@@ -17,12 +17,14 @@ fixtures = [
                 "Payment Entry-custom_source_voucher_doctype",
                 "Payment Entry-custom_source_voucher",
                 "Journal Entry-custom_source_voucher_doctype",
-                "Journal Entry-custom_source_voucher"
+                "Journal Entry-custom_source_voucher",
+                "Company-custom_dux_voucher_settings",
+                "Company-custom_voucher_print_logo",
+                "Company-custom_voucher_footer_note",
             ]]
         ]
-    }
+    },
 ]
-
 # Cancel cascade from backend entries to parent voucher
 doc_events = {
     "Payment Entry": {
