@@ -5,6 +5,33 @@ app_description = "Simple Tally-style Payment and Receipt Voucher"
 app_email = "aditya.surana@thesvsgroup.org"
 app_license = "mit"
 
+required_apps = ["erpnext"]
+
+# Custom fields on Payment Entry and Journal Entry
+# Synced automatically on every bench migrate
+fixtures = [
+    {
+        "dt": "Custom Field",
+        "filters": [
+            ["name", "in", [
+                "Payment Entry-custom_source_voucher_doctype",
+                "Payment Entry-custom_source_voucher",
+                "Journal Entry-custom_source_voucher_doctype",
+                "Journal Entry-custom_source_voucher"
+            ]]
+        ]
+    }
+]
+
+# Cancel cascade from backend entries to parent voucher
+doc_events = {
+    "Payment Entry": {
+        "on_cancel": "dux_voucher.dux_voucher.utils.on_payment_entry_cancel"
+    },
+    "Journal Entry": {
+        "on_cancel": "dux_voucher.dux_voucher.utils.on_journal_entry_cancel"
+    }
+}
 # Apps
 # ------------------
 

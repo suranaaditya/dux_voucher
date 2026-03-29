@@ -1,0 +1,280 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "naming_series:",
+ "creation": "2026-03-29 07:47:31.237869",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "basic_details_section",
+  "company",
+  "mode_of_payment",
+  "entry_mode",
+  "basic_col_break",
+  "posting_date",
+  "paid_from_account",
+  "amount",
+  "party_wise_section",
+  "party_rows",
+  "head_wise_section",
+  "account_rows",
+  "contra_section",
+  "transfer_from_account",
+  "contra_col_break",
+  "transfer_to_account",
+  "reference_section",
+  "reference_no",
+  "cost_center",
+  "reference_col_break",
+  "reference_date",
+  "project",
+  "remarks_section",
+  "remarks",
+  "backend_tracking_section",
+  "is_posted",
+  "backend_references_section",
+  "backend_references",
+  "amended_from"
+ ],
+ "fields": [
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Naming Series",
+   "no_copy": 1,
+   "options": "PV-.YYYY.-",
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "basic_details_section",
+   "fieldtype": "Section Break",
+   "label": "Basic Details"
+  },
+  {
+   "bold": 1,
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "fieldname": "mode_of_payment",
+   "fieldtype": "Link",
+   "label": "Payment Method",
+   "options": "Mode of Payment"
+  },
+  {
+   "default": "Party-wise",
+   "fieldname": "entry_mode",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Entry Mode",
+   "options": "Party-wise\nHead-wise\nContra Entry",
+   "reqd": 1
+  },
+  {
+   "fieldname": "basic_col_break",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Today",
+   "fieldname": "posting_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Posting Date",
+   "reqd": 1
+  },
+  {
+   "depends_on": "eval:doc.entry_mode !== 'Contra Entry'",
+   "fieldname": "paid_from_account",
+   "fieldtype": "Link",
+   "label": "Paid From Account",
+   "options": "Account"
+  },
+  {
+   "depends_on": "eval:doc.entry_mode !== 'Head-wise'",
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "label": "Amount"
+  },
+  {
+   "depends_on": "eval:doc.entry_mode === 'Party-wise'",
+   "fieldname": "party_wise_section",
+   "fieldtype": "Section Break",
+   "label": "Party-wise Entries"
+  },
+  {
+   "depends_on": "eval:doc.entry_mode === 'Party-wise'",
+   "fieldname": "party_rows",
+   "fieldtype": "Table",
+   "label": "Party Rows",
+   "options": "PV Party Row"
+  },
+  {
+   "depends_on": "eval:doc.entry_mode === 'Head-wise'",
+   "fieldname": "head_wise_section",
+   "fieldtype": "Section Break",
+   "label": "Head-wise Entries"
+  },
+  {
+   "depends_on": "eval:doc.entry_mode === 'Head-wise'",
+   "fieldname": "account_rows",
+   "fieldtype": "Table",
+   "label": "Account Rows",
+   "options": "PV Account Row"
+  },
+  {
+   "depends_on": "eval:doc.entry_mode === 'Contra Entry'",
+   "fieldname": "contra_section",
+   "fieldtype": "Section Break",
+   "label": "Contra Details"
+  },
+  {
+   "depends_on": "eval:doc.entry_mode === 'Contra Entry'",
+   "fieldname": "transfer_from_account",
+   "fieldtype": "Link",
+   "label": "Transfer From Account",
+   "options": "Account"
+  },
+  {
+   "depends_on": "eval:doc.entry_mode === 'Contra Entry'",
+   "fieldname": "contra_col_break",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "eval:doc.entry_mode === 'Contra Entry'",
+   "fieldname": "transfer_to_account",
+   "fieldtype": "Link",
+   "label": "Transfer To Account",
+   "options": "Account"
+  },
+  {
+   "fieldname": "reference_section",
+   "fieldtype": "Section Break",
+   "label": "Reference / Allocation Details"
+  },
+  {
+   "fieldname": "reference_no",
+   "fieldtype": "Data",
+   "label": "Reference No"
+  },
+  {
+   "fieldname": "cost_center",
+   "fieldtype": "Link",
+   "label": "Cost Center",
+   "options": "Cost Center"
+  },
+  {
+   "fieldname": "reference_col_break",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "reference_date",
+   "fieldtype": "Date",
+   "label": "Reference Date"
+  },
+  {
+   "fieldname": "project",
+   "fieldtype": "Link",
+   "label": "Project",
+   "options": "Project"
+  },
+  {
+   "fieldname": "remarks_section",
+   "fieldtype": "Section Break",
+   "label": "Remarks"
+  },
+  {
+   "fieldname": "remarks",
+   "fieldtype": "Text",
+   "label": "Remarks"
+  },
+  {
+   "fieldname": "backend_tracking_section",
+   "fieldtype": "Section Break",
+   "label": "Backend Tracking"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_posted",
+   "fieldtype": "Check",
+   "label": "Is Posted",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "backend_references_section",
+   "fieldtype": "Section Break",
+   "label": "Backend References"
+  },
+  {
+   "fieldname": "backend_references",
+   "fieldtype": "Table",
+   "label": "Backend References",
+   "no_copy": 1,
+   "options": "PV Backend Reference",
+   "read_only": 1
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Payment Voucher",
+   "print_hide": 1,
+   "read_only": 1,
+   "search_index": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2026-03-29 07:47:31.237869",
+ "modified_by": "Administrator",
+ "module": "Dux Voucher",
+ "name": "Payment Voucher",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts User",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
