@@ -96,7 +96,6 @@
    "options": "Account"
   },
   {
-   "depends_on": "eval:doc.entry_mode !== 'Head-wise'",
    "fieldname": "amount",
    "fieldtype": "Currency",
    "label": "Amount"
@@ -234,7 +233,7 @@
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-03-29 07:47:31.237869",
+ "modified": "2026-03-30 14:56:24.246198",
  "modified_by": "Administrator",
  "module": "Dux Voucher",
  "name": "Payment Voucher",
