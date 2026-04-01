@@ -115,6 +115,9 @@ frappe.ui.form.on("PV Party Row", {
         }
         const typed = row.party;
         frappe.model.set_value(cdt, cdn, "party", "");
+        // Clear stale balance when re-searching
+        frappe.model.set_value(cdt, cdn, "current_balance", 0);
+        frappe.model.set_value(cdt, cdn, "balance_type", "");
         _open_party_dialog(frm, cdt, cdn, typed);
     },
 
@@ -150,20 +153,35 @@ frappe.ui.form.on("PV Account Row", {
 
     account(frm, cdt, cdn) {
         const row = locals[cdt][cdn];
-        if (row.account && frm.doc.company) {
+        if (!row.account) {
+            // Account cleared — clear balance
+            frappe.model.set_value(cdt, cdn, "current_balance", 0);
+            frappe.model.set_value(cdt, cdn, "balance_type", "");
+            return;
+        }
+        if (frm.doc.company) {
             frappe.db.get_value("Account", row.account, "company", (r) => {
                 if (r && r.company !== frm.doc.company) {
                     frappe.model.set_value(cdt, cdn, "account", "");
+                    frappe.model.set_value(cdt, cdn, "current_balance", 0);
+                    frappe.model.set_value(cdt, cdn, "balance_type", "");
                     frappe.show_alert({
                         message: __("Account must belong to {0}", [frm.doc.company]),
                         indicator: "orange"
                     });
+                } else {
+                    // Account is valid — fetch its current balance
+                    _fetch_account_balance(frm, cdt, cdn, row.account);
                 }
             });
         }
     },
 });
 
+
+// ---------------------------------------------------------------
+// Party search dialog
+// ---------------------------------------------------------------
 
 function _open_party_dialog(frm, cdt, cdn, prefill_txt) {
     if (_party_dialog_open) return;
@@ -267,6 +285,7 @@ function _open_party_dialog(frm, cdt, cdn, prefill_txt) {
         frappe.model.set_value(cdt, cdn, "party", r.name);
         frappe.model.set_value(cdt, cdn, "party_type", r.party_type);
         frappe.model.set_value(cdt, cdn, "party_name", r.display_name);
+
         dialog.hide();
         frm.refresh_field("party_rows");
 
@@ -275,6 +294,38 @@ function _open_party_dialog(frm, cdt, cdn, prefill_txt) {
             const $amount_input = grid.wrapper.find('.grid-row[data-name="' + cdn + '"] [data-fieldname="amount"] input');
             if ($amount_input.length) $amount_input.focus();
         }, 200);
+
+        // Fetch and display current balance for selected party
+        if (frm.doc.company) {
+            frappe.call({
+                method: "dux_voucher.dux_voucher.api.payment_voucher_api.get_party_balance",
+                args: {
+                    party_type: r.party_type,
+                    party: r.name,
+                    company: frm.doc.company,
+                    posting_date: frm.doc.posting_date
+                },
+                callback: function (res) {
+                    if (res.message) {
+                        frappe.model.set_value(cdt, cdn, "current_balance", res.message.balance);
+                        frappe.model.set_value(cdt, cdn, "balance_type", res.message.balance_type);
+                        frm.refresh_field("party_rows");
+                        // Show a quick alert so user notices the balance
+                        if (res.message.balance_type !== "Nil") {
+                            const currency = frappe.boot.sysdefaults.currency || "INR";
+                            const indicator = res.message.balance_type === "Dr" ? "orange" : "blue";
+                            frappe.show_alert({
+                                message: __(
+                                    "{0} current balance: {1} {2}",
+                                    [r.name, format_currency(res.message.balance, currency), res.message.balance_type]
+                                ),
+                                indicator: indicator
+                            }, 5);
+                        }
+                    }
+                }
+            });
+        }
     };
 
     const _do_search = function (txt) {
@@ -353,6 +404,34 @@ function _open_party_dialog(frm, cdt, cdn, prefill_txt) {
         _do_search(txt);
     }, 300));
 }
+
+
+// ---------------------------------------------------------------
+// Balance fetching for account rows
+// ---------------------------------------------------------------
+
+function _fetch_account_balance(frm, cdt, cdn, account) {
+    frappe.call({
+        method: "dux_voucher.dux_voucher.api.payment_voucher_api.get_account_balance",
+        args: {
+            account: account,
+            company: frm.doc.company,
+            posting_date: frm.doc.posting_date
+        },
+        callback: function (res) {
+            if (res.message) {
+                frappe.model.set_value(cdt, cdn, "current_balance", res.message.balance);
+                frappe.model.set_value(cdt, cdn, "balance_type", res.message.balance_type);
+            }
+        }
+    });
+}
+
+
+// ---------------------------------------------------------------
+// Entry mode helpers
+// ---------------------------------------------------------------
+
 function _apply_entry_mode(frm) {
     const mode = frm.doc.entry_mode;
 
@@ -568,4 +647,3 @@ function _set_account_row_filter(frm) {
         };
     });
 }
-
