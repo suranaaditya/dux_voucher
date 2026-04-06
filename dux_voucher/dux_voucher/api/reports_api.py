@@ -4,38 +4,80 @@ from frappe.utils import flt, getdate, formatdate
 
 
 @frappe.whitelist()
-def get_ledger_statement(company, account, from_date, to_date):
+def get_ledger_statement(company, account, from_date, to_date,
+						  party=None, party_type=None):
 	"""
-	Return Tally-style ledger statement data.
-	Includes opening balance, GL Entries with running balance, closing balance.
+	Tally-style ledger statement.
+	- If party + party_type are supplied  → filter GL Entry by party field
+	  (shows all entries for that specific Customer / Supplier / Employee)
+	- If only account is supplied          → filter GL Entry by account field
 	"""
 	if not all([company, account, from_date, to_date]):
 		frappe.throw(_("Company, Account, From Date and To Date are all required"))
 
 	from_date = getdate(from_date)
-	to_date = getdate(to_date)
-
+	to_date   = getdate(to_date)
 	if from_date > to_date:
 		frappe.throw(_("From Date cannot be after To Date"))
 
-	# ── Opening Balance ───────────────────────────────────────────────────────
-	ob_row = frappe.db.sql("""
-		SELECT
-			COALESCE(SUM(debit_in_account_currency),  0) AS total_debit,
-			COALESCE(SUM(credit_in_account_currency), 0) AS total_credit
-		FROM `tabGL Entry`
-		WHERE account      = %(account)s
-		  AND company      = %(company)s
-		  AND posting_date < %(from_date)s
-		  AND is_cancelled = 0
-	""", {"account": account, "company": company, "from_date": from_date}, as_dict=True)
+	use_party = bool(party and party_type)
 
-	ob_net = flt(ob_row[0].total_debit) - flt(ob_row[0].total_credit) if ob_row else 0.0
+	# ── Opening Balance ───────────────────────────────────────────────────────
+	if use_party:
+		ob_row = frappe.db.sql("""
+			SELECT
+				COALESCE(SUM(debit_in_account_currency),  0) AS total_debit,
+				COALESCE(SUM(credit_in_account_currency), 0) AS total_credit
+			FROM `tabGL Entry`
+			WHERE party      = %(party)s
+			  AND party_type = %(party_type)s
+			  AND company    = %(company)s
+			  AND posting_date < %(from_date)s
+			  AND is_cancelled  = 0
+		""", {"party": party, "party_type": party_type,
+			  "company": company, "from_date": from_date}, as_dict=True)
+	else:
+		ob_row = frappe.db.sql("""
+			SELECT
+				COALESCE(SUM(debit_in_account_currency),  0) AS total_debit,
+				COALESCE(SUM(credit_in_account_currency), 0) AS total_credit
+			FROM `tabGL Entry`
+			WHERE account      = %(account)s
+			  AND company      = %(company)s
+			  AND posting_date < %(from_date)s
+			  AND is_cancelled  = 0
+		""", {"account": account, "company": company,
+			  "from_date": from_date}, as_dict=True)
+
+	ob_net = (flt(ob_row[0].total_debit) - flt(ob_row[0].total_credit)
+			  if ob_row else 0.0)
 
 	# ── Period GL Entries ─────────────────────────────────────────────────────
+	if use_party:
+		where_clause = """
+			gle.party      = %(party)s
+			AND gle.party_type = %(party_type)s
+			AND gle.company    = %(company)s
+			AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s
+			AND gle.is_cancelled = 0
+		"""
+		params = {"party": party, "party_type": party_type,
+				  "company": company,
+				  "from_date": from_date, "to_date": to_date}
+	else:
+		where_clause = """
+			gle.account      = %(account)s
+			AND gle.company  = %(company)s
+			AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s
+			AND gle.is_cancelled = 0
+		"""
+		params = {"account": account, "company": company,
+				  "from_date": from_date, "to_date": to_date}
+
 	entries = frappe.db.sql("""
 		SELECT
 			gle.posting_date,
+			gle.account,
 			gle.voucher_type,
 			gle.voucher_no,
 			gle.against,
@@ -47,19 +89,24 @@ def get_ledger_statement(company, account, from_date, to_date):
 			gle.creation,
 
 			CASE
-				WHEN gle.voucher_type = 'Payment Entry' THEN pe.custom_source_voucher_doctype
-				WHEN gle.voucher_type = 'Journal Entry' THEN je.custom_source_voucher_doctype
+				WHEN gle.voucher_type = 'Payment Entry'
+					THEN pe.custom_source_voucher_doctype
+				WHEN gle.voucher_type = 'Journal Entry'
+					THEN je.custom_source_voucher_doctype
 				ELSE NULL
 			END AS source_doctype,
 
 			CASE
-				WHEN gle.voucher_type = 'Payment Entry' THEN pe.custom_source_voucher
-				WHEN gle.voucher_type = 'Journal Entry' THEN je.custom_source_voucher
+				WHEN gle.voucher_type = 'Payment Entry'
+					THEN pe.custom_source_voucher
+				WHEN gle.voucher_type = 'Journal Entry'
+					THEN je.custom_source_voucher
 				ELSE NULL
 			END AS source_voucher,
 
 			CASE
-				WHEN gle.voucher_type = 'Payment Entry' THEN pe.payment_type
+				WHEN gle.voucher_type = 'Payment Entry'
+					THEN pe.payment_type
 				ELSE NULL
 			END AS payment_type
 
@@ -73,20 +120,12 @@ def get_ledger_statement(company, account, from_date, to_date):
 			   ON je.name = gle.voucher_no
 			  AND gle.voucher_type = 'Journal Entry'
 
-		WHERE gle.account      = %(account)s
-		  AND gle.company      = %(company)s
-		  AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s
-		  AND gle.is_cancelled = 0
+		WHERE {where}
 
 		ORDER BY gle.posting_date, gle.creation
-	""", {
-		"account":   account,
-		"company":   company,
-		"from_date": from_date,
-		"to_date":   to_date,
-	}, as_dict=True)
+	""".format(where=where_clause), params, as_dict=True)
 
-	# ── Build rows with running balance ───────────────────────────────────────
+	# ── Build rows ────────────────────────────────────────────────────────────
 	running  = ob_net
 	total_dr = 0.0
 	total_cr = 0.0
@@ -101,41 +140,50 @@ def get_ledger_statement(company, account, from_date, to_date):
 
 		display_type, display_vch, vch_url = _resolve_voucher(e)
 
+		# ICAI rule: account debited → "To", account credited → "By"
 		prefix = "To" if dr > 0 else "By"
 
-		if e.party:
+		# For party-mode, show account name as contra; else show party or against
+		if use_party:
+			contra = e.account or _clean_against(e.against or "")
+		elif e.party:
 			contra = e.party
 		else:
 			contra = _clean_against(e.against or "")
 
 		rows.append({
-			"posting_date":  formatdate(e.posting_date, "dd-MMM-yy"),
-			"prefix":        prefix,
-			"contra":        contra,
-			"voucher_type":  display_type,
-			"voucher_no":    display_vch,
-			"voucher_url":   vch_url,
-			"debit":         dr,
-			"credit":        cr,
-			"balance":       abs(running),
-			"balance_type":  "Dr" if running >= 0 else "Cr",
-			"remarks":       (e.remarks or "").strip(),
+			"posting_date": formatdate(e.posting_date, "dd-MMM-yy"),
+			"prefix":       prefix,
+			"contra":       contra,
+			"voucher_type": display_type,
+			"voucher_no":   display_vch,
+			"voucher_url":  vch_url,
+			"debit":        dr,
+			"credit":       cr,
+			"balance":      abs(running),
+			"balance_type": "Dr" if running >= 0 else "Cr",
+			"remarks":      (e.remarks or "").strip(),
 		})
 
 	closing = running
 
-	# ── Account meta ──────────────────────────────────────────────────────────
-	acc_meta = frappe.db.get_value(
-		"Account", account,
-		["account_name", "account_type", "root_type"],
-		as_dict=True
-	) or {}
+	# ── Account / Party meta ──────────────────────────────────────────────────
+	if use_party:
+		display_name = party
+		acc_type     = party_type
+	else:
+		acc_meta = frappe.db.get_value(
+			"Account", account,
+			["account_name", "account_type"], as_dict=True
+		) or {}
+		display_name = acc_meta.get("account_name", account)
+		acc_type     = acc_meta.get("account_type", "")
 
 	return {
 		"company":         company,
 		"account":         account,
-		"account_name":    acc_meta.get("account_name", account),
-		"account_type":    acc_meta.get("account_type", ""),
+		"account_name":    display_name,
+		"account_type":    acc_type,
 		"from_date":       formatdate(from_date, "dd-MMM-yyyy"),
 		"to_date":         formatdate(to_date,   "dd-MMM-yyyy"),
 		"opening_balance": abs(ob_net),
@@ -152,11 +200,10 @@ def get_ledger_statement(company, account, from_date, to_date):
 @frappe.whitelist()
 def search_ledger(company, search_txt=""):
 	"""
-	Combined search across Account master, Customer, Supplier, Employee.
-	Returns {value, label, meta} for the custom dropdown.
-	value = actual account name in GL Entry (what gets passed to get_ledger_statement)
-	label = human-readable display name
-	meta  = account type and code shown below label
+	Search accounts AND parties (Customer/Supplier/Employee).
+	Returns {value, label, meta, type, party_type, account} per item.
+	  type = "account" → filter GL by account field
+	  type = "party"   → filter GL by party field
 	"""
 	if not company:
 		return []
@@ -164,7 +211,7 @@ def search_ledger(company, search_txt=""):
 	like = "%" + (search_txt or "") + "%"
 	results = []
 
-	# 1. Account master (leaf nodes for this company)
+	# 1. Account master
 	accounts = frappe.db.sql("""
 		SELECT name, account_name, account_type
 		FROM `tabAccount`
@@ -172,68 +219,96 @@ def search_ledger(company, search_txt=""):
 		  AND is_group = 0
 		  AND disabled = 0
 		  AND (name LIKE %(like)s OR account_name LIKE %(like)s)
-		ORDER BY name
-		LIMIT 20
+		ORDER BY name LIMIT 15
 	""", {"company": company, "like": like}, as_dict=True)
 
 	for a in accounts:
 		results.append({
-			"value": a.name,
-			"label": a.account_name,
-			"meta":  (a.account_type or "Account") + "  ·  " + a.name,
+			"type":       "account",
+			"value":      a.name,
+			"label":      a.account_name,
+			"meta":       (a.account_type or "Account") + "  ·  " + a.name,
+			"party_type": None,
+			"account":    a.name,
 		})
 
-	# 2. Customers — map to their receivable account
+	# 2. Customers
 	if len(results) < 25:
 		customers = frappe.db.sql("""
-			SELECT name, customer_name
-			FROM `tabCustomer`
+			SELECT name, customer_name FROM `tabCustomer`
 			WHERE disabled = 0
 			  AND (name LIKE %(like)s OR customer_name LIKE %(like)s)
 			ORDER BY name LIMIT 8
 		""", {"like": like}, as_dict=True)
 
 		for c in customers:
-			acc = frappe.db.get_value(
-				"Party Account",
-				{"parent": c.name, "company": company, "parenttype": "Customer"},
-				"account"
-			) or frappe.get_cached_value("Company", company, "default_receivable_account")
-			if acc:
-				results.append({
-					"value": acc,
-					"label": c.customer_name + "  (Customer)",
-					"meta":  "Receivable  ·  " + acc,
-				})
+			acc = (frappe.db.get_value(
+					"Party Account",
+					{"parent": c.name, "company": company,
+					 "parenttype": "Customer"}, "account")
+				   or frappe.get_cached_value(
+					"Company", company, "default_receivable_account"))
+			results.append({
+				"type":       "party",
+				"value":      c.name,
+				"label":      c.customer_name + "  (Customer)",
+				"meta":       "Customer  ·  " + (acc or ""),
+				"party_type": "Customer",
+				"account":    acc or "",
+			})
 
-	# 3. Suppliers — map to their payable account
+	# 3. Suppliers
 	if len(results) < 30:
 		suppliers = frappe.db.sql("""
-			SELECT name, supplier_name
-			FROM `tabSupplier`
+			SELECT name, supplier_name FROM `tabSupplier`
 			WHERE disabled = 0
 			  AND (name LIKE %(like)s OR supplier_name LIKE %(like)s)
 			ORDER BY name LIMIT 8
 		""", {"like": like}, as_dict=True)
 
 		for s in suppliers:
-			acc = frappe.db.get_value(
-				"Party Account",
-				{"parent": s.name, "company": company, "parenttype": "Supplier"},
-				"account"
-			) or frappe.get_cached_value("Company", company, "default_payable_account")
-			if acc:
-				results.append({
-					"value": acc,
-					"label": s.supplier_name + "  (Supplier)",
-					"meta":  "Payable  ·  " + acc,
-				})
+			acc = (frappe.db.get_value(
+					"Party Account",
+					{"parent": s.name, "company": company,
+					 "parenttype": "Supplier"}, "account")
+				   or frappe.get_cached_value(
+					"Company", company, "default_payable_account"))
+			results.append({
+				"type":       "party",
+				"value":      s.name,
+				"label":      s.supplier_name + "  (Supplier)",
+				"meta":       "Supplier  ·  " + (acc or ""),
+				"party_type": "Supplier",
+				"account":    acc or "",
+			})
 
-	return results[:30]
+	# 4. Employees
+	if len(results) < 35:
+		employees = frappe.db.sql("""
+			SELECT name, employee_name FROM `tabEmployee`
+			WHERE status = 'Active'
+			  AND (name LIKE %(like)s OR employee_name LIKE %(like)s)
+			ORDER BY name LIMIT 5
+		""", {"like": like}, as_dict=True)
 
+		for emp in employees:
+			acc = frappe.get_cached_value(
+				"Company", company, "default_payable_account") or ""
+			results.append({
+				"type":       "party",
+				"value":      emp.name,
+				"label":      emp.employee_name + "  (Employee)",
+				"meta":       "Employee  ·  " + acc,
+				"party_type": "Employee",
+				"account":    acc,
+			})
+
+	return results[:35]
+
+
+# ── Internal helpers ──────────────────────────────────────────────────────────
 
 def _resolve_voucher(e):
-	"""Map GL Entry row to display type, voucher number, and desk URL."""
 	src_dt  = (e.get("source_doctype") or "").strip()
 	src_vch = (e.get("source_voucher") or "").strip()
 	pmt     = (e.get("payment_type")   or "").strip()
@@ -259,12 +334,17 @@ def _resolve_voucher(e):
 			label = "Payment Entry"
 		return label, vno, "/desk/payment-entry/" + vno
 
+	if vt == "Purchase Invoice":
+		return "Purchase Invoice", vno, "/desk/purchase-invoice/" + vno
+
+	if vt == "Sales Invoice":
+		return "Sales Invoice", vno, "/desk/sales-invoice/" + vno
+
 	slug = vt.lower().replace(" ", "-")
 	return vt, vno, "/desk/" + slug + "/" + vno
 
 
 def _clean_against(against_str):
-	"""Return single account or 'Various' for comma-separated list."""
 	parts = [a.strip() for a in against_str.split(",") if a.strip()]
 	if not parts:
 		return ""
