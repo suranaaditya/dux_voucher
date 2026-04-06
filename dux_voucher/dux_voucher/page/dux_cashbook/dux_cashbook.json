@@ -1,0 +1,19 @@
+{
+ "content": null,
+ "creation": "2026-04-07 02:51:21.233822",
+ "docstatus": 0,
+ "doctype": "Page",
+ "idx": 0,
+ "modified": "2026-04-07 02:51:21.233822",
+ "modified_by": "Administrator",
+ "module": "Dux Voucher",
+ "name": "dux-cashbook",
+ "owner": "Administrator",
+ "page_name": "dux-cashbook",
+ "roles": [],
+ "script": null,
+ "standard": "Yes",
+ "style": null,
+ "system_page": 0,
+ "title": "Cash & Bank Book"
+}

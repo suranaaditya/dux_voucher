@@ -456,13 +456,14 @@ body{font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:11px;line-heigh
 .p-txncount{font-size:9px;color:#94a3b8}
 
 /* ── Table ── */
+*{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 table{width:100%;border-collapse:collapse}
 thead tr{background:#1e293b}
 thead th{font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#f1f5f9;padding:7px 9px;white-space:nowrap}
 thead th.r{text-align:right}
 
-.p-ob td{background:#eff6ff;padding:8px 9px;border-top:1px solid #bfdbfe;border-bottom:1px solid #bfdbfe}
-.p-cb td{background:#eff6ff;padding:8px 9px;border-top:2.5px solid #0f172a;border-bottom:1px solid #bfdbfe}
+.p-ob td{background:#dbeafe;padding:8px 9px;border-top:1px solid #93c5fd;border-bottom:1px solid #93c5fd}
+.p-cb td{background:#dbeafe;padding:8px 9px;border-top:2.5px solid #0f172a;border-bottom:1px solid #93c5fd}
 .p-ob-lbl{font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:#1e3a5f}
 
 .p-even td{background:#fff;padding:6px 9px;border-bottom:1px solid #f1f5f9;vertical-align:top}
@@ -487,7 +488,7 @@ thead th.r{text-align:right}
 .p-suf{font-size:8px;margin-left:1px;font-weight:800;opacity:.7}
 
 /* ── Footer ── */
-.p-foot{margin-top:auto;padding-top:12px;border-top:1px solid #e2e8f0;margin-top:20px;display:flex;justify-content:space-between;font-size:9px;color:#94a3b8}
+.p-foot{margin-top:20px;padding-top:10px;border-top:1px solid #e2e8f0;text-align:right;font-size:9px;color:#94a3b8}
 
 @media print{
   thead{display:table-header-group}
@@ -533,11 +534,7 @@ thead th.r{text-align:right}
   <tbody>${tRows}</tbody>
 </table>
 
-<div class="p-foot">
-  <div>${_esc(d.company)}</div>
-  <div style="text-align:center">Dux DigiTech &nbsp;·&nbsp; Powered by Dux Voucher</div>
-  <div></div>
-</div>
+<div class="p-foot">Powered by Dux DigiTech</div>
 
 </div>
 <script>window.onload=function(){window.print()}<\/script>
