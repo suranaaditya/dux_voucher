@@ -385,3 +385,30 @@ def _clean_against(against_str):
 	if not parts:    return ""
 	if len(parts) == 1: return parts[0]
 	return "Various"
+
+
+@frappe.whitelist()
+def get_permitted_companies():
+    """
+    Return list of companies the current user has access to.
+    Uses User Permission if set, else returns all non-group companies.
+    Runs server-side so no direct User Permission doctype access needed.
+    """
+    user = frappe.session.user
+    user_perms = frappe.db.get_all(
+        'User Permission',
+        filters={'user': user, 'allow': 'Company'},
+        fields=['for_value'],
+        limit=200
+    )
+    if user_perms:
+        return [p.for_value for p in user_perms]
+    # No user permissions set — return all non-group companies
+    companies = frappe.db.get_all(
+        'Company',
+        filters={'is_group': 0},
+        fields=['name'],
+        order_by='name asc',
+        limit=200
+    )
+    return [c.name for c in companies]

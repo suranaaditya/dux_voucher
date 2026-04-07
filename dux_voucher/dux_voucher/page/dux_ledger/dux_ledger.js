@@ -223,25 +223,9 @@ class DuxLedger {
 	_loadCompanies() {
 		var self=this;
 		frappe.call({
-			method:"frappe.auth.get_logged_user",
+			method:"dux_voucher.dux_voucher.api.reports_api.get_permitted_companies",
 			callback:function(r){
-				var email=r.message;
-				if(!email||email==="Guest") return;
-				frappe.call({
-					method:"frappe.client.get_list",
-					args:{doctype:"User Permission",filters:[["user","=",email],["allow","=","Company"]],fields:["for_value"],limit_page_length:200},
-					callback:function(r2){
-						var items=r2.message||[];
-						if(items.length){ self._populateCompanies(items.map(function(p){return p.for_value;})); }
-						else{
-							frappe.call({
-								method:"frappe.client.get_list",
-								args:{doctype:"Company",filters:[["is_group","=",0]],fields:["name"],limit_page_length:200,order_by:"name asc"},
-								callback:function(r3){ self._populateCompanies((r3.message||[]).map(function(c){return c.name;})); },
-							});
-						}
-					},
-				});
+				self._populateCompanies(r.message||[]);
 			},
 		});
 	}
