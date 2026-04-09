@@ -1,0 +1,100 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-04-08 19:36:30.688501",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "mapping_section",
+  "mappings",
+  "settings_section",
+  "pending_review_alert_days",
+  "col_break_1",
+  "require_remarks",
+  "branch_group_name"
+ ],
+ "fields": [
+  {
+   "description": "Map each ERPNext company to its corresponding Branch & Division account. When an Inter-Company Transfer is submitted, the system uses this table to determine which account to debit or credit in each company.",
+   "fieldname": "mapping_section",
+   "fieldtype": "Section Break",
+   "label": "Company \u2192 Branch Account Mapping"
+  },
+  {
+   "fieldname": "mappings",
+   "fieldtype": "Table",
+   "label": "Account Mappings",
+   "options": "IC Company Account Mapping"
+  },
+  {
+   "fieldname": "settings_section",
+   "fieldtype": "Section Break",
+   "label": "Transfer Settings"
+  },
+  {
+   "default": "7",
+   "description": "Number of days after which a Pending Review ICT entry is flagged as overdue. Used for portal badge color and future email alerts.",
+   "fieldname": "pending_review_alert_days",
+   "fieldtype": "Int",
+   "label": "Pending Review Alert After (Days)"
+  },
+  {
+   "fieldname": "col_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "If enabled, the Remarks field becomes mandatory before submission.",
+   "fieldname": "require_remarks",
+   "fieldtype": "Check",
+   "label": "Require Remarks on Every Transfer"
+  },
+  {
+   "default": "Branch / Divisions",
+   "description": "The account_name of the Branch & Division group in your Chart of Accounts \u2014 without the company suffix. E.g. 'Branch / Divisions' or 'Branch & Division'. The system will search for this group as: [name you enter] - [company abbr]",
+   "fieldname": "branch_group_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Branch & Division Group Name",
+   "reqd": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-04-08 22:20:07.185637",
+ "modified_by": "Administrator",
+ "module": "Dux Voucher",
+ "name": "Inter-Company Transfer Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
