@@ -20,6 +20,8 @@
   "party_rows",
   "head_wise_section",
   "account_rows",
+  "combined_section",
+  "combined_rows",
   "contra_section",
   "transfer_from_account",
   "contra_col_break",
@@ -73,7 +75,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Entry Mode",
-   "options": "Party-wise\nHead-wise\nContra Entry",
+   "options": "Party-wise\nHead-wise\nContra Entry\nParty + Head Entry",
    "reqd": 1
   },
   {
@@ -227,13 +229,26 @@
    "print_hide": 1,
    "read_only": 1,
    "search_index": 1
+  },
+  {
+   "depends_on": "eval:doc.entry_mode === 'Party + Head Entry'",
+   "fieldname": "combined_rows",
+   "fieldtype": "Table",
+   "label": "Combined Rows",
+   "options": "PV Combined Row"
+  },
+  {
+   "depends_on": "eval:doc.entry_mode === 'Party + Head Entry'",
+   "fieldname": "combined_section",
+   "fieldtype": "Section Break",
+   "label": "Party + Head Entries"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-03-30 14:56:24.246198",
+ "modified": "2026-04-16 08:07:46.678900",
  "modified_by": "Administrator",
  "module": "Dux Voucher",
  "name": "Payment Voucher",

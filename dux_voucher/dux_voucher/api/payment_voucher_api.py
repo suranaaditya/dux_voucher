@@ -168,3 +168,9 @@ def get_account_balance(account, company, posting_date=None):
         return {"balance": abs(raw), "balance_type": "Cr"}
     else:
         return {"balance": 0, "balance_type": "Nil"}
+
+@frappe.whitelist()
+def get_party_default_account(party_type, party, company):
+    """Return the default ledger account for a party -- used by Combined mode auto-fill."""
+    from dux_voucher.dux_voucher.api.utils import _get_party_account
+    return _get_party_account(party_type, party, company)

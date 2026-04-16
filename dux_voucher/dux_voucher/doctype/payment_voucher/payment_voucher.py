@@ -27,6 +27,8 @@ class PaymentVoucher(Document):
             self._validate_head_wise()
         elif self.entry_mode == "Contra Entry":
             self._validate_contra()
+        elif self.entry_mode == "Party + Head Entry":
+            self._validate_combined()
 
     def _validate_basics(self):
         if not self.company:
@@ -138,6 +140,8 @@ class PaymentVoucher(Document):
                 refs = self._create_head_wise_journal_entry()
             elif self.entry_mode == "Contra Entry":
                 refs = self._create_contra_payment_entry()
+            elif self.entry_mode == "Party + Head Entry":
+                refs = self._create_combined_journal_entry()
         except frappe.ValidationError:
             raise
         except Exception as e:
@@ -305,4 +309,106 @@ class PaymentVoucher(Document):
             "doctype": "Payment Entry",
             "name": pe.name,
             "amount": flt(self.amount)
+        }]
+
+    # ------------------------------------------------------------------
+    # Party + Head Entry -- validation
+    # ------------------------------------------------------------------
+    def _validate_combined(self):
+        if not self.mode_of_payment:
+            frappe.throw(_("Payment Method is required"))
+        if not self.paid_from_account:
+            frappe.throw(_("Paid From Account is required"))
+        if not self.combined_rows:
+            frappe.throw(_("Please add at least one row"))
+
+        _validate_bank_cash_account(self.paid_from_account, "Paid From Account")
+
+        for row in self.combined_rows:
+            if not row.account:
+                frappe.throw(_("Row {0}: Account is required").format(row.idx))
+            if flt(row.debit) < 0 or flt(row.credit) < 0:
+                frappe.throw(
+                    _("Row {0}: Debit and Credit cannot be negative").format(row.idx)
+                )
+            if flt(row.debit) > 0 and flt(row.credit) > 0:
+                frappe.throw(
+                    _("Row {0}: A row cannot have both Debit and Credit").format(row.idx)
+                )
+            # If party is set, validate it exists
+            if row.party:
+                if not row.party_type:
+                    row.party_type = _detect_party_type(row.party)
+                    if not row.party_type:
+                        frappe.throw(
+                            _("Row {0}: '{1}' not found as Customer, "
+                              "Supplier or Employee").format(row.idx, row.party)
+                        )
+                if not frappe.db.exists(row.party_type, row.party):
+                    frappe.throw(
+                        _("Row {0}: {1} '{2}' does not exist").format(
+                            row.idx, row.party_type, row.party
+                        )
+                    )
+
+        total_debit = sum(flt(r.debit) for r in self.combined_rows)
+        total_credit = sum(flt(r.credit) for r in self.combined_rows)
+        net_amount = total_debit - total_credit
+
+        if net_amount <= 0:
+            frappe.throw(
+                _("Total Debit ({0}) must be greater than Total Credit ({1}). "
+                  "The difference will be auto-credited to '{2}'").format(
+                    total_debit, total_credit, self.paid_from_account
+                )
+            )
+
+        self.amount = net_amount
+
+    # ------------------------------------------------------------------
+    # Party + Head Entry -- one Journal Entry with party mapping
+    # ------------------------------------------------------------------
+    def _create_combined_journal_entry(self):
+        mop_type = get_mop_type(self.mode_of_payment)
+        voucher_type = "Cash Entry" if mop_type == "Cash" else "Bank Entry"
+
+        je = frappe.new_doc("Journal Entry")
+        je.voucher_type = voucher_type
+        je.company = self.company
+        je.posting_date = self.posting_date
+        je.cheque_no = self.reference_no or ""
+        je.cheque_date = self.reference_date or None
+        je.user_remark = self.remarks or ""
+        je.custom_source_voucher_doctype = "Payment Voucher"
+        je.custom_source_voucher = self.name
+
+        for row in self.combined_rows:
+            je.append("accounts", {
+                "account": row.account,
+                "party_type": row.party_type or "",
+                "party": row.party or "",
+                "debit_in_account_currency": flt(row.debit),
+                "credit_in_account_currency": flt(row.credit),
+                "cost_center": row.cost_center or self.cost_center or "",
+                "project": row.project or self.project or "",
+            })
+
+        # Auto-add bank/cash credit row
+        total_debit = sum(flt(r.debit) for r in self.combined_rows)
+        total_credit = sum(flt(r.credit) for r in self.combined_rows)
+        net_credit = total_debit - total_credit
+
+        je.append("accounts", {
+            "account": self.paid_from_account,
+            "debit_in_account_currency": 0,
+            "credit_in_account_currency": net_credit,
+            "cost_center": self.cost_center or "",
+            "project": self.project or "",
+        })
+
+        _submit_doc(je)
+        return [{
+            "doctype": "Journal Entry",
+            "name": je.name,
+            "amount": net_credit
         }]
