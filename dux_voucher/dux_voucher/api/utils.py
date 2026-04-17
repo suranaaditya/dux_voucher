@@ -109,3 +109,25 @@ def get_mop_type(mode_of_payment):
     return frappe.db.get_value(
         "Mode of Payment", mode_of_payment, "type"
     ) or "Bank"
+
+def _get_ex_student_accounts(company):
+    """
+    Return (receivable_account, opening_account) for a company.
+    Both accounts must already exist in the CoA (created manually per-company).
+    Throws a clear error if either is missing.
+    """
+    abbr = frappe.get_cached_value('Company', company, 'abbr')
+    if not abbr:
+        frappe.throw(_('Company {0} is missing an abbreviation').format(company))
+
+    receivable = f'Ex-Students Receivable - {abbr}'
+    opening = f'Temporary Opening - {abbr}'
+
+    missing = [a for a in (receivable, opening) if not frappe.db.exists('Account', a)]
+    if missing:
+        frappe.throw(_(
+            'Missing account(s) in Chart of Accounts for {0}: {1}. '
+            'Please create these accounts before posting Ex Student opening balances.'
+        ).format(company, ', '.join(missing)))
+
+    return receivable, opening
