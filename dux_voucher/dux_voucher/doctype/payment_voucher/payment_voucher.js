@@ -53,15 +53,45 @@ frappe.ui.form.on("Payment Voucher", {
         }
     },
 
+    validate(frm) {
+        // Guard: Party + Head Entry mode requires BOTH party rows AND head-only rows.
+        // If all rows are parties OR all rows are heads, offer auto-conversion.
+        if (frm.doc.entry_mode !== "Party + Head Entry") return;
+        const rows = (frm.doc.combined_rows || []).filter(r => r.account);
+        if (rows.length === 0) return;
+
+        const with_party = rows.filter(r => r.party);
+        const without_party = rows.filter(r => !r.party);
+
+        if (with_party.length === rows.length || without_party.length === rows.length) {
+            const target = with_party.length === rows.length ? "Party-wise" : "Head-wise";
+            const kind = target === "Party-wise" ? "parties" : "account heads";
+
+            frappe.validated = false;
+
+            frappe.confirm(
+                __('This is a "Party + Head Entry" voucher, but you have only entered {0}. Do you want to convert this into a {1} entry? Your row data will be preserved.', [kind, target]),
+                () => setTimeout(() => _convert_combined_to(frm, target), 0),
+                () => frappe.show_alert({
+                    message: __("Save cancelled. Please add the missing {0}.",
+                        [target === "Party-wise" ? "account-head rows" : "party rows"]),
+                    indicator: "orange"
+                }, 5)
+            );
+        }
+    },
+
     entry_mode(frm) {
         _apply_entry_mode(frm);
         _apply_payment_method_labels(frm);
         _set_paid_from_filter(frm);
-        frm.set_value("paid_from_account", "");
-        frm.set_value("amount", 0);
-        frm.clear_table("party_rows");
-        frm.clear_table("account_rows");
-        frm.clear_table("combined_rows");
+        if (!frm._auto_converting) {
+            frm.set_value("paid_from_account", "");
+            frm.set_value("amount", 0);
+            frm.clear_table("party_rows");
+            frm.clear_table("account_rows");
+            frm.clear_table("combined_rows");
+        }
         frm.refresh_fields();
     },
 
@@ -1067,4 +1097,80 @@ function _show_combined_totals(frm) {
     } else {
         frm.dashboard.clear_headline();
     }
+}
+
+
+// ---------------------------------------------------------------
+// Combined mode -> Party-wise / Head-wise auto-conversion
+// ---------------------------------------------------------------
+
+function _convert_combined_to(frm, target_mode) {
+    // Snapshot rows before we modify anything
+    const snapshot = (frm.doc.combined_rows || []).map(r => ({...r}));
+
+    // Set the flag FIRST so any cascading handler respects it
+    frm._auto_converting = true;
+
+    // Clear combined and update entry_mode directly on the doc — bypassing
+    // frm.set_value() avoids racing against the (async) entry_mode handler
+    // which would otherwise wipe the tables we are about to populate.
+    frm.clear_table("combined_rows");
+    frm.doc.entry_mode = target_mode;
+
+    // Populate the target child table BEFORE refreshing the form, so the
+    // refresh renders the populated rows.
+    if (target_mode === "Party-wise") {
+        snapshot.forEach(r => {
+            const net = flt(r.debit) - flt(r.credit);
+            if (Math.abs(net) < 0.005) return;
+            const row = frm.add_child("party_rows");
+            row.party = r.party;
+            row.party_type = r.party_type;
+            row.party_name = r.party_name;
+            row.amount = Math.abs(net);
+            row.current_balance = r.current_balance;
+            row.balance_type = r.balance_type;
+        });
+    } else if (target_mode === "Head-wise") {
+        snapshot.forEach(r => {
+            if (!flt(r.debit) && !flt(r.credit)) return;
+            const row = frm.add_child("account_rows");
+            row.account = r.account;
+            row.debit = flt(r.debit);
+            row.credit = flt(r.credit);
+            row.cost_center = r.cost_center;
+            row.project = r.project;
+            row.current_balance = r.current_balance;
+            row.balance_type = r.balance_type;
+        });
+    }
+
+    // Manually invoke the UI helpers that the entry_mode handler would have
+    // called — minus the destructive table-clearing it does for normal mode
+    // switches.
+    _apply_entry_mode(frm);
+    _apply_payment_method_labels(frm);
+    _set_paid_from_filter(frm);
+    frm.refresh_field("entry_mode");
+    frm.refresh_field("party_rows");
+    frm.refresh_field("account_rows");
+    frm.refresh_field("combined_rows");
+    frm.refresh_fields();
+
+    // Recompute header amount from the newly populated rows
+    if (target_mode === "Party-wise") {
+        _sum_party_rows(frm);
+    } else if (target_mode === "Head-wise") {
+        _show_headwise_totals(frm);
+    }
+
+    // Mark form dirty so the Save button stays enabled
+    frm.dirty();
+
+    frm._auto_converting = false;
+
+    frappe.show_alert({
+        message: __("Converted to {0} mode. Review the entries and click Save.", [target_mode]),
+        indicator: "blue"
+    }, 6);
 }

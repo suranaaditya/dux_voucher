@@ -52,15 +52,44 @@ frappe.ui.form.on("Receipt Voucher", {
         }
     },
 
+    validate(frm) {
+        // Guard: Party + Head Entry mode requires BOTH party rows AND head-only rows.
+        if (frm.doc.entry_mode !== "Party + Head Entry") return;
+        const rows = (frm.doc.combined_rows || []).filter(r => r.account);
+        if (rows.length === 0) return;
+
+        const with_party = rows.filter(r => r.party);
+        const without_party = rows.filter(r => !r.party);
+
+        if (with_party.length === rows.length || without_party.length === rows.length) {
+            const target = with_party.length === rows.length ? "Party-wise" : "Head-wise";
+            const kind = target === "Party-wise" ? "parties" : "account heads";
+
+            frappe.validated = false;
+
+            frappe.confirm(
+                __('This is a "Party + Head Entry" voucher, but you have only entered {0}. Do you want to convert this into a {1} entry? Your row data will be preserved.', [kind, target]),
+                () => setTimeout(() => _rv_convert_combined_to(frm, target), 0),
+                () => frappe.show_alert({
+                    message: __("Save cancelled. Please add the missing {0}.",
+                        [target === "Party-wise" ? "account-head rows" : "party rows"]),
+                    indicator: "orange"
+                }, 5)
+            );
+        }
+    },
+
     entry_mode(frm) {
         _rv_apply_entry_mode(frm);
         _rv_apply_payment_method_labels(frm);
         _rv_set_received_in_filter(frm);
-        frm.set_value("received_in_account", "");
-        frm.set_value("amount", 0);
-        frm.clear_table("party_rows");
-        frm.clear_table("account_rows");
-        frm.clear_table("combined_rows");
+        if (!frm._auto_converting) {
+            frm.set_value("received_in_account", "");
+            frm.set_value("amount", 0);
+            frm.clear_table("party_rows");
+            frm.clear_table("account_rows");
+            frm.clear_table("combined_rows");
+        }
         frm.refresh_fields();
     },
 
@@ -1040,4 +1069,68 @@ function _rv_show_combined_totals(frm) {
     } else {
         frm.dashboard.clear_headline();
     }
+}
+
+
+// ---------------------------------------------------------------
+// Combined mode -> Party-wise / Head-wise auto-conversion (RV)
+// ---------------------------------------------------------------
+
+function _rv_convert_combined_to(frm, target_mode) {
+    const snapshot = (frm.doc.combined_rows || []).map(r => ({...r}));
+
+    frm._auto_converting = true;
+
+    frm.clear_table("combined_rows");
+    frm.doc.entry_mode = target_mode;
+
+    if (target_mode === "Party-wise") {
+        snapshot.forEach(r => {
+            const net = flt(r.credit) - flt(r.debit);
+            if (Math.abs(net) < 0.005) return;
+            const row = frm.add_child("party_rows");
+            row.party = r.party;
+            row.party_type = r.party_type;
+            row.party_name = r.party_name;
+            row.amount = Math.abs(net);
+            row.current_balance = r.current_balance;
+            row.balance_type = r.balance_type;
+        });
+    } else if (target_mode === "Head-wise") {
+        snapshot.forEach(r => {
+            if (!flt(r.debit) && !flt(r.credit)) return;
+            const row = frm.add_child("account_rows");
+            row.account = r.account;
+            row.debit = flt(r.debit);
+            row.credit = flt(r.credit);
+            row.cost_center = r.cost_center;
+            row.project = r.project;
+            row.current_balance = r.current_balance;
+            row.balance_type = r.balance_type;
+        });
+    }
+
+    _rv_apply_entry_mode(frm);
+    _rv_apply_payment_method_labels(frm);
+    _rv_set_received_in_filter(frm);
+    frm.refresh_field("entry_mode");
+    frm.refresh_field("party_rows");
+    frm.refresh_field("account_rows");
+    frm.refresh_field("combined_rows");
+    frm.refresh_fields();
+
+    if (target_mode === "Party-wise") {
+        _rv_sum_party_rows(frm);
+    } else if (target_mode === "Head-wise") {
+        _rv_show_headwise_totals(frm);
+    }
+
+    frm.dirty();
+
+    frm._auto_converting = false;
+
+    frappe.show_alert({
+        message: __("Converted to {0} mode. Review the entries and click Save.", [target_mode]),
+        indicator: "blue"
+    }, 6);
 }
