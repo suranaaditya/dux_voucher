@@ -1,0 +1,47 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-04-08 19:36:30.493238",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "company",
+  "account_label"
+ ],
+ "fields": [
+  {
+   "columns": 5,
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "columns": 6,
+   "description": "Exact account_name as it appears under Branch / Divisions \u2014 without company suffix",
+   "fieldname": "account_label",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Account Label (in Branch / Divisions)",
+   "reqd": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-04-08 22:31:29.986640",
+ "modified_by": "Administrator",
+ "module": "Dux Voucher",
+ "name": "IC Company Account Mapping",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

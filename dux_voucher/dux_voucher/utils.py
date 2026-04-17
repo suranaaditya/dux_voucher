@@ -26,6 +26,15 @@ def on_journal_entry_cancel(doc, method):
         _cancel_parent_voucher(voucher_doctype, voucher_name)
 
 
+def on_journal_entry_submit(doc, method):
+    """When mirror JE is submitted by receiver, mark ICT as Completed."""
+    voucher_doctype = doc.get("custom_source_voucher_doctype")
+    voucher_name = doc.get("custom_source_voucher")
+    if voucher_doctype == "Inter-Company Transfer" and voucher_name:
+        from dux_voucher.dux_voucher.api.ic_transfer_api import mark_mirror_complete
+        mark_mirror_complete(voucher_name)
+
+
 def _cancel_parent_voucher(doctype, name):
     if not frappe.db.exists(doctype, name):
         return

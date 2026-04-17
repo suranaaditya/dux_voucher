@@ -1,0 +1,255 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "naming_series:",
+ "creation": "2026-04-07 23:23:28.215822",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "transfer_type",
+  "transfer_details_section",
+  "company",
+  "transaction_date",
+  "col_break_1",
+  "amount",
+  "reference_no",
+  "reference_date",
+  "payment_section",
+  "paid_from_account",
+  "col_break_2",
+  "paid_to_company",
+  "receipt_section",
+  "received_in_account",
+  "col_break_3",
+  "received_from_company",
+  "remarks_section",
+  "remarks",
+  "backend_section",
+  "mirror_status",
+  "col_break_4",
+  "from_je",
+  "to_je",
+  "amended_from"
+ ],
+ "fields": [
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Naming Series",
+   "no_copy": 1,
+   "options": "ICT-.YYYY.-",
+   "set_only_once": 1
+  },
+  {
+   "bold": 1,
+   "default": "Payment",
+   "fieldname": "transfer_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Transfer Type",
+   "options": "Payment\nReceipt",
+   "reqd": 1
+  },
+  {
+   "fieldname": "transfer_details_section",
+   "fieldtype": "Section Break",
+   "label": "Transfer Details"
+  },
+  {
+   "bold": 1,
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "ignore_user_permissions": 1,
+   "in_list_view": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "default": "Today",
+   "fieldname": "transaction_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "col_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Amount",
+   "reqd": 1
+  },
+  {
+   "fieldname": "reference_no",
+   "fieldtype": "Data",
+   "label": "UTR / Reference No"
+  },
+  {
+   "fieldname": "reference_date",
+   "fieldtype": "Date",
+   "label": "Reference Date"
+  },
+  {
+   "depends_on": "eval:doc.transfer_type=='Payment'",
+   "fieldname": "payment_section",
+   "fieldtype": "Section Break",
+   "label": "Payment Details"
+  },
+  {
+   "depends_on": "eval:doc.transfer_type=='Payment'",
+   "fieldname": "paid_from_account",
+   "fieldtype": "Link",
+   "label": "Paid From Account",
+   "mandatory_depends_on": "eval:doc.transfer_type=='Payment'",
+   "options": "Account"
+  },
+  {
+   "fieldname": "col_break_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "eval:doc.transfer_type=='Payment'",
+   "fieldname": "paid_to_company",
+   "fieldtype": "Link",
+   "ignore_user_permissions": 1,
+   "label": "Paid To Company",
+   "mandatory_depends_on": "eval:doc.transfer_type=='Payment'",
+   "options": "Company"
+  },
+  {
+   "depends_on": "eval:doc.transfer_type=='Receipt'",
+   "fieldname": "receipt_section",
+   "fieldtype": "Section Break",
+   "label": "Receipt Details"
+  },
+  {
+   "depends_on": "eval:doc.transfer_type=='Receipt'",
+   "fieldname": "received_in_account",
+   "fieldtype": "Link",
+   "label": "Received In Account",
+   "mandatory_depends_on": "eval:doc.transfer_type=='Receipt'",
+   "options": "Account"
+  },
+  {
+   "fieldname": "col_break_3",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "eval:doc.transfer_type=='Receipt'",
+   "fieldname": "received_from_company",
+   "fieldtype": "Link",
+   "ignore_user_permissions": 1,
+   "label": "Received From Company",
+   "mandatory_depends_on": "eval:doc.transfer_type=='Receipt'",
+   "options": "Company"
+  },
+  {
+   "fieldname": "remarks_section",
+   "fieldtype": "Section Break",
+   "label": "Remarks"
+  },
+  {
+   "fieldname": "remarks",
+   "fieldtype": "Text",
+   "label": "Remarks"
+  },
+  {
+   "fieldname": "backend_section",
+   "fieldtype": "Section Break",
+   "label": "Backend Tracking"
+  },
+  {
+   "fieldname": "mirror_status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Mirror Status",
+   "no_copy": 1,
+   "options": "\nPending Review\nCompleted\nCancelled",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_4",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "from_je",
+   "fieldtype": "Link",
+   "label": "Journal Entry (This Company)",
+   "no_copy": 1,
+   "options": "Journal Entry",
+   "read_only": 1
+  },
+  {
+   "fieldname": "to_je",
+   "fieldtype": "Link",
+   "label": "Mirror Journal Entry (Other Company)",
+   "no_copy": 1,
+   "options": "Journal Entry",
+   "read_only": 1
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Inter-Company Transfer",
+   "print_hide": 1,
+   "read_only": 1,
+   "search_index": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2026-04-07 23:23:28.215822",
+ "modified_by": "Administrator",
+ "module": "Dux Voucher",
+ "name": "Inter-Company Transfer",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts User",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

@@ -34,6 +34,14 @@ doc_events = {
         "on_cancel": "dux_voucher.dux_voucher.utils.on_journal_entry_cancel"
     }
 }
+
+permission_query_conditions = {
+    "Inter-Company Transfer": "dux_voucher.dux_voucher.api.ic_transfer_api.get_ict_permission_query"
+}
+
+has_permission = {
+    "Inter-Company Transfer": "dux_voucher.dux_voucher.api.ic_transfer_api.ict_has_permission"
+}
 # Apps
 # ------------------
 
