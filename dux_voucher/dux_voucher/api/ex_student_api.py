@@ -58,6 +58,8 @@ def import_from_csv(batch_name, file_url):
                 father_name=row.get('father_name'),
                 course=row.get('course'),
                 batch_year=row.get('batch_year'),
+                admission_session=row.get('admission_session'),
+                student_id=row.get('student_id'),
                 mobile=row.get('mobile'),
                 email=row.get('email'),
             )

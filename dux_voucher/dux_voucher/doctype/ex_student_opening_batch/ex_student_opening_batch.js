@@ -66,10 +66,10 @@ function _open_csv_import(frm) {
                     options: `
                         <div class="text-muted" style="margin-bottom:8px">
                             <p><b>Expected columns (first row = header):</b><br>
-                            <code>student_name</code>, <code>amount</code>,
+                            <code>student_name</code>, <code>student_id</code>, <code>amount</code>,
                             <code>father_name</code>, <code>course</code>,
-                            <code>batch_year</code>, <code>mobile</code>,
-                            <code>email</code>, <code>remarks</code>.</p>
+                            <code>batch_year</code>, <code>admission_session</code>,
+                            <code>mobile</code>, <code>email</code>, <code>remarks</code>.</p>
                             <p>Only <code>student_name</code> and <code>amount</code> are required.
                             Any student name that doesn't already exist in <b>${frappe.utils.escape_html(frm.doc.company)}</b> will be auto-created.</p>
                             <p><a href="#" class="dv-download-template"><i class="fa fa-download"></i> Download template CSV</a></p>
@@ -124,8 +124,8 @@ function _open_csv_import(frm) {
 }
 
 function _download_template() {
-    const header = ['student_name','amount','father_name','course','batch_year','mobile','email','remarks'];
-    const sample = ['Ramesh Sharma','15000','Suresh Sharma','BTech CSE','2019','9876543210','ramesh@example.com','sem-6 fees'];
+    const header = ['student_name','student_id','amount','father_name','course','batch_year','admission_session','mobile','email','remarks'];
+    const sample = ['Ramesh Sharma','STU-001','15000','Suresh Sharma','BTech CSE','2019','2018-19','9876543210','ramesh@example.com','sem-6 fees'];
     const csv = header.join(',') + '\n' + sample.join(',') + '\n';
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
