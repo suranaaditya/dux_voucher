@@ -1,5 +1,4 @@
 // Copyright (c) 2026, Dux Digitech and contributors
-// For license information, please see license.txt
 
 frappe.ui.form.on('Ex Student Receipt', {
     refresh(frm) {
@@ -9,6 +8,7 @@ frappe.ui.form.on('Ex Student Receipt', {
                 () => frappe.set_route('Form', 'Journal Entry', frm.doc.backend_je)
             );
         }
+        _show_outstanding_headline(frm);
     },
 
     onload(frm) {
@@ -19,7 +19,6 @@ frappe.ui.form.on('Ex Student Receipt', {
     company(frm) {
         _apply_student_filter(frm);
         _apply_received_in_filter(frm);
-        // Reset dependent fields if company changes
         if (!frm.is_new() || frm.doc.ex_student) {
             frm.set_value('ex_student', '');
             frm.set_value('current_outstanding', 0);
@@ -30,6 +29,7 @@ frappe.ui.form.on('Ex Student Receipt', {
     ex_student(frm) {
         if (!frm.doc.ex_student) {
             frm.set_value('current_outstanding', 0);
+            frm.dashboard.clear_headline();
             return;
         }
         frappe.call({
@@ -43,8 +43,28 @@ frappe.ui.form.on('Ex Student Receipt', {
     },
 
     mode_of_payment(frm) {
-        if (!frm.doc.mode_of_payment) return;
-        // Try to auto-fetch the account linked to this mode of payment for the current company
+        if (!frm.doc.mode_of_payment) {
+            frm._mop_type = null;
+            _apply_received_in_filter(frm);
+            return;
+        }
+        // Fetch MOP type (Bank/Cash/General) -- drives the account filter
+        frappe.db.get_value('Mode of Payment', frm.doc.mode_of_payment, 'type', (r) => {
+            frm._mop_type = (r && r.type) || null;
+            _apply_received_in_filter(frm);
+
+            // If current account doesn't match the MOP type, clear it
+            if (frm.doc.received_in_account) {
+                frappe.db.get_value('Account', frm.doc.received_in_account, 'account_type', (ar) => {
+                    const at = ar && ar.account_type;
+                    if (frm._mop_type && at && at !== frm._mop_type) {
+                        frm.set_value('received_in_account', '');
+                    }
+                });
+            }
+        });
+
+        // Auto-fill the default account for this MOP + company (if set in Mode of Payment Account)
         frappe.call({
             method: 'frappe.client.get_list',
             args: {
@@ -61,8 +81,9 @@ frappe.ui.form.on('Ex Student Receipt', {
         });
     },
 
+    amount(frm) { _show_outstanding_headline(frm); },
+
     validate(frm) {
-        // Warn-but-allow overpayment
         if (frm._overpayment_confirmed) return;
         const outstanding = flt(frm.doc.current_outstanding);
         const amount = flt(frm.doc.amount);
@@ -94,28 +115,41 @@ function _apply_student_filter(frm) {
 }
 
 function _apply_received_in_filter(frm) {
-    frm.set_query('received_in_account', () => ({
-        filters: {
+    frm.set_query('received_in_account', () => {
+        const filters = {
             company: frm.doc.company || '',
-            account_type: ['in', ['Bank', 'Cash']],
             is_group: 0,
-        },
-    }));
+        };
+        if (frm._mop_type === 'Cash') {
+            filters.account_type = 'Cash';
+        } else if (frm._mop_type === 'Bank') {
+            filters.account_type = 'Bank';
+        } else {
+            // No MOP type (not set or General) -- allow both Bank and Cash
+            filters.account_type = ['in', ['Bank', 'Cash']];
+        }
+        return { filters };
+    });
 }
 
 function _show_outstanding_headline(frm) {
     const bal = flt(frm.doc.current_outstanding);
+    const amount = flt(frm.doc.amount);
+    let msg, indicator;
     if (bal > 0.005) {
-        frm.dashboard.set_headline(
-            __('Student currently owes {0}', [format_currency(bal)]),
-            'blue'
-        );
+        msg = __('Student currently owes {0}', [format_currency(bal)]);
+        indicator = 'blue';
     } else if (bal < -0.005) {
-        frm.dashboard.set_headline(
-            __('Student has a credit balance of {0}', [format_currency(Math.abs(bal))]),
-            'orange'
-        );
+        msg = __('Student has a credit balance of {0}', [format_currency(Math.abs(bal))]);
+        indicator = 'orange';
     } else {
         frm.dashboard.clear_headline();
+        return;
     }
+    if (amount > 0 && amount > bal + 0.005) {
+        const excess = amount - bal;
+        msg += ' — ' + __('This receipt will create a credit balance of {0}', [format_currency(excess)]);
+        indicator = 'red';
+    }
+    frm.dashboard.set_headline(msg, indicator);
 }
