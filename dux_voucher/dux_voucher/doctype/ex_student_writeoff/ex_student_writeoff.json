@@ -1,0 +1,255 @@
+{
+ "actions": [],
+ "autoname": "naming_series:",
+ "creation": "2026-04-18 12:23:33.875355",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "basic_section",
+  "company",
+  "posting_date",
+  "col_basic",
+  "ex_student",
+  "student_name",
+  "amount_section",
+  "amount",
+  "writeoff_account",
+  "col_amount",
+  "current_outstanding",
+  "reason_section",
+  "reason",
+  "remarks_section",
+  "remarks",
+  "tracking_section",
+  "outstanding_before",
+  "outstanding_after",
+  "col_track",
+  "is_posted",
+  "backend_je",
+  "amended_from"
+ ],
+ "fields": [
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Naming Series",
+   "no_copy": 1,
+   "options": "ESW-.YYYY.-",
+   "reqd": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "basic_section",
+   "fieldtype": "Section Break",
+   "label": "Basic Details"
+  },
+  {
+   "bold": 1,
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "default": "Today",
+   "fieldname": "posting_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Posting Date",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "col_basic",
+   "fieldtype": "Column Break"
+  },
+  {
+   "bold": 1,
+   "fieldname": "ex_student",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Ex Student",
+   "options": "Ex Student",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "ex_student.student_name",
+   "fieldname": "student_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Student Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "amount_section",
+   "fieldtype": "Section Break",
+   "label": "Write-Off"
+  },
+  {
+   "bold": 1,
+   "description": "Amount to write off (must be > 0 and \u2264 current outstanding)",
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Amount",
+   "reqd": 1
+  },
+  {
+   "description": "Expense account to book the write-off against (e.g. Bad Debts, Scholarship, Discount Allowed)",
+   "fieldname": "writeoff_account",
+   "fieldtype": "Link",
+   "label": "Write-Off Account",
+   "options": "Account",
+   "reqd": 1
+  },
+  {
+   "fieldname": "col_amount",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Auto-fetched when the student is selected. Must be > 0 to write off.",
+   "fieldname": "current_outstanding",
+   "fieldtype": "Currency",
+   "label": "Current Outstanding (Dr)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reason_section",
+   "fieldtype": "Section Break",
+   "label": "Reason"
+  },
+  {
+   "description": "Why is this being written off? (Graduated unpaid, deceased, settlement, etc.)",
+   "fieldname": "reason",
+   "fieldtype": "Small Text",
+   "label": "Reason",
+   "reqd": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "remarks_section",
+   "fieldtype": "Section Break",
+   "label": "Remarks"
+  },
+  {
+   "fieldname": "remarks",
+   "fieldtype": "Small Text",
+   "label": "Remarks"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "tracking_section",
+   "fieldtype": "Section Break",
+   "label": "Posting Status"
+  },
+  {
+   "description": "Snapshot at submit",
+   "fieldname": "outstanding_before",
+   "fieldtype": "Currency",
+   "label": "Outstanding Before",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "outstanding_after",
+   "fieldtype": "Currency",
+   "label": "Outstanding After",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_track",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_posted",
+   "fieldtype": "Check",
+   "label": "Is Posted",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "backend_je",
+   "fieldtype": "Link",
+   "label": "Backend Journal Entry",
+   "no_copy": 1,
+   "options": "Journal Entry",
+   "read_only": 1
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Ex Student Writeoff",
+   "print_hide": 1,
+   "read_only": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2026-04-18 12:23:33.875355",
+ "modified_by": "Administrator",
+ "module": "Dux Voucher",
+ "name": "Ex Student Writeoff",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts User",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
