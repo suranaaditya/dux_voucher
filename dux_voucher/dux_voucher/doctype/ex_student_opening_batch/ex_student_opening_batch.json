@@ -10,7 +10,9 @@
   "company",
   "posting_date",
   "col_basic",
-  "total_amount",
+  "total_debit",
+  "total_credit",
+  "net_amount",
   "students_section",
   "students_table",
   "remarks_section",
@@ -56,13 +58,6 @@
   {
    "fieldname": "col_basic",
    "fieldtype": "Column Break"
-  },
-  {
-   "fieldname": "total_amount",
-   "fieldtype": "Currency",
-   "in_list_view": 1,
-   "label": "Total Amount",
-   "read_only": 1
   },
   {
    "fieldname": "students_section",
@@ -115,13 +110,33 @@
    "options": "Ex Student Opening Batch",
    "print_hide": 1,
    "read_only": 1
+  },
+  {
+   "fieldname": "total_debit",
+   "fieldtype": "Currency",
+   "label": "Total Debit",
+   "read_only": 1
+  },
+  {
+   "fieldname": "total_credit",
+   "fieldtype": "Currency",
+   "label": "Total Credit",
+   "read_only": 1
+  },
+  {
+   "description": "Net = Total Debit minus Total Credit. Positive means net receivable (Dr).",
+   "fieldname": "net_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Net Amount",
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-04-17 22:31:15.502259",
+ "modified": "2026-04-18 10:11:23.392953",
  "modified_by": "Administrator",
  "module": "Dux Voucher",
  "name": "Ex Student Opening Batch",

@@ -8,7 +8,8 @@
  "field_order": [
   "ex_student",
   "student_name",
-  "amount",
+  "debit_amount",
+  "credit_amount",
   "remarks"
  ],
  "fields": [
@@ -31,26 +32,33 @@
    "read_only": 1
   },
   {
-   "columns": 2,
-   "fieldname": "amount",
-   "fieldtype": "Currency",
-   "in_list_view": 1,
-   "label": "Pending Amount",
-   "reqd": 1
-  },
-  {
    "columns": 3,
    "fieldname": "remarks",
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "Remarks"
+  },
+  {
+   "columns": 2,
+   "fieldname": "debit_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Debit",
+   "reqd": 1
+  },
+  {
+   "columns": 2,
+   "fieldname": "credit_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Credit"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-04-17 22:28:06.068718",
+ "modified": "2026-04-18 10:11:23.179435",
  "modified_by": "Administrator",
  "module": "Dux Voucher",
  "name": "Ex Student Opening Row",

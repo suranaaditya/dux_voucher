@@ -44,12 +44,22 @@ def import_from_csv(batch_name, file_url):
     for idx, row in enumerate(rows, start=2):  # row 1 = header
         try:
             student_name = (row.get('student_name') or '').strip()
-            amount = flt(row.get('amount'))
+            debit = flt(row.get('debit') or row.get('debit_amount'))
+            credit = flt(row.get('credit') or row.get('credit_amount'))
+
+            # Backward compat: if legacy 'amount' column provided with no debit/credit,
+            # treat it as debit (owes us).
+            if debit == 0 and credit == 0 and row.get('amount'):
+                debit = flt(row.get('amount'))
+
             if not student_name:
                 errors.append(_('Row {0}: missing student_name').format(idx))
                 continue
-            if amount <= 0:
-                errors.append(_('Row {0}: amount must be > 0').format(idx))
+            if debit <= 0 and credit <= 0:
+                errors.append(_('Row {0}: provide debit or credit > 0').format(idx))
+                continue
+            if debit > 0 and credit > 0:
+                errors.append(_('Row {0}: cannot have both debit and credit').format(idx))
                 continue
 
             ex_student_id = _get_or_create_ex_student(
@@ -68,7 +78,8 @@ def import_from_csv(batch_name, file_url):
 
             batch.append('students_table', {
                 'ex_student': ex_student_id['name'],
-                'amount': amount,
+                'debit_amount': debit,
+                'credit_amount': credit,
                 'remarks': (row.get('remarks') or '').strip() or None,
             })
             appended += 1
@@ -141,7 +152,15 @@ def _current_outstanding(ex_student):
 
 @frappe.whitelist()
 def get_outstanding(ex_student):
-    """Whitelisted: return current outstanding balance for a student (positive = owes us)."""
+    """Return outstanding for a student as {'amount': signed_value, 'abs': abs_value, 'type': 'Dr|Cr|Nil'}.
+
+    Positive = student owes (Dr). Negative = advance/credit balance (Cr).
+    """
     if not ex_student:
-        return 0
-    return _current_outstanding(ex_student)
+        return {'amount': 0, 'abs': 0, 'type': 'Nil'}
+    signed = _current_outstanding(ex_student)
+    if signed > 0.005:
+        return {'amount': signed, 'abs': signed, 'type': 'Dr'}
+    elif signed < -0.005:
+        return {'amount': signed, 'abs': abs(signed), 'type': 'Cr'}
+    return {'amount': 0, 'abs': 0, 'type': 'Nil'}

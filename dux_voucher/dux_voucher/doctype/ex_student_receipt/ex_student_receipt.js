@@ -36,7 +36,9 @@ frappe.ui.form.on('Ex Student Receipt', {
             method: 'dux_voucher.dux_voucher.api.ex_student_api.get_outstanding',
             args: { ex_student: frm.doc.ex_student },
             callback: (r) => {
-                frm.set_value('current_outstanding', flt(r.message || 0));
+                const info = r.message || {amount: 0, abs: 0, type: 'Nil'};
+                frm.set_value('current_outstanding', flt(info.amount));
+                frm._outstanding_type = info.type;
                 _show_outstanding_headline(frm);
             },
         });
@@ -137,10 +139,10 @@ function _show_outstanding_headline(frm) {
     const amount = flt(frm.doc.amount);
     let msg, indicator;
     if (bal > 0.005) {
-        msg = __('Student currently owes {0}', [format_currency(bal)]);
+        msg = __('Outstanding: {0} Dr (student owes)', [format_currency(bal)]);
         indicator = 'blue';
     } else if (bal < -0.005) {
-        msg = __('Student has a credit balance of {0}', [format_currency(Math.abs(bal))]);
+        msg = __('Outstanding: {0} Cr (advance balance)', [format_currency(Math.abs(bal))]);
         indicator = 'orange';
     } else {
         frm.dashboard.clear_headline();
@@ -148,7 +150,7 @@ function _show_outstanding_headline(frm) {
     }
     if (amount > 0 && amount > bal + 0.005) {
         const excess = amount - bal;
-        msg += ' — ' + __('This receipt will create a credit balance of {0}', [format_currency(excess)]);
+        msg += ' — ' + __('This receipt will create a Cr balance of {0}', [format_currency(excess)]);
         indicator = 'red';
     }
     frm.dashboard.set_headline(msg, indicator);

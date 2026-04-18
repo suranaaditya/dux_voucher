@@ -29,8 +29,8 @@ class ExStudent(Document):
             ).format(self.student_name, self.company, existing))
 
     def recompute_opening_balance(self):
-        """Recompute opening_balance from the parallel ledger."""
-        total = frappe.db.sql(
+        """Recompute signed balance + balance_type from the parallel ledger."""
+        row = frappe.db.sql(
             '''
             SELECT SUM(debit) - SUM(credit)
             FROM `tabEx Student Ledger Entry`
@@ -38,6 +38,18 @@ class ExStudent(Document):
             ''',
             (self.name,),
         )
-        value = flt(total[0][0]) if total and total[0][0] is not None else 0
-        if flt(self.opening_balance) != value:
-            frappe.db.set_value('Ex Student', self.name, 'opening_balance', value)
+        signed = flt(row[0][0]) if row and row[0][0] is not None else 0
+
+        if signed > 0.005:
+            balance_type = 'Dr'
+        elif signed < -0.005:
+            balance_type = 'Cr'
+        else:
+            balance_type = 'Nil'
+
+        if flt(self.opening_balance) != signed or (self.balance_type or 'Nil') != balance_type:
+            frappe.db.set_value(
+                'Ex Student', self.name,
+                {'opening_balance': signed, 'balance_type': balance_type},
+                update_modified=False,
+            )

@@ -21,6 +21,7 @@
   "email",
   "section_balance",
   "opening_balance",
+  "balance_type",
   "is_disabled"
  ],
  "fields": [
@@ -118,12 +119,21 @@
    "fieldname": "admission_session",
    "fieldtype": "Data",
    "label": "Admission Session"
+  },
+  {
+   "default": "Nil",
+   "fieldname": "balance_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Balance Type",
+   "options": "\nDr\nCr\nNil",
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-04-18 09:41:10.769131",
+ "modified": "2026-04-18 10:11:23.565970",
  "modified_by": "Administrator",
  "module": "Dux Voucher",
  "name": "Ex Student",
