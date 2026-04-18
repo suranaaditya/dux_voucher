@@ -137,5 +137,6 @@ class ExStudentOpeningBatch(Document):
     # ------------------------------------------------------------------
     def _recompute_student_balances(self):
         for row in self.students_table:
-            student = frappe.get_doc('Ex Student', row.ex_student)
-            student.recompute_opening_balance()
+            if row.ex_student and frappe.db.exists('Ex Student', row.ex_student):
+                student = frappe.get_doc('Ex Student', row.ex_student)
+                student.recompute_opening_balance()

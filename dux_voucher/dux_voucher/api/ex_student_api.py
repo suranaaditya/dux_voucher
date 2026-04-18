@@ -122,3 +122,24 @@ def _get_or_create_ex_student(student_name, company, **extra):
             doc.set(k, v)
     doc.insert(ignore_permissions=True)
     return {'name': doc.name, 'created': True}
+
+
+def _current_outstanding(ex_student):
+    """Return current outstanding = SUM(debit) - SUM(credit) from non-cancelled ledger entries."""
+    row = frappe.db.sql(
+        '''
+        SELECT SUM(debit) - SUM(credit)
+        FROM `tabEx Student Ledger Entry`
+        WHERE ex_student = %s AND is_cancelled = 0
+        ''',
+        (ex_student,),
+    )
+    return flt(row[0][0]) if row and row[0][0] is not None else 0
+
+
+@frappe.whitelist()
+def get_outstanding(ex_student):
+    """Whitelisted: return current outstanding balance for a student (positive = owes us)."""
+    if not ex_student:
+        return 0
+    return _current_outstanding(ex_student)
