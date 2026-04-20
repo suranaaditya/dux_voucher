@@ -84,7 +84,6 @@
    "fieldtype": "Date",
    "in_list_view": 1,
    "label": "Posting Date",
-   "read_only": 1,
    "reqd": 1
   },
   {
@@ -219,7 +218,7 @@
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-04-16 15:31:18.495969",
+ "modified": "2026-04-20 10:07:03.842062",
  "modified_by": "Administrator",
  "module": "Dux Voucher",
  "name": "Receipt Voucher",
