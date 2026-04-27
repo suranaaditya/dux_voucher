@@ -80,6 +80,8 @@ class DuxCashBook {
 .cb-print-opt{padding:10px 14px;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:9px;color:#374151;border-bottom:1px solid #f3f4f6}
 .cb-print-opt:last-child{border-bottom:none}
 .cb-print-opt:hover{background:#f0fdf4;color:#059669}
+.cb-excel-btn{display:none;height:36px;padding:0 14px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid #16a34a;background:#16a34a;color:#fff;font-family:inherit;transition:all .15s;align-items:center;gap:6px}
+.cb-excel-btn:hover{background:#15803d;border-color:#15803d}
 .cb-placeholder{text-align:center;padding:64px 20px;color:#9ca3af;font-size:14px}
 .cb-placeholder strong{color:#6b7280}
 .cb-acc-type-badge-bank{font-size:10px;font-weight:700;background:#f0fdf4;color:#166534;border-radius:4px;padding:2px 7px;letter-spacing:.03em}
@@ -150,6 +152,9 @@ class DuxCashBook {
     <div class="cb-fg"><label>To</label><input id="cb-to" type="date"></div>
     <div class="cb-btn-row">
       <button class="cb-btn cb-btn-primary" id="cb-show-btn">Show</button>
+      <button class="cb-excel-btn" id="cb-excel-btn">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/><path d="M8 13l3 3-3 3M14 13l-3 3 3 3"/></svg>Excel
+      </button>
       <div class="cb-print-split" id="cb-print-split">
         <div class="cb-print-split-inner">
           <button class="cb-print-main" id="cb-print-p-btn">
@@ -188,6 +193,7 @@ class DuxCashBook {
 			if(!e.target.closest(".cb-print-split")) _gel("cb-print-menu").classList.remove("open");
 		});
 		_gel("cb-show-btn").addEventListener("click",   function(){ self.fetchReport(); });
+		_gel("cb-excel-btn").addEventListener("click",  function(){ self._exportExcel(); });
 		_gel("cb-print-p-btn").addEventListener("click",function(){ _gel("cb-print-menu").classList.remove("open"); self._printReport(false); });
 		_gel("cb-print-caret").addEventListener("click",function(e){ e.stopPropagation(); _gel("cb-print-menu").classList.toggle("open"); });
 		_gel("cb-opt-p").addEventListener("click",  function(){ _gel("cb-print-menu").classList.remove("open"); self._printReport(false); });
@@ -265,6 +271,7 @@ class DuxCashBook {
 
 		_gel("cb-area").innerHTML='<div class="cb-placeholder">Loading…</div>';
 		_gel("cb-print-split").style.display="none";
+		_gel("cb-excel-btn").style.display="none";
 		this._lastData=null;
 
 		var self=this;
@@ -276,6 +283,7 @@ class DuxCashBook {
 					self._lastData=r.message;
 					self._render(r.message);
 					_gel("cb-print-split").style.display="block";
+					_gel("cb-excel-btn").style.display="inline-flex";
 				} else {
 					_gel("cb-area").innerHTML='<div class="cb-placeholder">No transactions found for this account and period.</div>';
 				}
@@ -339,6 +347,18 @@ class DuxCashBook {
     </table>
   </div>
 </div>`;
+	}
+
+	/* ── Excel Export ─────────────────────────────────────────────── */
+	_exportExcel(){
+		if(!this._lastData) return;
+		var company=_gel("cb-co-sel").value,
+		    account=_gel("cb-acc-sel").value,
+		    from_date=_gel("cb-from").value,
+		    to_date=_gel("cb-to").value;
+		var params=new URLSearchParams({company:company,account:account,from_date:from_date,to_date:to_date});
+		var url="/api/method/dux_voucher.dux_voucher.api.reports_export.export_cash_bank_book_xlsx?"+params.toString();
+		window.location.href=url;
 	}
 
 	/* ── Professional Print ───────────────────────────────────────── */

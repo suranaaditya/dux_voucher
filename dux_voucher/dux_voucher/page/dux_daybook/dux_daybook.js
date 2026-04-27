@@ -77,6 +77,8 @@ class DuxDayBook {
 .db-print-opt{padding:10px 14px;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:9px;color:#374151;border-bottom:1px solid #f3f4f6}
 .db-print-opt:last-child{border-bottom:none}
 .db-print-opt:hover{background:#f0f4ff;color:#1d4ed8}
+.db-excel-btn{display:none;height:36px;padding:0 14px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid #16a34a;background:#16a34a;color:#fff;font-family:inherit;transition:all .15s;align-items:center;gap:6px}
+.db-excel-btn:hover{background:#15803d;border-color:#15803d}
 .db-placeholder{text-align:center;padding:64px 20px;color:#9ca3af;font-size:14px}
 .db-placeholder strong{color:#6b7280}
 
@@ -155,6 +157,9 @@ class DuxDayBook {
     </div>
     <div class="db-btn-row">
       <button class="db-btn db-btn-primary" id="db-show-btn">Show</button>
+      <button class="db-excel-btn" id="db-excel-btn">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/><path d="M8 13l3 3-3 3M14 13l-3 3 3 3"/></svg>Excel
+      </button>
       <div class="db-print-split" id="db-print-split">
         <div class="db-print-split-inner">
           <button class="db-print-main" id="db-print-p-btn">
@@ -187,6 +192,7 @@ class DuxDayBook {
 			if(!e.target.closest(".db-print-split")) _gel("db-print-menu").classList.remove("open");
 		});
 		_gel("db-show-btn").addEventListener("click", function(){ self.fetchReport(); });
+		_gel("db-excel-btn").addEventListener("click", function(){ self._exportExcel(); });
 		_gel("db-print-p-btn").addEventListener("click", function(){ _gel("db-print-menu").classList.remove("open"); self._printReport(false); });
 		_gel("db-print-caret").addEventListener("click", function(e){ e.stopPropagation(); _gel("db-print-menu").classList.toggle("open"); });
 		_gel("db-opt-p").addEventListener("click",  function(){ _gel("db-print-menu").classList.remove("open"); self._printReport(false); });
@@ -237,6 +243,7 @@ class DuxDayBook {
 
 		_gel("db-area").innerHTML='<div class="db-placeholder">Loading…</div>';
 		_gel("db-print-split").style.display="none";
+		_gel("db-excel-btn").style.display="none";
 		this._lastData=null;
 
 		var self=this;
@@ -248,6 +255,7 @@ class DuxDayBook {
 					self._lastData=r.message;
 					self._render(r.message);
 					_gel("db-print-split").style.display="block";
+					_gel("db-excel-btn").style.display="inline-flex";
 				} else {
 					_gel("db-area").innerHTML='<div class="db-placeholder">No transactions found for this period.</div>';
 				}
@@ -322,6 +330,19 @@ class DuxDayBook {
     </table>
   </div>
 </div>`;
+	}
+
+	/* ── Excel Export ──────────────────────────────────────────────── */
+	_exportExcel(){
+		if(!this._lastData) return;
+		var company=_gel("db-co-sel").value,
+		    from_date=_gel("db-from").value,
+		    to_date=_gel("db-to").value,
+		    vt_filter=_gel("db-vt-sel").value;
+		var params=new URLSearchParams({company:company,from_date:from_date,to_date:to_date});
+		if(vt_filter) params.append("voucher_type_filter",vt_filter);
+		var url="/api/method/dux_voucher.dux_voucher.api.reports_export.export_day_book_xlsx?"+params.toString();
+		window.location.href=url;
 	}
 
 	/* ── Professional Print ────────────────────────────────────────── */

@@ -90,6 +90,8 @@ class DuxLedger {
 .dl-print-opt{padding:10px 14px;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:9px;color:#374151;border-bottom:1px solid #f3f4f6}
 .dl-print-opt:last-child{border-bottom:none}
 .dl-print-opt:hover{background:#f0f4ff;color:#1d4ed8}
+.dl-excel-btn{display:none;height:36px;padding:0 14px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid #16a34a;background:#16a34a;color:#fff;font-family:inherit;transition:all .15s;align-items:center;gap:6px}
+.dl-excel-btn:hover{background:#15803d;border-color:#15803d}
 .dl-placeholder{text-align:center;padding:64px 20px;color:#9ca3af;font-size:14px}
 .dl-placeholder strong{color:#6b7280}
 .dl-report-card{background:#fff;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden}
@@ -161,6 +163,9 @@ class DuxLedger {
     <div class="dl-fg"><label>To</label><input id="dl-to" type="date"></div>
     <div class="dl-btn-row">
       <button class="dl-btn dl-btn-primary" id="dl-show-btn">Show</button>
+      <button class="dl-excel-btn" id="dl-excel-btn">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/><path d="M8 13l3 3-3 3M14 13l-3 3 3 3"/></svg>Excel
+      </button>
       <div class="dl-print-split" id="dl-print-split">
         <div class="dl-print-split-inner">
           <button class="dl-print-main" id="dl-print-p-btn">
@@ -204,6 +209,7 @@ class DuxLedger {
 			if(!e.target.closest(".dl-print-split")) _gel("dl-print-menu").classList.remove("open");
 		});
 		_gel("dl-show-btn").addEventListener("click", function(){ self.fetchReport(); });
+		_gel("dl-excel-btn").addEventListener("click", function(){ self._exportExcel(); });
 		_gel("dl-print-p-btn").addEventListener("click", function(){ _gel("dl-print-menu").classList.remove("open"); self._printReport(false); });
 		_gel("dl-print-caret").addEventListener("click", function(e){ e.stopPropagation(); _gel("dl-print-menu").classList.toggle("open"); });
 		_gel("dl-opt-p").addEventListener("click",  function(){ _gel("dl-print-menu").classList.remove("open"); self._printReport(false); });
@@ -297,6 +303,7 @@ class DuxLedger {
 		if(!from_date||!to_date){ frappe.msgprint({message:"Please set both dates.",indicator:"orange"}); return; }
 		_gel("dl-area").innerHTML='<div class="dl-placeholder">Loading…</div>';
 		_gel("dl-print-split").style.display="none";
+		_gel("dl-excel-btn").style.display="none";
 		this._lastData=null;
 		var self=this, args={company,account,from_date,to_date};
 		if(party)      args.party=party;
@@ -305,7 +312,7 @@ class DuxLedger {
 			method:"dux_voucher.dux_voucher.api.reports_api.get_ledger_statement",
 			args:args,
 			callback:function(r){
-				if(r.message){ self._lastData=r.message; self._render(r.message); _gel("dl-print-split").style.display="block"; }
+				if(r.message){ self._lastData=r.message; self._render(r.message); _gel("dl-print-split").style.display="block"; _gel("dl-excel-btn").style.display="inline-flex"; }
 				else{ _gel("dl-area").innerHTML='<div class="dl-placeholder">No data found for this selection and period.</div>'; }
 			},
 			error:function(){ _gel("dl-area").innerHTML='<div class="dl-placeholder" style="color:#dc2626">Could not load report. Verify account name and try again.</div>'; },
@@ -346,6 +353,26 @@ class DuxLedger {
     </table>
   </div>
 </div>`;
+	}
+
+	/* ══════════════════════════════════════════════════════════
+	   Excel export — streams styled .xlsx via openpyxl backend
+	   ══════════════════════════════════════════════════════════ */
+	_exportExcel(){
+		if(!this._lastData) return;
+		var company=_gel("dl-co-sel").value,
+		    from_date=_gel("dl-from").value,
+		    to_date=_gel("dl-to").value;
+		var account="",party=null,party_type=null;
+		if(this._selected){
+			if(this._selected.type==="account"){ account=this._selected.value; }
+			else{ account=this._selected.account; party=this._selected.value; party_type=this._selected.party_type; }
+		} else { account=_gel("dl-acc-inp").value.trim(); }
+		var params=new URLSearchParams({company:company,account:account,from_date:from_date,to_date:to_date});
+		if(party)      params.append("party",party);
+		if(party_type) params.append("party_type",party_type);
+		var url="/api/method/dux_voucher.dux_voucher.api.reports_export.export_ledger_xlsx?"+params.toString();
+		window.location.href=url;
 	}
 
 	/* ══════════════════════════════════════════════════════════
