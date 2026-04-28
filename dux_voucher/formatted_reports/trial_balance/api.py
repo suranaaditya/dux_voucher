@@ -43,8 +43,12 @@ def export_formatted_tb(filters):
     elif filters is None:
         filters = {}
 
-    company = filters.get("company")
-    if not company:
+    # ERPNext's trial_balance.validate_filters() does attribute access
+    # (filters.fiscal_year, filters.company, …) — that requires a
+    # frappe._dict, not a plain dict. Wrap before passing through.
+    filters = frappe._dict(filters)
+
+    if not filters.get("company"):
         frappe.throw(_("Please select a Company before downloading."))
 
     # Reuse the standard report's data layer — never recompute totals.
