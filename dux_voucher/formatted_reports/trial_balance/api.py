@@ -48,7 +48,8 @@ def export_formatted_tb(filters):
     # frappe._dict, not a plain dict. Wrap before passing through.
     filters = frappe._dict(filters)
 
-    if not filters.get("company"):
+    company = filters.get("company")
+    if not company:
         frappe.throw(_("Please select a Company before downloading."))
 
     # Reuse the standard report's data layer — never recompute totals.
