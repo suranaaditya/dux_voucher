@@ -21,6 +21,23 @@ from datetime import date as _date
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.worksheet.hyperlink import Hyperlink
+
+
+def _intra_link(cell, target_sheet, target_cell):
+    """Attach an in-workbook hyperlink to ``cell``.
+
+    Using a real :class:`Hyperlink` with ``location=`` (rather than the
+    ``cell.hyperlink = "#'Sheet'!A1"`` string shorthand) is what Excel
+    expects for "place in this document" navigation — it round-trips
+    through openpyxl as ``hyperlink.location`` rather than landing on
+    ``hyperlink.target``.
+    """
+    cell.hyperlink = Hyperlink(
+        ref=cell.coordinate,
+        location=f"'{target_sheet}'!{target_cell}",
+        display=str(cell.value) if cell.value is not None else "",
+    )
 
 
 # ── v5 colour palette ────────────────────────────────────────────────
@@ -275,7 +292,7 @@ def _write_detail(ws_d, company, period, data, total_nums,
     ws_d.row_dimensions[2].height = 15
 
     back = ws_d.cell(row=2, column=7, value="←  Back to Summary")
-    back.hyperlink = "#'Summary'!A1"
+    _intra_link(back, "Summary", "A1")
     back.font = Font(name="Calibri", size=10, color=LINK_BLUE,
                       underline="single")
     back.alignment = Alignment(horizontal="right")
@@ -525,7 +542,7 @@ def _write_summary(ws_s, company, period, top_group_rows, total_r,
         if tg_name in top_group_rows:
             det_r = top_group_rows[tg_name]
             nm = ws_s.cell(row=sr, column=2, value=display)
-            nm.hyperlink = f"#'Detail'!A{det_r}"
+            _intra_link(nm, "Detail", f"A{det_r}")
             nm.font = Font(name="Calibri", size=11, color=LINK_BLUE,
                             underline="single")
             cd = ws_s.cell(
@@ -609,7 +626,7 @@ def _write_summary(ws_s, company, period, top_group_rows, total_r,
     sr += 3
     view_d = ws_s.cell(row=sr, column=2,
                         value="View full account-level detail  →")
-    view_d.hyperlink = "#'Detail'!A1"
+    _intra_link(view_d, "Detail", "A1")
     view_d.font = Font(name="Calibri", size=10, color=LINK_BLUE,
                         underline="single", italic=True)
     view_d.alignment = Alignment(horizontal="left", vertical="center")
