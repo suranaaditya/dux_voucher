@@ -238,73 +238,86 @@ def export_formatted_tb(filters):
     return {"file_url": file_doc.file_url, "file_name": file_doc.file_name}
 ```
 
-### 4.4 Client script
+### 4.4 Client script — `app_include_js` (revised from original plan)
 
-Two mechanisms exist; **use the Custom Script DocType approach** for upgrade
-safety:
+> **The original plan was wrong here**, and the verify step we built
+> into this section caught it. On Frappe 16.12 the `Client Script`
+> DocType's `view` field only accepts `List` or `Form` — not `Report`
+> — so attaching a Client Script to a query report isn't possible.
+> The replacement is `app_include_js`: ship a small JS bundle in
+> `public/js/`, register it in `hooks.py`, and let Frappe's bundler
+> serve it on every desk page. ERPNext itself uses this pattern for
+> cross-cutting JS, so we're not inventing anything.
+
+The button-installer JS lives at
+`dux_voucher/public/js/formatted_tb_button.bundle.js` and is wired in
+through `hooks.py`:
 
 ```python
-# dux_voucher/formatted_reports/trial_balance/client_script.py
-import frappe
-
-CLIENT_SCRIPT_NAME = "Trial Balance — Formatted Export Button"
-SCRIPT = """
-frappe.query_reports["Trial Balance"] = frappe.query_reports["Trial Balance"] || {};
-
-const _orig_onload = frappe.query_reports["Trial Balance"].onload;
-frappe.query_reports["Trial Balance"].onload = function (report) {
-    if (typeof _orig_onload === "function") _orig_onload.call(this, report);
-
-    report.page.add_inner_button(__("Download Formatted TB"), () => {
-        const filters = report.get_values();
-        frappe.call({
-            method: "dux_voucher.formatted_reports.trial_balance.api.export_formatted_tb",
-            args: { filters },
-            freeze: true,
-            freeze_message: __("Generating formatted Trial Balance..."),
-            callback: (r) => {
-                if (r.message && r.message.file_url) {
-                    window.open(r.message.file_url, "_blank");
-                }
-            },
-        });
-    }, __("Export"));
-};
-"""
-
-def ensure_custom_script():
-    """Idempotent — safe to run on every after_migrate."""
-    name = frappe.db.get_value(
-        "Client Script",
-        {"dt": "Trial Balance", "name": CLIENT_SCRIPT_NAME},
-        "name",
-    )
-    if name:
-        doc = frappe.get_doc("Client Script", name)
-        doc.script = SCRIPT
-        doc.enabled = 1
-        doc.save(ignore_permissions=True)
-    else:
-        frappe.get_doc({
-            "doctype": "Client Script",
-            "name": CLIENT_SCRIPT_NAME,
-            "dt": "Trial Balance",
-            "view": "Report",
-            "script": SCRIPT,
-            "enabled": 1,
-        }).insert(ignore_permissions=True)
-    frappe.db.commit()
+app_include_js = ["formatted_tb_button.bundle.js"]
 ```
 
-**Important**: Frappe's `Client Script` DocType for Reports requires `view`
-to be `"Report"`. Verify on dev server with:
+**Timing wrinkle.** `app_include_js` evaluates once at desk boot, but
+ERPNext's `trial_balance.js` loads lazily on first navigation into
+the report and runs:
+
+```js
+frappe.query_reports["Trial Balance"] = { onload: function() {...} };
+```
+
+— clobbering anything we set at boot. The naive "save the original,
+wrap it" pattern from the prior plan version doesn't survive that
+fresh assignment.
+
+**Solution: `Object.defineProperty` setter on the slot.** When ERPNext
+does its assignment, our setter wraps the incoming object's `onload`
+before storing it, so the framework's subsequent `onload()` call hits
+our wrapper. No timing sensitivity, no polling, survives navigating
+away/back, and any future ERPNext-side mutation goes through the
+setter too.
+
+Sketch (the real source — with the marker comment, button handler,
+and idempotency guards — lives in the bundle file):
+
+```js
+// dux_voucher:formatted-tb-button v1
+(function () {
+    if (window._dux_formatted_tb_v1) return;
+    window._dux_formatted_tb_v1 = true;
+    frappe.provide("frappe.query_reports");
+
+    var KEY = "Trial Balance";
+    var _stored = frappe.query_reports[KEY];
+
+    function wrap(tb) { /* wrap tb.onload to also call add_button(report) */ }
+    function add_button(report) { /* page.add_inner_button(...) */ }
+
+    if (_stored) wrap(_stored);
+    Object.defineProperty(frappe.query_reports, KEY, {
+        configurable: true, enumerable: true,
+        get: function () { return _stored; },
+        set: function (val) { _stored = wrap(val); },
+    });
+})();
+```
+
+The first comment line `// dux_voucher:formatted-tb-button v1` is the
+stable marker that the smoke test in §5.3 asserts on.
+
+**No `client_script.py`, no `after_install` / `after_migrate` hooks.**
+Button activation is a static-asset concern: it lands on the next
+`bench build --app dux_voucher` followed by a hard browser refresh.
+
+**Verify command** (kept here for the next iteration to re-check):
 
 ```bash
-bench --site erp.jewonline.in execute \
-  "frappe.get_meta('Client Script').get_field('view').options"
+bench --site erp.jewonline.in execute frappe.client.get_value \
+  --kwargs '{"doctype":"DocField","filters":{"parent":"Client Script","fieldname":"view"},"fieldname":["options","fieldtype"]}'
 ```
 
-Adjust if the DocType structure differs in 16.12.
+If a future Frappe version adds `Report` to that enum, the Client
+Script approach becomes viable again — but `app_include_js` is
+already simpler and lower-risk, so there's no reason to switch back.
 
 ### 4.5 Builder — adapt the reference implementation
 
@@ -393,10 +406,20 @@ After installation on `erp.jewonline.in`:
 
 Add `dux_voucher/formatted_reports/trial_balance/tests/test_smoke.py`
 that runs after every `bench update`:
+
 - Asserts ERPNext's `execute()` returns columns containing each of the
-  seven expected fieldnames.
-- Asserts the Client Script with our marker name still exists and is
-  enabled.
+  seven expected fieldnames (`account`, `opening_debit`,
+  `opening_credit`, `debit`, `credit`, `closing_debit`,
+  `closing_credit`).
+- Asserts `app_include_js` in `dux_voucher/hooks.py` still references
+  `formatted_tb_button.bundle.js`.
+- Asserts the **built** asset
+  (`/home/frappe/frappe-bench/sites/assets/dux_voucher/dist/js/formatted_tb_button.bundle.<hash>.js`,
+  resolve via Frappe's asset hash map) **contains the stable marker
+  string** `// dux_voucher:formatted-tb-button v1`. This catches the
+  case where the bundle ships stripped or the source file is silently
+  truncated — the user would otherwise see a missing button with no
+  obvious cause.
 
 ---
 

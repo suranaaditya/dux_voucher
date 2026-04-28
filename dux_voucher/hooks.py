@@ -42,6 +42,15 @@ permission_query_conditions = {
 has_permission = {
     "Inter-Company Transfer": "dux_voucher.dux_voucher.api.ic_transfer_api.ict_has_permission"
 }
+
+# Inject the "Download Formatted TB" button into the standard ERPNext
+# Trial Balance query report. The bundle file lives in public/js/ and
+# Frappe's asset bundler concatenates+minifies it on `bench build`.
+# See dux_voucher/formatted_reports/PLAN.md §4.4 for why we inject via
+# `app_include_js` rather than the originally planned Client Script
+# DocType (which doesn't accept "Report" view on Frappe 16.12).
+app_include_js = ["formatted_tb_button.bundle.js"]
+
 # Apps
 # ------------------
 
