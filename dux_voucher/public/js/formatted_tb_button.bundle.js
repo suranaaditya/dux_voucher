@@ -31,10 +31,14 @@
 (function () {
     "use strict";
 
-    // Idempotent guard — script could in theory load twice if hooks.py
-    // is misconfigured. Don't double-wrap.
-    if (window._dux_formatted_tb_v1) return;
-    window._dux_formatted_tb_v1 = true;
+    // Idempotent guard + smoke-test marker. The string value is what the
+    // PLAN.md §5.3 smoke test greps for in the *built* bundle — esbuild
+    // strips line comments on `bench build` (`legal-comments: none`),
+    // so the marker has to live in code, not in a comment, to survive.
+    // Using the version string itself doubles as the loaded-flag value.
+    var MARKER = "dux_voucher:formatted-tb-button v1";
+    if (window._dux_formatted_tb_loaded === MARKER) return;
+    window._dux_formatted_tb_loaded = MARKER;
 
     frappe.provide("frappe.query_reports");
 
