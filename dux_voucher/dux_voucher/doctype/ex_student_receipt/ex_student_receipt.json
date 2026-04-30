@@ -63,8 +63,7 @@
    "fieldtype": "Date",
    "in_list_view": 1,
    "label": "Posting Date",
-   "reqd": 1,
-   "read_only": 1
+   "reqd": 1
   },
   {
    "fieldname": "col_basic",
