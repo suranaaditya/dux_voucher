@@ -4,3 +4,4 @@
 
 [post_model_sync]
 # Patches added in this section will be executed after doctypes are migrated
+dux_voucher.dux_voucher.patches.v1_0.seed_backdating_rules
