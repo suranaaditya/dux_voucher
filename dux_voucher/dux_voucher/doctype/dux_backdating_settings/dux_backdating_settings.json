@@ -1,0 +1,90 @@
+{
+ "actions": [],
+ "creation": "2026-04-30 00:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "intro_html",
+  "enabled",
+  "enforce_for_amend",
+  "bypass_section",
+  "bypass_roles",
+  "rules_section",
+  "rules"
+ ],
+ "fields": [
+  {
+   "fieldname": "intro_html",
+   "fieldtype": "HTML",
+   "options": "<div style=\"padding:8px 0 4px;color:#475569;font-size:13px;line-height:1.55\">\nControls whether <em>backdated</em> and <em>forward-dated</em> postings are allowed on Payment Vouchers, Receipt Vouchers, Ex Student Receipts, Journal Entries, Purchase Orders, Purchase Receipts and Purchase Invoices &mdash; site-wide, across all companies. The <strong>master switch</strong> below disables enforcement entirely without losing your rules.\n</div>"
+  },
+  {
+   "default": "0",
+   "description": "Master switch. When unchecked, no posting-date checks run on any document. Use this to temporarily relax the policy without losing your rule rows.",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enforce Posting-Date Restrictions"
+  },
+  {
+   "default": "1",
+   "depends_on": "eval:doc.enabled",
+   "description": "When checked, the policy also runs on amendments of previously-submitted documents. Uncheck if amendments need to bypass the rule for back-office corrections.",
+   "fieldname": "enforce_for_amend",
+   "fieldtype": "Check",
+   "label": "Apply Policy to Amendments"
+  },
+  {
+   "depends_on": "eval:doc.enabled",
+   "fieldname": "bypass_section",
+   "fieldtype": "Section Break",
+   "label": "Global Bypass"
+  },
+  {
+   "description": "Users holding any of these roles bypass the policy entirely on every controlled DocType. Leave empty for no bypass.",
+   "fieldname": "bypass_roles",
+   "fieldtype": "Table MultiSelect",
+   "label": "Roles That Bypass This Policy",
+   "options": "Dux Backdating Bypass Role"
+  },
+  {
+   "depends_on": "eval:doc.enabled",
+   "fieldname": "rules_section",
+   "fieldtype": "Section Break",
+   "label": "Per-DocType Rules"
+  },
+  {
+   "description": "One rule per controlled DocType. The seven default rows are seeded automatically; you only need to flip the relevant flags and set the day caps.",
+   "fieldname": "rules",
+   "fieldtype": "Table",
+   "label": "Rules",
+   "options": "Dux Backdating Rule"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-04-30 00:00:00",
+ "modified_by": "Administrator",
+ "module": "Dux Voucher",
+ "name": "Dux Backdating Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

@@ -1,0 +1,76 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-04-30 00:00:00",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "target_doctype",
+  "allow_backdating",
+  "max_days_back",
+  "allow_forward_dating",
+  "max_days_forward"
+ ],
+ "fields": [
+  {
+   "columns": 3,
+   "description": "The DocType this rule applies to.",
+   "fieldname": "target_doctype",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "DocType",
+   "options": "\nPayment Voucher\nReceipt Voucher\nEx Student Receipt\nJournal Entry\nPurchase Order\nPurchase Receipt\nPurchase Invoice",
+   "reqd": 1
+  },
+  {
+   "columns": 1,
+   "default": "0",
+   "fieldname": "allow_backdating",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Allow Backdating"
+  },
+  {
+   "columns": 2,
+   "default": "0",
+   "depends_on": "eval:doc.allow_backdating",
+   "description": "Maximum days in the past a posting date can be when backdating is allowed. 0 means today only.",
+   "fieldname": "max_days_back",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Max Days Back"
+  },
+  {
+   "columns": 1,
+   "default": "0",
+   "fieldname": "allow_forward_dating",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Allow Forward Dating"
+  },
+  {
+   "columns": 2,
+   "default": "0",
+   "depends_on": "eval:doc.allow_forward_dating",
+   "description": "Maximum days into the future a posting date can be when forward dating is allowed. 0 means today only.",
+   "fieldname": "max_days_forward",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Max Days Forward"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-04-30 00:00:00",
+ "modified_by": "Administrator",
+ "module": "Dux Voucher",
+ "name": "Dux Backdating Rule",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}
