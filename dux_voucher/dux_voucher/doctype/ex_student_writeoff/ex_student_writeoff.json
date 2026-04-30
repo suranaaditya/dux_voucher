@@ -60,7 +60,6 @@
    "fieldtype": "Date",
    "in_list_view": 1,
    "label": "Posting Date",
-   "read_only": 1,
    "reqd": 1
   },
   {
