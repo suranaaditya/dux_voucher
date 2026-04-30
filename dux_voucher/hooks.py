@@ -25,14 +25,24 @@ fixtures = [
         ]
     },
 ]
-# Cancel cascade from backend entries to parent voucher
+# Cancel cascade from backend entries to parent voucher;
+# posting-date enforcement on the seven controlled doctypes (handler is
+# a no-op when Dux Backdating Settings.enabled = 0).
+_BACKDATING = "dux_voucher.dux_voucher.api.backdating.enforce"
 doc_events = {
     "Payment Entry": {
         "on_cancel": "dux_voucher.dux_voucher.utils.on_payment_entry_cancel"
     },
     "Journal Entry": {
-        "on_cancel": "dux_voucher.dux_voucher.utils.on_journal_entry_cancel"
-    }
+        "on_cancel": "dux_voucher.dux_voucher.utils.on_journal_entry_cancel",
+        "validate":  _BACKDATING,
+    },
+    "Payment Voucher":    {"validate": _BACKDATING},
+    "Receipt Voucher":    {"validate": _BACKDATING},
+    "Ex Student Receipt": {"validate": _BACKDATING},
+    "Purchase Order":     {"validate": _BACKDATING},
+    "Purchase Receipt":   {"validate": _BACKDATING},
+    "Purchase Invoice":   {"validate": _BACKDATING},
 }
 
 permission_query_conditions = {
