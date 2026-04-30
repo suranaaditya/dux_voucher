@@ -119,6 +119,25 @@ class TestBackdating(unittest.TestCase):
 
 
 # =====================================================================
+# Unlimited semantics — max_days_* == 0 means "no upper bound"
+# =====================================================================
+
+class TestUnlimited(unittest.TestCase):
+
+    def test_backdate_with_zero_max_allows_far_past(self):
+        # allow_backdating=1, max_days_back=0 → any past date passes.
+        s = _settings(rules=[_rule(allow_backdating=1, max_days_back=0)])
+        backdating._check(
+            _doc(posting_date=date(1999, 1, 1)), s, TODAY)
+
+    def test_forward_with_zero_max_allows_far_future(self):
+        s = _settings(rules=[_rule(allow_forward_dating=1,
+                                     max_days_forward=0)])
+        backdating._check(
+            _doc(posting_date=date(2099, 1, 1)), s, TODAY)
+
+
+# =====================================================================
 # Forward-dating boundaries
 # =====================================================================
 

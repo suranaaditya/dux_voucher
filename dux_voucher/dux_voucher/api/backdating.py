@@ -82,12 +82,15 @@ def _check(doc, settings, today):
                   "Today is {1}; the posting date must not be earlier.")
                 .format(doc.doctype, today.isoformat())
             )
-        if days_back > (rule.max_days_back or 0):
+        limit_back = rule.max_days_back or 0
+        # `limit_back == 0` is interpreted as "unlimited" — any past
+        # date is acceptable as long as backdating itself is allowed.
+        if limit_back and days_back > limit_back:
             frappe.throw(
                 _("Backdated {0} entries are limited to {1} day(s) in "
                   "the past. The posting date {2} is {3} day(s) ago.")
                 .format(
-                    doc.doctype, rule.max_days_back or 0,
+                    doc.doctype, limit_back,
                     posting.isoformat(), days_back,
                 )
             )
@@ -100,12 +103,14 @@ def _check(doc, settings, today):
                   "Today is {1}; the posting date must not be later.")
                 .format(doc.doctype, today.isoformat())
             )
-        if days_forward > (rule.max_days_forward or 0):
+        limit_forward = rule.max_days_forward or 0
+        # `limit_forward == 0` is "unlimited" (mirrors the back side).
+        if limit_forward and days_forward > limit_forward:
             frappe.throw(
                 _("Forward-dated {0} entries are limited to {1} day(s) "
                   "in the future. The posting date {2} is {3} day(s) "
                   "ahead.").format(
-                    doc.doctype, rule.max_days_forward or 0,
+                    doc.doctype, limit_forward,
                     posting.isoformat(), days_forward,
                 )
             )
