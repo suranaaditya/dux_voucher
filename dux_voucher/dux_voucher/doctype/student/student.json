@@ -1,0 +1,157 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "naming_series:",
+ "creation": "2026-05-01 00:00:00",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "student_name",
+  "father_name",
+  "course",
+  "company",
+  "col_break_identity",
+  "mobile",
+  "email",
+  "is_disabled",
+  "display_section",
+  "student_display"
+ ],
+ "fields": [
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "no_copy": 1,
+   "options": "STU-.####.",
+   "set_only_once": 1
+  },
+  {
+   "bold": 1,
+   "fieldname": "student_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Student Name",
+   "reqd": 1
+  },
+  {
+   "description": "Used together with course to dedup students. A name + father + course triple must be unique.",
+   "fieldname": "father_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Father's Name",
+   "reqd": 1
+  },
+  {
+   "fieldname": "course",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Course",
+   "options": "Course",
+   "reqd": 1
+  },
+  {
+   "description": "Auto-filled from the chosen Course.",
+   "fetch_from": "course.company",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_identity",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "mobile",
+   "fieldtype": "Data",
+   "label": "Mobile",
+   "options": "Phone"
+  },
+  {
+   "fieldname": "email",
+   "fieldtype": "Data",
+   "label": "Email",
+   "options": "Email"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_disabled",
+   "fieldtype": "Check",
+   "label": "Disabled"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "display_section",
+   "fieldtype": "Section Break",
+   "label": "Display"
+  },
+  {
+   "description": "Auto-computed from Student Name, Father's Name and Course. Used as the title in dropdowns and link previews so users see the disambiguating info instead of the bare STU-#### id.",
+   "fieldname": "student_display",
+   "fieldtype": "Data",
+   "label": "Display Title",
+   "no_copy": 1,
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-05-01 00:00:00",
+ "modified_by": "Administrator",
+ "module": "Dux Voucher",
+ "name": "Student",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts User",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "search_fields": "student_name,father_name,course",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "student_display",
+ "track_changes": 1
+}
