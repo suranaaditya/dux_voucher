@@ -76,11 +76,20 @@ frappe.ui.form.on("Student Fee Receipt", {
     student(frm) {
         // Switching student likely changes course → wipe stale head
         // rows so amounts entered for the old student's course don't
-        // silently fail validation later.
+        // silently fail validation later. Also force a refresh on the
+        // heads field so the set_query closure re-evaluates with the
+        // newly fetched frm.doc.course value (especially important
+        // after inline-create, where fetch_from races with user
+        // clicking 'Add Row').
         if (frm.doc.heads && frm.doc.heads.length) {
             frm.clear_table("heads");
-            frm.refresh_field("heads");
         }
+        frm.refresh_field("heads");
+
+        // Inline-create takes a path that doesn't go through the
+        // refresh event, so re-default admission_year here too if it's
+        // still blank.
+        _default_admission_year(frm);
     },
 
     mode_of_payment(frm) {
@@ -131,21 +140,30 @@ function _refresh_mop_account_type(frm) {
  * Default `admission_year` on a fresh new form. The controller's
  * `before_insert` does the same defaulting on save, but that's too
  * late for the UI — the operator opens the form and sees an empty
- * required field. Calling the same whitelisted helper from JS
- * keeps the FY math (Apr-Mar Indian fiscal year) in one place.
+ * required field.
+ *
+ * Computed sync in JS (rather than via frappe.call) so there is no
+ * race with form-render events such as inline-create completion: the
+ * default is set immediately on every triggering event without an
+ * AJAX round-trip that could lose to a user click.
  */
 function _default_admission_year(frm) {
     if (!frm.is_new() || frm.doc.admission_year) return;
-    frappe.call({
-        method: "dux_voucher.dux_voucher.doctype.student_fee_receipt." +
-                 "student_fee_receipt.current_admission_year",
-        args: { today: frm.doc.posting_date },
-        callback: (r) => {
-            // Re-check the field is still blank — user may have typed
-            // something while the AJAX was in flight.
-            if (r && r.message && !frm.doc.admission_year) {
-                frm.set_value("admission_year", r.message);
-            }
-        },
-    });
+    frm.set_value("admission_year", _compute_indian_fy(frm.doc.posting_date));
+}
+
+/**
+ * Indian fiscal year (Apr-Mar) for a given date string in 'FY YYYY-YY'
+ * format. Mirrors the Python helper
+ * ``dux_voucher.dux_voucher.doctype.student_fee_receipt.student_fee_receipt.current_admission_year``
+ * — keep these two in sync if the format ever changes.
+ */
+function _compute_indian_fy(date_str) {
+    const dt = date_str ? new Date(date_str) : new Date();
+    if (isNaN(dt.getTime())) return "";
+    const year = dt.getFullYear();
+    const month = dt.getMonth() + 1;        // 1-12
+    const start = month >= 4 ? year : year - 1;
+    const end_yy = String((start + 1) % 100).padStart(2, "0");
+    return `FY ${start}-${end_yy}`;
 }
