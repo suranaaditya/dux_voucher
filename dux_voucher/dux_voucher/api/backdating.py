@@ -14,13 +14,6 @@ from frappe import _
 from frappe.utils import getdate
 
 
-# Different ERPNext doctypes use different fieldnames for the posting
-# date. Anything not listed falls back to ``posting_date``.
-DATE_FIELDS = {
-    "Purchase Order": "transaction_date",
-}
-
-
 # =====================================================================
 # Public entry point
 # =====================================================================
@@ -67,7 +60,11 @@ def _check(doc, settings, today):
     if not rule:
         return
 
-    date_field = DATE_FIELDS.get(doc.doctype, "posting_date")
+    # Per-rule override; blank falls back to the standard fieldname.
+    # See `Dux Backdating Settings.DEFAULT_DATE_FIELDS` for the seed
+    # values; users can change them on the Settings page without any
+    # code change.
+    date_field = (rule.date_field or "").strip() or "posting_date"
     posting_raw = doc.get(date_field)
     if not posting_raw:
         # Let upstream "required" validation handle missing dates.

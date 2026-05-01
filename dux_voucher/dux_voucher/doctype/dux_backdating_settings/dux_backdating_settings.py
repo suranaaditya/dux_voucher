@@ -29,6 +29,32 @@ SUPPORTED_DOCTYPES = (
     "Purchase Invoice",
 )
 
+# Per-DocType posting-date fieldname overrides. The handler treats a
+# blank ``date_field`` as ``posting_date``, so only DocTypes that use
+# a non-standard fieldname need an entry here. Adding a new override
+# in the future is a single line in this map plus an optional backfill
+# patch — no handler change needed.
+DEFAULT_DATE_FIELDS = {
+    "Purchase Order": "transaction_date",
+}
+
+
+def default_rule(target_doctype):
+    """Return the dict of default values for a freshly-seeded rule.
+
+    Used by both the install patch and the controller's seeding safety
+    net so that the two paths can never drift on what counts as a
+    "default rule".
+    """
+    return {
+        "target_doctype":       target_doctype,
+        "allow_backdating":     0,
+        "max_days_back":        0,
+        "allow_forward_dating": 0,
+        "max_days_forward":     0,
+        "date_field":           DEFAULT_DATE_FIELDS.get(target_doctype, ""),
+    }
+
 
 class DuxBackdatingSettings(Document):
 
@@ -41,13 +67,7 @@ class DuxBackdatingSettings(Document):
                      if r.target_doctype}
         for dt in SUPPORTED_DOCTYPES:
             if dt not in existing:
-                self.append("rules", {
-                    "target_doctype":       dt,
-                    "allow_backdating":     0,
-                    "max_days_back":        0,
-                    "allow_forward_dating": 0,
-                    "max_days_forward":     0,
-                })
+                self.append("rules", default_rule(dt))
 
     def _reject_duplicate_rules(self):
         seen = set()

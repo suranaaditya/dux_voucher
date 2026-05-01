@@ -33,13 +33,15 @@ def _settings(enabled=1, enforce_for_amend=1, bypass_roles=None, rules=None):
 
 def _rule(target_doctype="Payment Voucher",
            allow_backdating=0, max_days_back=0,
-           allow_forward_dating=0, max_days_forward=0):
+           allow_forward_dating=0, max_days_forward=0,
+           date_field=""):
     return {
         "target_doctype":       target_doctype,
         "allow_backdating":     allow_backdating,
         "max_days_back":        max_days_back,
         "allow_forward_dating": allow_forward_dating,
         "max_days_forward":     max_days_forward,
+        "date_field":           date_field,
     }
 
 
@@ -207,14 +209,16 @@ class TestAmendment(unittest.TestCase):
 
 
 # =====================================================================
-# Date-field map (Purchase Order uses transaction_date)
+# Per-rule date-field override (replaces the prior hardcoded map)
 # =====================================================================
 
-class TestDateFieldMap(unittest.TestCase):
+class TestDateFieldOverride(unittest.TestCase):
 
     def test_purchase_order_uses_transaction_date(self):
+        # The rule row carries the override now; no hardcoded map.
         s = _settings(rules=[_rule(target_doctype="Purchase Order",
-                                     allow_backdating=0)])
+                                     allow_backdating=0,
+                                     date_field="transaction_date")])
         doc = _doc(doctype="Purchase Order",
                     posting_date=None,
                     transaction_date=date(2020, 1, 1))
@@ -222,14 +226,42 @@ class TestDateFieldMap(unittest.TestCase):
             backdating._check(doc, s, TODAY)
 
     def test_purchase_order_ignores_posting_date_field(self):
-        # Defensive: even if a stale posting_date is set on a PO, it's
-        # not the field we look up. Today's transaction_date → silent.
+        # Defensive: stale posting_date on a PO is not the field we
+        # look up — the rule says transaction_date.
         s = _settings(rules=[_rule(target_doctype="Purchase Order",
-                                     allow_backdating=0)])
+                                     allow_backdating=0,
+                                     date_field="transaction_date")])
         doc = _doc(doctype="Purchase Order",
                     posting_date=date(2020, 1, 1),
                     transaction_date=TODAY)
         backdating._check(doc, s, TODAY)
+
+    def test_blank_date_field_falls_back_to_posting_date(self):
+        # No date_field on the rule → handler defaults to posting_date.
+        s = _settings(rules=[_rule(allow_backdating=0, date_field="")])
+        with self.assertRaises(frappe.ValidationError):
+            backdating._check(
+                _doc(posting_date=date(2020, 1, 1)), s, TODAY)
+
+    def test_arbitrary_custom_date_field(self):
+        # Future doctypes can declare any fieldname they like; the
+        # handler reads it via doc.get without code changes.
+        s = _settings(rules=[_rule(target_doctype="Future DocType",
+                                     allow_backdating=0,
+                                     date_field="effective_from")])
+        doc = _doc(doctype="Future DocType",
+                    effective_from=date(2020, 1, 1))
+        with self.assertRaises(frappe.ValidationError):
+            backdating._check(doc, s, TODAY)
+
+    def test_unknown_date_field_silently_skipped(self):
+        # If the rule names a field that doesn't exist on the doc,
+        # doc.get returns None → handler returns silently. This is
+        # intentional: a typo on the Settings page mustn't break saves.
+        s = _settings(rules=[_rule(allow_backdating=0,
+                                     date_field="nonexistent_field")])
+        backdating._check(
+            _doc(posting_date=date(2020, 1, 1)), s, TODAY)
 
 
 # =====================================================================

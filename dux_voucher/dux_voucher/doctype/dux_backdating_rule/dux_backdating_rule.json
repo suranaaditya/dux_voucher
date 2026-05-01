@@ -10,7 +10,8 @@
   "allow_backdating",
   "max_days_back",
   "allow_forward_dating",
-  "max_days_forward"
+  "max_days_forward",
+  "date_field"
  ],
  "fields": [
   {
@@ -58,6 +59,12 @@
    "fieldtype": "Int",
    "in_list_view": 1,
    "label": "Max Days Forward"
+  },
+  {
+   "description": "Document field that holds the posting date. Leave blank to use 'posting_date' (the default for most DocTypes). Set to 'transaction_date' for Purchase Order, or any other custom field name when a future controlled DocType uses a non-standard fieldname. Non-existent or unset fields are silently skipped at validate time, so a wrong value here can't break document saves — it just means the rule won't fire on that DocType.",
+   "fieldname": "date_field",
+   "fieldtype": "Data",
+   "label": "Date Field (override)"
   }
  ],
  "index_web_pages_for_search": 1,

@@ -14,6 +14,7 @@ import frappe
 
 from dux_voucher.dux_voucher.doctype.dux_backdating_settings.dux_backdating_settings import (
     SUPPORTED_DOCTYPES,
+    default_rule,
 )
 
 
@@ -24,13 +25,7 @@ def execute():
     added = 0
     for dt in SUPPORTED_DOCTYPES:
         if dt not in existing:
-            settings.append("rules", {
-                "target_doctype":       dt,
-                "allow_backdating":     0,
-                "max_days_back":        0,
-                "allow_forward_dating": 0,
-                "max_days_forward":     0,
-            })
+            settings.append("rules", default_rule(dt))
             added += 1
     if added:
         settings.flags.ignore_permissions = True
