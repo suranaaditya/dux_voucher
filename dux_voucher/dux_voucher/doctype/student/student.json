@@ -38,7 +38,7 @@
    "reqd": 1
   },
   {
-   "description": "Used together with course to dedup students. A name + father + course triple must be unique.",
+   "description": "Used together with course and company to dedup students. The (name + father + course + company) tuple must be unique — same person can however register at two different institutions.",
    "fieldname": "father_name",
    "fieldtype": "Data",
    "in_list_view": 1,
@@ -55,21 +55,21 @@
    "reqd": 1
   },
   {
-   "description": "Auto-filled from the chosen Course.",
-   "fetch_from": "course.company",
+   "description": "Institution where the student is enrolled. Course is global; company belongs to the enrolment.",
    "fieldname": "company",
    "fieldtype": "Link",
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Company",
    "options": "Company",
-   "read_only": 1
+   "reqd": 1
   },
   {
    "fieldname": "col_break_identity",
    "fieldtype": "Column Break"
   },
   {
+   "description": "10-digit Indian mobile number starting with 6, 7, 8 or 9. +91 prefix is optional and stripped on save.",
    "fieldname": "mobile",
    "fieldtype": "Data",
    "label": "Mobile",

@@ -1,49 +1,27 @@
 {
  "actions": [],
  "allow_rename": 1,
- "autoname": "naming_series:",
+ "autoname": "field:course_name",
  "creation": "2026-05-01 00:00:00",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
-  "naming_series",
   "course_name",
-  "company",
-  "col_break_basic",
-  "is_disabled"
+  "is_disabled",
+  "description"
  ],
  "fields": [
   {
-   "fieldname": "naming_series",
-   "fieldtype": "Select",
-   "label": "Series",
-   "no_copy": 1,
-   "options": "CRS-.####.",
-   "set_only_once": 1
-  },
-  {
    "bold": 1,
-   "description": "Display name of the course (e.g. 'MBA', 'BCom', 'BBA').",
+   "description": "Display name of the course (e.g. 'MBA', 'BCom', 'BBA'). The course is global — the same course can be offered by multiple companies and shares its fee head list across all of them.",
    "fieldname": "course_name",
    "fieldtype": "Data",
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Course Name",
-   "reqd": 1
-  },
-  {
-   "fieldname": "company",
-   "fieldtype": "Link",
-   "in_list_view": 1,
-   "in_standard_filter": 1,
-   "label": "Company",
-   "options": "Company",
-   "reqd": 1
-  },
-  {
-   "fieldname": "col_break_basic",
-   "fieldtype": "Column Break"
+   "reqd": 1,
+   "unique": 1
   },
   {
    "default": "0",
@@ -52,6 +30,11 @@
    "fieldtype": "Check",
    "in_list_view": 1,
    "label": "Disabled"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description"
   }
  ],
  "index_web_pages_for_search": 1,
@@ -103,6 +86,5 @@
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": [],
- "title_field": "course_name",
  "track_changes": 1
 }

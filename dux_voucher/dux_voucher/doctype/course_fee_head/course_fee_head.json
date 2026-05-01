@@ -10,7 +10,6 @@
   "naming_series",
   "head_name",
   "course",
-  "company",
   "col_break_basic",
   "is_disabled",
   "description"
@@ -42,18 +41,6 @@
    "label": "Course",
    "options": "Course",
    "reqd": 1
-  },
-  {
-   "description": "Auto-filled from the chosen Course. Denormalised onto the row so list-view filtering by company is one query, not a join.",
-   "fetch_from": "course.company",
-   "fetch_if_empty": 0,
-   "fieldname": "company",
-   "fieldtype": "Link",
-   "in_list_view": 1,
-   "in_standard_filter": 1,
-   "label": "Company",
-   "options": "Company",
-   "read_only": 1
   },
   {
    "fieldname": "col_break_basic",

@@ -5,9 +5,10 @@ presentation concept on the receipt — accounting only ever credits the
 single 'Admission Fee / Registration' liability account regardless of
 which heads were used to itemise the receipt.
 
-Heads are scoped to a course (and transitively to a company) so the
-receipt's head picker can be filtered tightly: an MBA student doesn't
-see 'Lab Fee' if the MBA course doesn't have it.
+Heads attach to a Course (which is itself global, not company-scoped),
+so the same head list applies regardless of which company is collecting
+the fees. The receipt's head picker filters by the student's course so
+an MBA student doesn't see 'Lab Fee' if the MBA course doesn't have it.
 """
 
 import frappe

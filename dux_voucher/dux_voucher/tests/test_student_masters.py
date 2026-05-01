@@ -1,8 +1,8 @@
 """Unit tests for the three new admission-fee master doctypes:
 
-* :class:`Course`
-* :class:`Course Fee Head`
-* :class:`Student`
+* :class:`Course`             — global, autoname = course_name
+* :class:`Course Fee Head`    — attaches to a course; CFH-#### autoname
+* :class:`Student`            — STU-#### autoname; dedup via validate
 
 The tests run inside Frappe's test harness so they hit the real DB
 rather than mocking it — masters are cheap to insert and clean up,
@@ -19,26 +19,24 @@ import unittest
 import frappe
 
 
-# A local marker so the tearDown sweep only deletes records this
-# module created, never anything pre-existing on the test site.
+# Local marker so the tearDown sweep only deletes records this module
+# created, never anything pre-existing on the test site.
 TEST_PREFIX = "PYTEST_"
 
 
 def _company():
-    """Return the first non-group company on the site. Tests need
-    a real Company because Course.company is a hard Link constraint
+    """Return the first non-group company on the site. Tests need a
+    real Company because Student.company is a hard Link constraint
     and we can't mock the FK relationship cheaply."""
     return frappe.get_all(
-        "Company", filters={"is_group": 0}, fields=["name"],
-        limit_page_length=1,
+        "Company", filters={"is_group": 0}, fields=["name"], limit=1,
     )[0].name
 
 
-def _make_course(course_name, company=None):
+def _make_course(course_name):
     return frappe.get_doc({
         "doctype":     "Course",
         "course_name": TEST_PREFIX + course_name,
-        "company":     company or _company(),
     }).insert(ignore_permissions=True)
 
 
@@ -50,42 +48,41 @@ def _make_head(head_name, course):
     }).insert(ignore_permissions=True)
 
 
-def _make_student(student_name, father_name, course):
-    return frappe.get_doc({
+def _make_student(student_name, father_name, course, company=None,
+                   mobile=None):
+    doc = {
         "doctype":      "Student",
         "student_name": TEST_PREFIX + student_name,
         "father_name":  TEST_PREFIX + father_name,
         "course":       course.name,
-    }).insert(ignore_permissions=True)
+        "company":      company or _company(),
+    }
+    if mobile is not None:
+        doc["mobile"] = mobile
+    return frappe.get_doc(doc).insert(ignore_permissions=True)
 
 
 def _cleanup():
     """Best-effort sweep of any test-prefixed records left behind."""
-    # Delete in dependency order: Student → Course Fee Head → Course
     for dt, field in [
         ("Student",          "student_name"),
         ("Course Fee Head",  "head_name"),
         ("Course",           "course_name"),
     ]:
         for r in frappe.get_all(
-            dt,
-            filters={field: ["like", TEST_PREFIX + "%"]},
+            dt, filters={field: ["like", TEST_PREFIX + "%"]},
             fields=["name"],
         ):
             try:
                 frappe.delete_doc(dt, r.name, ignore_permissions=True,
                                     force=1)
             except Exception:
-                # If delete fails (e.g. linked from a real record) we
-                # don't want one stale row to break subsequent tests.
-                # Frappe's test harness rolls back the transaction
-                # anyway so this is mostly belt-and-braces.
                 pass
     frappe.db.commit()
 
 
 # =====================================================================
-# Course
+# Course (global, autoname = course_name)
 # =====================================================================
 
 class TestCourse(unittest.TestCase):
@@ -96,29 +93,23 @@ class TestCourse(unittest.TestCase):
     def tearDown(self):
         _cleanup()
 
-    def test_course_can_be_created(self):
+    def test_course_autonames_to_course_name(self):
         c = _make_course("MBA")
-        self.assertTrue(c.name.startswith("CRS-"))
-        self.assertEqual(c.course_name, TEST_PREFIX + "MBA")
+        # name == course_name (autoname is field:course_name)
+        self.assertEqual(c.name, c.course_name)
+        self.assertEqual(c.name, TEST_PREFIX + "MBA")
 
-    def test_duplicate_course_name_in_same_company_rejected(self):
+    def test_duplicate_course_name_rejected(self):
         _make_course("MBA")
-        with self.assertRaises(frappe.ValidationError) as ctx:
+        # Frappe raises DuplicateEntryError (subclass of ValidationError-ish)
+        # when the unique-flagged primary key collides.
+        with self.assertRaises(Exception) as ctx:
             _make_course("MBA")
-        self.assertIn("already exists", str(ctx.exception))
-
-    def test_same_course_name_in_different_company_allowed(self):
-        # If the site has only one company, this case is degenerate;
-        # skip rather than fail to keep the test resilient.
-        companies = frappe.get_all(
-            "Company", filters={"is_group": 0}, fields=["name"],
-            limit_page_length=2,
-        )
-        if len(companies) < 2:
-            self.skipTest("site has fewer than 2 companies")
-        _make_course("MBA", company=companies[0].name)
-        # Same course_name, different company → allowed
-        _make_course("MBA", company=companies[1].name)
+        # Either DuplicateEntryError or ValidationError text — both
+        # surface "already exists" or "Duplicate name" in the message.
+        msg = str(ctx.exception)
+        self.assertTrue("exist" in msg.lower() or "duplicate" in msg.lower(),
+                          f"unexpected message: {msg!r}")
 
 
 # =====================================================================
@@ -137,8 +128,7 @@ class TestCourseFeeHead(unittest.TestCase):
     def test_head_can_be_created(self):
         h = _make_head("Tuition", self.course)
         self.assertTrue(h.name.startswith("CFH-"))
-        # company must auto-fetch from the course
-        self.assertEqual(h.company, self.course.company)
+        self.assertEqual(h.course, self.course.name)
 
     def test_duplicate_head_in_same_course_rejected(self):
         _make_head("Tuition", self.course)
@@ -149,8 +139,6 @@ class TestCourseFeeHead(unittest.TestCase):
     def test_same_head_name_in_different_course_allowed(self):
         bcom = _make_course("BCom")
         _make_head("Tuition", self.course)
-        # Same head name on a different course → fine; both courses
-        # legitimately have a 'Tuition' fee head.
         h = _make_head("Tuition", bcom)
         self.assertEqual(h.course, bcom.name)
 
@@ -173,42 +161,92 @@ class TestStudent(unittest.TestCase):
         s = _make_student("Aditya", "Mahesh", self.course_mba)
         self.assertTrue(s.name.startswith("STU-"))
         # Display title composed at validate-time
-        self.assertIn("Aditya",  s.student_display)
-        self.assertIn("Mahesh",  s.student_display)
+        self.assertIn("Aditya",          s.student_display)
+        self.assertIn("Mahesh",          s.student_display)
         self.assertIn(self.course_mba.name, s.student_display)
-        # company auto-fetched from course
-        self.assertEqual(s.company, self.course_mba.company)
 
-    def test_duplicate_student_same_name_father_course_rejected(self):
+    def test_duplicate_student_same_quad_rejected(self):
+        # Same (name, father, course, company) tuple → throws
         _make_student("Aditya", "Mahesh", self.course_mba)
         with self.assertRaises(frappe.ValidationError) as ctx:
             _make_student("Aditya", "Mahesh", self.course_mba)
-        # Error message should mention the existing student so the
-        # counter operator knows where the conflict is, not just that
-        # one exists.
-        msg = str(ctx.exception)
-        self.assertIn("already exists", msg)
+        self.assertIn("already exists", str(ctx.exception))
 
     def test_same_student_different_course_allowed(self):
         _make_student("Aditya", "Mahesh", self.course_mba)
-        # Same person enrolling in a second course → ok, separate row.
         s2 = _make_student("Aditya", "Mahesh", self.course_bcom)
         self.assertEqual(s2.course, self.course_bcom.name)
 
+    def test_same_student_different_company_allowed(self):
+        # Same person enrolling at two institutions → both accepted.
+        # Skip if the site doesn't have two companies.
+        companies = frappe.get_all(
+            "Company", filters={"is_group": 0}, fields=["name"], limit=2,
+        )
+        if len(companies) < 2:
+            self.skipTest("site has fewer than 2 companies")
+        _make_student("Aditya", "Mahesh", self.course_mba,
+                       company=companies[0].name)
+        s2 = _make_student("Aditya", "Mahesh", self.course_mba,
+                            company=companies[1].name)
+        self.assertEqual(s2.company, companies[1].name)
+
     def test_same_name_different_father_allowed(self):
-        # Two unrelated students who share a first name but have
-        # different fathers must both be accepted.
         _make_student("Aditya", "Mahesh", self.course_mba)
         s2 = _make_student("Aditya", "Suresh", self.course_mba)
         self.assertEqual(s2.father_name, TEST_PREFIX + "Suresh")
 
     def test_display_recomputes_on_save(self):
         s = _make_student("Aditya", "Mahesh", self.course_mba)
-        old_display = s.student_display
+        old = s.student_display
         s.father_name = TEST_PREFIX + "Mahesh Kumar"
         s.save(ignore_permissions=True)
-        self.assertNotEqual(s.student_display, old_display)
+        self.assertNotEqual(s.student_display, old)
         self.assertIn("Mahesh Kumar", s.student_display)
+
+    # ── Mobile validation ────────────────────────────────────────────
+
+    def test_mobile_valid_10_digit(self):
+        s = _make_student("Aditya", "Mahesh", self.course_mba,
+                           mobile="9876543210")
+        self.assertEqual(s.mobile, "9876543210")
+
+    def test_mobile_with_plus_91_prefix_normalised(self):
+        s = _make_student("Aditya", "Mahesh", self.course_mba,
+                           mobile="+91 9876543210")
+        self.assertEqual(s.mobile, "9876543210")
+
+    def test_mobile_with_91_prefix_normalised(self):
+        s = _make_student("Aditya", "Mahesh", self.course_mba,
+                           mobile="919876543210")
+        self.assertEqual(s.mobile, "9876543210")
+
+    def test_mobile_with_dashes_and_spaces_normalised(self):
+        s = _make_student("Aditya", "Mahesh", self.course_mba,
+                           mobile="98765-43210")
+        self.assertEqual(s.mobile, "9876543210")
+
+    def test_mobile_starting_with_5_rejected(self):
+        # Indian mobiles start with 6/7/8/9. 5xx would be a landline
+        # short code, not a mobile.
+        with self.assertRaises(frappe.ValidationError):
+            _make_student("Aditya", "Mahesh", self.course_mba,
+                           mobile="5876543210")
+
+    def test_mobile_too_short_rejected(self):
+        with self.assertRaises(frappe.ValidationError):
+            _make_student("Aditya", "Mahesh", self.course_mba,
+                           mobile="987654321")
+
+    def test_mobile_too_long_rejected(self):
+        with self.assertRaises(frappe.ValidationError):
+            _make_student("Aditya", "Mahesh", self.course_mba,
+                           mobile="98765432101")
+
+    def test_mobile_optional(self):
+        # Empty mobile is allowed — it's an optional field.
+        s = _make_student("Aditya", "Mahesh", self.course_mba)
+        self.assertFalse(s.mobile)
 
 
 if __name__ == "__main__":
