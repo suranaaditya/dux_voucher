@@ -70,6 +70,7 @@ frappe.ui.form.on("Student Fee Receipt", {
 
     refresh(frm) {
         _refresh_mop_account_type(frm);
+        _default_admission_year(frm);
     },
 
     student(frm) {
@@ -122,5 +123,29 @@ function _refresh_mop_account_type(frm) {
         "type"
     ).then((r) => {
         frm._mop_account_type = (r && r.message && r.message.type) || null;
+    });
+}
+
+
+/**
+ * Default `admission_year` on a fresh new form. The controller's
+ * `before_insert` does the same defaulting on save, but that's too
+ * late for the UI — the operator opens the form and sees an empty
+ * required field. Calling the same whitelisted helper from JS
+ * keeps the FY math (Apr-Mar Indian fiscal year) in one place.
+ */
+function _default_admission_year(frm) {
+    if (!frm.is_new() || frm.doc.admission_year) return;
+    frappe.call({
+        method: "dux_voucher.dux_voucher.doctype.student_fee_receipt." +
+                 "student_fee_receipt.current_admission_year",
+        args: { today: frm.doc.posting_date },
+        callback: (r) => {
+            // Re-check the field is still blank — user may have typed
+            // something while the AJAX was in flight.
+            if (r && r.message && !frm.doc.admission_year) {
+                frm.set_value("admission_year", r.message);
+            }
+        },
     });
 }
