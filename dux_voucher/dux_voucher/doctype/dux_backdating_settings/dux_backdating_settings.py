@@ -23,6 +23,7 @@ SUPPORTED_DOCTYPES = (
     "Payment Voucher",
     "Receipt Voucher",
     "Ex Student Receipt",
+    "Student Fee Receipt",
     "Journal Entry",
     "Purchase Order",
     "Purchase Receipt",

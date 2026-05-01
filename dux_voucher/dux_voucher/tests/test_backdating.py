@@ -316,5 +316,32 @@ class TestEnforceShortCircuits(unittest.TestCase):
             backdating.enforce(doc)
 
 
+# =====================================================================
+# Per-DocType wiring smoke
+# =====================================================================
+
+class TestStudentFeeReceiptCovered(unittest.TestCase):
+    """Sanity that the new (8th) supported DocType is reached by the
+    same enforcement logic as the rest. This isn't a separate
+    code-path — the handler is generic over rule.target_doctype — but
+    asserts that the eighth doctype name is recognised once it has a
+    rule row."""
+
+    def test_student_fee_receipt_backdating_blocks_when_disallowed(self):
+        s = _settings(rules=[_rule(target_doctype="Student Fee Receipt",
+                                     allow_backdating=0)])
+        doc = _doc(doctype="Student Fee Receipt",
+                    posting_date=date(2020, 1, 1))
+        with self.assertRaises(frappe.ValidationError):
+            backdating._check(doc, s, TODAY)
+
+    def test_student_fee_receipt_within_limit_passes(self):
+        s = _settings(rules=[_rule(target_doctype="Student Fee Receipt",
+                                     allow_backdating=1, max_days_back=7)])
+        doc = _doc(doctype="Student Fee Receipt",
+                    posting_date=date(2026, 4, 25))   # 5 days back from TODAY
+        backdating._check(doc, s, TODAY)
+
+
 if __name__ == "__main__":
     unittest.main()

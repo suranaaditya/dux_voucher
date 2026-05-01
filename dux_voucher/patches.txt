@@ -6,3 +6,4 @@
 # Patches added in this section will be executed after doctypes are migrated
 dux_voucher.dux_voucher.patches.v1_0.seed_backdating_rules
 dux_voucher.dux_voucher.patches.v1_1.backfill_date_field
+dux_voucher.dux_voucher.patches.v1_2.seed_student_fee_receipt_rule

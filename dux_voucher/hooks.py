@@ -37,12 +37,13 @@ doc_events = {
         "on_cancel": "dux_voucher.dux_voucher.utils.on_journal_entry_cancel",
         "validate":  _BACKDATING,
     },
-    "Payment Voucher":    {"validate": _BACKDATING},
-    "Receipt Voucher":    {"validate": _BACKDATING},
-    "Ex Student Receipt": {"validate": _BACKDATING},
-    "Purchase Order":     {"validate": _BACKDATING},
-    "Purchase Receipt":   {"validate": _BACKDATING},
-    "Purchase Invoice":   {"validate": _BACKDATING},
+    "Payment Voucher":     {"validate": _BACKDATING},
+    "Receipt Voucher":     {"validate": _BACKDATING},
+    "Ex Student Receipt":  {"validate": _BACKDATING},
+    "Student Fee Receipt": {"validate": _BACKDATING},
+    "Purchase Order":      {"validate": _BACKDATING},
+    "Purchase Receipt":    {"validate": _BACKDATING},
+    "Purchase Invoice":    {"validate": _BACKDATING},
 }
 
 permission_query_conditions = {

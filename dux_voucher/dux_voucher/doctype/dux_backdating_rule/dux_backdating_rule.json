@@ -21,7 +21,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "DocType",
-   "options": "\nPayment Voucher\nReceipt Voucher\nEx Student Receipt\nJournal Entry\nPurchase Order\nPurchase Receipt\nPurchase Invoice",
+   "options": "\nPayment Voucher\nReceipt Voucher\nEx Student Receipt\nStudent Fee Receipt\nJournal Entry\nPurchase Order\nPurchase Receipt\nPurchase Invoice",
    "reqd": 1
   },
   {
