@@ -221,8 +221,9 @@ report and a print format:
   stripping `+91`/`91` prefix).
 - **Student Fee Receipt** (submittable, `SFR-.YYYY.-`) — multi-head
   split into a child table; on submit posts a **single 2-line JE**
-  crediting `Admission Fee / Registration - {abbr}` under the
-  `University Fee Payable` group, debiting `received_in_account`.
+  crediting `Admission/Registration Fee (Provisional) - {abbr}` under
+  the `Admission Fee (Provisional)` group (under Current Liabilities),
+  debiting `received_in_account`.
   `voucher_type` derives from the received-in account type (Bank vs
   Cash). Cancel cascade in both directions reuses
   `utils.on_journal_entry_cancel` (generic over source doctype).

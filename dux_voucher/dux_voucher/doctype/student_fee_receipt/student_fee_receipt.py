@@ -1,10 +1,11 @@
 """Student Fee Receipt — admission-fee collection from incoming students.
 
 Single submittable doctype. On submit it posts one Journal Entry
-crediting the company's 'Admission Fee / Registration' liability and
-debiting the bank/cash account on the receipt; on cancel it cancels
-that JE. The JE is the only side-effect; the heads child table is
-purely a presentation device for the printed receipt.
+crediting the company's 'Admission/Registration Fee (Provisional)'
+liability (under the Admission Fee (Provisional) group, under Current
+Liabilities) and debiting the bank/cash account on the receipt; on
+cancel it cancels that JE. The JE is the only side-effect; the heads
+child table is purely a presentation device for the printed receipt.
 
 Cancel-cascade in both directions piggy-backs on the existing
 ``utils.on_journal_entry_cancel`` hook — no new wiring needed because

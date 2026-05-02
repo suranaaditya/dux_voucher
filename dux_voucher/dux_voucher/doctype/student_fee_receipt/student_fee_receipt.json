@@ -1,278 +1,32 @@
 {
- "actions": [],
- "allow_rename": 1,
- "autoname": "naming_series:",
- "creation": "2026-05-01 00:00:00",
- "doctype": "DocType",
- "editable_grid": 1,
- "engine": "InnoDB",
- "field_order": [
-  "naming_series",
-  "basic_section",
-  "company",
-  "posting_date",
-  "admission_year",
-  "basic_col_break",
-  "student",
-  "student_name",
-  "father_name",
-  "course",
-  "amount_section",
-  "heads",
-  "amount_col_break",
-  "total_amount",
-  "payment_section",
-  "mode_of_payment",
-  "received_in_account",
-  "payment_col_break",
-  "reference_no",
-  "reference_date",
-  "remarks_section",
-  "remarks",
-  "tracking_section",
-  "is_posted",
-  "backend_je",
-  "amended_from"
- ],
- "fields": [
-  {
-   "fieldname": "naming_series",
-   "fieldtype": "Select",
-   "label": "Series",
-   "no_copy": 1,
-   "options": "SFR-.YYYY.-",
-   "set_only_once": 1
-  },
-  {
-   "fieldname": "basic_section",
-   "fieldtype": "Section Break",
-   "label": "Basic Details"
-  },
-  {
-   "bold": 1,
-   "fieldname": "company",
-   "fieldtype": "Link",
-   "in_list_view": 1,
-   "in_standard_filter": 1,
-   "label": "Company",
-   "options": "Company",
-   "reqd": 1
-  },
-  {
-   "default": "Today",
-   "fieldname": "posting_date",
-   "fieldtype": "Date",
-   "in_list_view": 1,
-   "label": "Posting Date",
-   "reqd": 1
-  },
-  {
-   "description": "Auto-defaulted to the current Indian fiscal year (Apr-Mar). Override only when collecting next-session admission fees in advance.",
-   "fieldname": "admission_year",
-   "fieldtype": "Data",
-   "in_standard_filter": 1,
-   "label": "Admission Year",
-   "reqd": 1
-  },
-  {
-   "fieldname": "basic_col_break",
-   "fieldtype": "Column Break"
-  },
-  {
-   "bold": 1,
-   "description": "Pick an existing Student or click '+ Create New' to register a new admission inline.",
-   "fieldname": "student",
-   "fieldtype": "Link",
-   "in_list_view": 1,
-   "in_standard_filter": 1,
-   "label": "Student",
-   "options": "Student",
-   "reqd": 1
-  },
-  {
-   "fetch_from": "student.student_name",
-   "fieldname": "student_name",
-   "fieldtype": "Data",
-   "in_list_view": 1,
-   "label": "Student Name",
-   "read_only": 1
-  },
-  {
-   "fetch_from": "student.father_name",
-   "fieldname": "father_name",
-   "fieldtype": "Data",
-   "label": "Father's Name",
-   "read_only": 1
-  },
-  {
-   "fetch_from": "student.course",
-   "fieldname": "course",
-   "fieldtype": "Link",
-   "in_list_view": 1,
-   "label": "Course",
-   "options": "Course",
-   "read_only": 1
-  },
-  {
-   "fieldname": "amount_section",
-   "fieldtype": "Section Break",
-   "label": "Fee Heads"
-  },
-  {
-   "description": "Each row's Fee Head must belong to the student's course. Amount per row contributes to the total but does NOT change the accounting — the JE credits the single 'Admission Fee / Registration' liability account regardless of how the amount is split here.",
-   "fieldname": "heads",
-   "fieldtype": "Table",
-   "label": "Heads",
-   "options": "Student Fee Receipt Head",
-   "reqd": 1
-  },
-  {
-   "fieldname": "amount_col_break",
-   "fieldtype": "Column Break"
-  },
-  {
-   "bold": 1,
-   "fieldname": "total_amount",
-   "fieldtype": "Currency",
-   "in_list_view": 1,
-   "label": "Total Amount",
-   "read_only": 1
-  },
-  {
-   "fieldname": "payment_section",
-   "fieldtype": "Section Break",
-   "label": "Payment Details"
-  },
-  {
-   "fieldname": "mode_of_payment",
-   "fieldtype": "Link",
-   "label": "Mode of Payment",
-   "options": "Mode of Payment"
-  },
-  {
-   "description": "Bank or Cash account where the money landed. Must be of type 'Bank' or 'Cash'. The Journal Entry posts a Debit here.",
-   "fieldname": "received_in_account",
-   "fieldtype": "Link",
-   "label": "Received In Account",
-   "options": "Account",
-   "reqd": 1
-  },
-  {
-   "fieldname": "payment_col_break",
-   "fieldtype": "Column Break"
-  },
-  {
-   "description": "UTR for online transfers, cheque number for cheques.",
-   "fieldname": "reference_no",
-   "fieldtype": "Data",
-   "label": "Reference No"
-  },
-  {
-   "fieldname": "reference_date",
-   "fieldtype": "Date",
-   "label": "Reference Date"
-  },
-  {
-   "fieldname": "remarks_section",
-   "fieldtype": "Section Break",
-   "label": "Remarks"
-  },
-  {
-   "fieldname": "remarks",
-   "fieldtype": "Small Text",
-   "label": "Remarks"
-  },
-  {
-   "collapsible": 1,
-   "fieldname": "tracking_section",
-   "fieldtype": "Section Break",
-   "label": "Backend Tracking"
-  },
-  {
-   "default": "0",
-   "fieldname": "is_posted",
-   "fieldtype": "Check",
-   "label": "Is Posted",
-   "no_copy": 1,
-   "read_only": 1
-  },
-  {
-   "fieldname": "backend_je",
-   "fieldtype": "Link",
-   "label": "Backend Journal Entry",
-   "no_copy": 1,
-   "options": "Journal Entry",
-   "read_only": 1
-  },
-  {
-   "fieldname": "amended_from",
-   "fieldtype": "Link",
-   "label": "Amended From",
-   "no_copy": 1,
-   "options": "Student Fee Receipt",
-   "print_hide": 1,
-   "read_only": 1,
-   "search_index": 1
-  }
- ],
- "index_web_pages_for_search": 1,
- "is_submittable": 1,
- "links": [],
- "modified": "2026-05-01 00:00:00",
+ "absolute_value": 0,
+ "align_labels_right": 0,
+ "creation": "2026-05-02 00:00:00",
+ "custom_format": 1,
+ "disabled": 0,
+ "doc_type": "Student Fee Receipt",
+ "docstatus": 0,
+ "doctype": "Print Format",
+ "font_size": 12,
+ "html": "{#\n  Student Fee Receipt \u2014 Print Format\n  App     : dux_voucher | Frappe v16 / ERPNext v16\n  Module  : Dux Voucher\n  Style   : Mirrors Ex Student Receipt (green accent), adapted for\n            admission-fee receipts: Fee Heads itemisation in place of\n            the Ex Student outstanding-ledger block.\n#}\n\n{%- set company_doc = frappe.get_doc(\"Company\", doc.company) %}\n{%- set _raw_logo   = company_doc.get(\"custom_voucher_print_logo\") %}\n{%- if _raw_logo %}\n  {%- set logo_url = frappe.utils.get_url(_raw_logo) %}\n{%- else %}\n  {%- set logo_url = frappe.utils.get_url(\"/assets/dux_voucher/images/dv_logo.png\") %}\n{%- endif %}\n{%- set currency    = company_doc.get(\"default_currency\") or \"INR\" %}\n{%- set sym         = frappe.db.get_value(\"Currency\", currency, \"symbol\") or \"&#8377;\" %}\n{%- set footer_note = company_doc.get(\"custom_voucher_footer_note\") or\n    \"This is a computer-generated fee receipt. Valid without physical stamp unless specified by policy.\" %}\n\n{%- set _mop       = doc.get(\"mode_of_payment\") or \"\" %}\n{%- set _mop_type  = frappe.db.get_value(\"Mode of Payment\", _mop, \"type\") if _mop else \"\" %}\n{%- set _is_cheque = \"cheque\" in _mop.lower() %}\n{%- set _is_bank   = (_mop_type == \"Bank\") and not _is_cheque %}\n\n{%- set _ref_no_label   = \"Cheque No.\"  if _is_cheque else (\"UTR No.\"  if _is_bank else \"Reference No.\") %}\n{%- set _ref_date_label = \"Cheque Date\" if _is_cheque else \"Reference Date\" %}\n{%- set _show_ref = doc.get(\"reference_no\") or doc.get(\"reference_date\") %}\n\n{%- set _owner_name = frappe.db.get_value(\"User\", doc.owner, \"full_name\") or doc.owner %}\n\n<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"UTF-8\">\n<title>Admission Fee Receipt \u2014 {{ doc.name }}</title>\n<style>\n  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }\n  body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; color: #1a1a2e; background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }\n  .page { width: 100%; max-width: 210mm; margin: 0 auto; padding: 5mm 8mm 6mm; display: flex; flex-direction: column; gap: 0; }\n\n  /* HEADER \u2014 green accent */\n  .header { display: grid; grid-template-columns: 90px 1fr 175px; gap: 10px; align-items: flex-start; padding-bottom: 10px; border-bottom: 2.5px solid #0F6E56; }\n  .logo-wrap img { width: 82px; height: auto; max-height: 60px; object-fit: contain; display: block; }\n  .co-name { font-size: 14px; font-weight: 700; color: #0F6E56; margin-bottom: 4px; }\n  .co-meta { font-size: 9.5px; color: #555; line-height: 1.65; }\n  .doc-title-block { text-align: right; }\n  .vch-label { font-size: 13px; font-weight: 700; color: #0F6E56; letter-spacing: 1px; text-transform: uppercase; }\n  .doc-no-pill { display: inline-block; margin-top: 5px; background: #E1F5EE; color: #04342C; font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 4px; }\n  .date-label { font-size: 8.5px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 7px; }\n  .date-value { font-size: 12px; font-weight: 600; color: #1a1a2e; margin-top: 2px; }\n\n  /* META STRIP */\n  .meta-strip { display: grid; grid-template-columns: 1fr 1fr 1fr; border: 0.5px solid #b8e0d4; border-top: none; }\n  .mc { padding: 7px 11px; border-right: 0.5px solid #b8e0d4; }\n  .mc:last-child { border-right: none; }\n  .mc-label { font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.6px; color: #888; margin-bottom: 3px; }\n  .mc-value { font-size: 11px; font-weight: 600; color: #1a1a2e; }\n\n  /* SECTION TITLE */\n  .sec-title { background: #f0faf6; border-top: 0.5px solid #b8e0d4; border-bottom: 0.5px solid #b8e0d4; padding: 5px 11px; font-size: 8.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.7px; color: #0F6E56; margin-top: 6px; }\n\n  /* STUDENT INFO TABLE (key-value pairs) */\n  table.kv { width: 100%; border-collapse: collapse; border: 0.5px solid #b8e0d4; border-top: none; }\n  table.kv td { padding: 7px 11px; border-bottom: 0.5px solid #e8f5f0; vertical-align: middle; font-size: 11px; color: #1a1a2e; }\n  table.kv tr:last-child td { border-bottom: none; }\n  table.kv td.k { width: 170px; font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.5px; color: #888; font-weight: 700; border-right: 0.5px solid #e8f5f0; background: #fafdfb; }\n  table.kv td.v { font-size: 12px; font-weight: 600; color: #1a1a2e; }\n  table.kv td.v-big { font-size: 14px; font-weight: 700; color: #0F6E56; }\n\n  /* REFERENCE STRIP */\n  .ref-row { display: grid; grid-template-columns: 1fr 1fr; border: 0.5px solid #b8e0d4; border-top: none; }\n  .ref-cell { padding: 6px 11px; border-right: 0.5px solid #b8e0d4; }\n  .ref-cell:last-child { border-right: none; }\n  .ref-label { font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.5px; color: #888; margin-bottom: 2px; }\n  .ref-value { font-size: 11px; font-weight: 600; color: #1a1a2e; }\n\n  /* FEE HEADS TABLE \u2014 itemised breakdown */\n  table.heads { width: 100%; border-collapse: collapse; border: 0.5px solid #b8e0d4; border-top: none; }\n  table.heads thead th { background: #fafdfb; padding: 7px 11px; font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.5px; color: #888; font-weight: 700; border-bottom: 0.5px solid #b8e0d4; }\n  table.heads thead th.r { text-align: right; }\n  table.heads td { padding: 8px 11px; border-bottom: 0.5px solid #e8f5f0; font-size: 11px; }\n  table.heads tr:last-child td { border-bottom: none; }\n  table.heads td.k { color: #1a1a2e; font-weight: 600; }\n  table.heads td.r { text-align: right; font-variant-numeric: tabular-nums; font-family: 'Courier New', monospace; font-size: 11.5px; white-space: nowrap; color: #1a1a2e; }\n  table.heads tr.total td { background: #f5fbf8; font-weight: 700; color: #0F6E56; border-top: 1.5px solid #0F6E56; padding: 9px 11px; }\n  table.heads tr.total td.r { font-size: 13px; }\n\n  /* TOTALS BAR (amount-in-words + big amount) */\n  .totals-bar { display: flex; justify-content: space-between; align-items: center; padding: 9px 11px; border: 0.5px solid #b8e0d4; border-top: 1.5px solid #0F6E56; background: #f5fbf8; margin-top: 6px; }\n  .w-label { font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.5px; color: #888; margin-bottom: 3px; }\n  .w-value { font-size: 10.5px; font-style: italic; color: #0F6E56; font-weight: 600; max-width: 340px; }\n  .a-label { font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.5px; color: #888; margin-bottom: 2px; text-align: right; }\n  .a-value { font-size: 22px; font-weight: 700; color: #0F6E56; text-align: right; }\n\n  /* REMARKS */\n  .remarks-block { border: 0.5px solid #b8e0d4; border-top: none; padding: 7px 11px; }\n  .r-label { font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.5px; color: #888; margin-bottom: 3px; }\n  .r-value { font-size: 11px; color: #333; line-height: 1.5; }\n\n  /* SIGNATURES */\n  .sig-strip { display: grid; grid-template-columns: 1fr 1fr 1fr; border: 0.5px solid #b8e0d4; margin-top: 14px; }\n  .sig-cell { padding: 7px 14px 9px; border-right: 0.5px solid #b8e0d4; text-align: center; }\n  .sig-cell:last-child { border-right: none; }\n  .sig-space { height: 34px; }\n  .sig-line { border-top: 1px solid #0F6E56; margin-bottom: 4px; }\n  .sig-label { font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.6px; color: #555; }\n  .sig-name  { font-size: 9px; color: #0F6E56; font-weight: 600; margin-top: 2px; }\n\n  /* PAGE FOOTER */\n  .page-footer { margin-top: 10px; padding-top: 8px; border-top: 0.5px solid #b8e0d4; display: flex; justify-content: space-between; align-items: center; }\n  .page-footer .note { font-size: 8.5px; color: #aaa; font-style: italic; max-width: 480px; }\n  .page-footer .brand { font-size: 8.5px; color: #aaa; white-space: nowrap; }\n  .page-footer .brand strong { color: #0F6E56; }\n\n  @media print {\n    body { background: white; }\n    .page { padding: 3mm 5mm; margin: 0; width: 100%; max-width: 100%; }\n    @page { size: A4; margin: 10mm; }\n  }\n</style>\n</head>\n<body>\n<div class=\"page\">\n\n  {# \u2550\u2550 HEADER \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 #}\n  <div class=\"header\">\n    <div class=\"logo-wrap\">\n      <img src=\"{{ logo_url }}\" alt=\"{{ company_doc.company_name or doc.company }}\">\n    </div>\n    <div>\n      <div class=\"co-name\">{{ company_doc.company_name or doc.company }}</div>\n      <div class=\"co-meta\">\n        {%- if company_doc.get(\"gstin\") %}GSTIN: {{ company_doc.gstin }}{%- if company_doc.get(\"tax_id\") %} &nbsp;|&nbsp; PAN: {{ company_doc.tax_id }}{%- endif %}<br>{%- elif company_doc.get(\"tax_id\") %}PAN: {{ company_doc.tax_id }}<br>{%- endif %}\n        {%- set addr_id = frappe.db.get_value(\"Dynamic Link\", {\"link_doctype\": \"Company\", \"link_name\": company_doc.name, \"parenttype\": \"Address\"}, \"parent\") %}\n        {%- if addr_id %}\n          {%- set a = frappe.get_doc(\"Address\", addr_id) %}\n          {%- set addr_parts = [a.address_line1, a.address_line2, a.city, a.state, a.pincode] | select | join(\", \") %}\n          {{ addr_parts }}<br>\n        {%- endif %}\n        {%- if company_doc.get(\"phone_no\") %}Ph: {{ company_doc.phone_no }}{%- endif %}{%- if company_doc.get(\"phone_no\") and company_doc.get(\"email\") %} &nbsp;|&nbsp; {%- endif %}{%- if company_doc.get(\"email\") %}{{ company_doc.email }}{%- endif %}\n      </div>\n    </div>\n    <div class=\"doc-title-block\">\n      <div class=\"vch-label\">Admission Fee Receipt</div>\n      <div><span class=\"doc-no-pill\">{{ doc.name }}</span></div>\n      <div class=\"date-label\">Date</div>\n      <div class=\"date-value\">{{ frappe.format(doc.posting_date, {\"fieldtype\": \"Date\"}) }}</div>\n    </div>\n  </div>\n\n  {# \u2550\u2550 META STRIP \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 #}\n  <div class=\"meta-strip\">\n    <div class=\"mc\">\n      <div class=\"mc-label\">Payment Method</div>\n      <div class=\"mc-value\">{{ _mop or \"&#8212;\" }}</div>\n    </div>\n    <div class=\"mc\">\n      <div class=\"mc-label\">Received In Account</div>\n      <div class=\"mc-value\">{{ doc.get(\"received_in_account\") or \"&#8212;\" }}</div>\n    </div>\n    <div class=\"mc\">\n      <div class=\"mc-label\">Ledger Head</div>\n      <div class=\"mc-value\">Admission/Registration Fee (Provisional)</div>\n    </div>\n  </div>\n\n  {# \u2550\u2550 STUDENT DETAILS \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 #}\n  <div class=\"sec-title\">Received from</div>\n  <table class=\"kv\">\n    <tr>\n      <td class=\"k\">Student Name</td>\n      <td class=\"v v-big\">{{ doc.student_name or doc.student }}</td>\n    </tr>\n    <tr>\n      <td class=\"k\">Father's Name</td>\n      <td class=\"v\">{{ doc.father_name or \"&#8212;\" }}</td>\n    </tr>\n    <tr>\n      <td class=\"k\">Course</td>\n      <td class=\"v\">{{ doc.course or \"&#8212;\" }}</td>\n    </tr>\n    <tr>\n      <td class=\"k\">Admission Year</td>\n      <td class=\"v\">{{ doc.admission_year or \"&#8212;\" }}</td>\n    </tr>\n    <tr>\n      <td class=\"k\">Student ID</td>\n      <td class=\"v\">{{ doc.student }}</td>\n    </tr>\n  </table>\n\n  {# \u2550\u2550 REFERENCE STRIP \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 #}\n  {%- if _show_ref %}\n  <div class=\"sec-title\">Payment Reference</div>\n  <div class=\"ref-row\">\n    <div class=\"ref-cell\">\n      <div class=\"ref-label\">{{ _ref_no_label }}</div>\n      <div class=\"ref-value\">{{ doc.get(\"reference_no\") or \"&#8212;\" }}</div>\n    </div>\n    <div class=\"ref-cell\">\n      <div class=\"ref-label\">{{ _ref_date_label }}</div>\n      <div class=\"ref-value\">\n        {%- if doc.get(\"reference_date\") %}{{ frappe.format(doc.reference_date, {\"fieldtype\": \"Date\"}) }}{%- else %}&#8212;{%- endif %}\n      </div>\n    </div>\n  </div>\n  {%- endif %}\n\n  {# \u2550\u2550 FEE HEADS BREAKDOWN \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 #}\n  <div class=\"sec-title\">Fee Heads</div>\n  <table class=\"heads\">\n    <thead>\n      <tr>\n        <th>Head</th>\n        <th class=\"r\">Amount</th>\n      </tr>\n    </thead>\n    <tbody>\n      {%- for row in doc.heads %}\n      {%- set head_doc = frappe.get_cached_doc(\"Course Fee Head\", row.head) %}\n      <tr>\n        <td class=\"k\">{{ head_doc.head_name }}</td>\n        <td class=\"r\">{{ frappe.utils.fmt_money(row.amount, currency=currency) }}</td>\n      </tr>\n      {%- endfor %}\n      <tr class=\"total\">\n        <td class=\"k\">Total</td>\n        <td class=\"r\">{{ frappe.utils.fmt_money(doc.total_amount, currency=currency) }}</td>\n      </tr>\n    </tbody>\n  </table>\n\n  {# \u2550\u2550 TOTALS BAR (amount in words) \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 #}\n  <div class=\"totals-bar\">\n    <div>\n      <div class=\"w-label\">Amount in words</div>\n      <div class=\"w-value\">\n        {%- set _words = frappe.utils.money_in_words(doc.total_amount, main_currency=currency) or \"&#8212;\" %}\n        {{ _words.replace(\"INR \", \"\").replace(\"USD \", \"\").replace(\"EUR \", \"\") if _words != \"&#8212;\" else \"&#8212;\" }}\n      </div>\n    </div>\n    <div>\n      <div class=\"a-label\">Amount Received</div>\n      <div class=\"a-value\">{{ frappe.utils.fmt_money(doc.total_amount, currency=currency) }}</div>\n    </div>\n  </div>\n\n  {# \u2550\u2550 REMARKS \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 #}\n  {%- if doc.get(\"remarks\") %}\n  <div class=\"remarks-block\">\n    <div class=\"r-label\">Remarks / Narration</div>\n    <div class=\"r-value\">{{ doc.remarks }}</div>\n  </div>\n  {%- endif %}\n\n  {# \u2550\u2550 SIGNATURES \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 #}\n  <div class=\"sig-strip\">\n    <div class=\"sig-cell\">\n      <div class=\"sig-space\"></div>\n      <div class=\"sig-line\"></div>\n      <div class=\"sig-label\">Prepared By</div>\n      <div class=\"sig-name\">{{ _owner_name }}</div>\n    </div>\n    <div class=\"sig-cell\">\n      <div class=\"sig-space\"></div>\n      <div class=\"sig-line\"></div>\n      <div class=\"sig-label\">Verified By</div>\n    </div>\n    <div class=\"sig-cell\">\n      <div class=\"sig-space\"></div>\n      <div class=\"sig-line\"></div>\n      <div class=\"sig-label\">Authorised Signatory</div>\n    </div>\n  </div>\n\n  {# \u2550\u2550 PAGE FOOTER \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 #}\n  <div class=\"page-footer\">\n    <div class=\"note\">{{ footer_note }}</div>\n    <div class=\"brand\">Powered by <strong>DUX DigiTech</strong></div>\n  </div>\n\n</div>\n</body>\n</html>\n",
+ "idx": 0,
+ "line_breaks": 0,
+ "margin_bottom": 15.0,
+ "margin_left": 15.0,
+ "margin_right": 15.0,
+ "margin_top": 15.0,
+ "modified": "2026-05-02 00:00:00",
  "modified_by": "Administrator",
  "module": "Dux Voucher",
  "name": "Student Fee Receipt",
  "owner": "Administrator",
- "permissions": [
-  {
-   "amend": 1,
-   "cancel": 1,
-   "create": 1,
-   "delete": 1,
-   "email": 1,
-   "export": 1,
-   "print": 1,
-   "read": 1,
-   "report": 1,
-   "role": "System Manager",
-   "share": 1,
-   "submit": 1,
-   "write": 1
-  },
-  {
-   "amend": 1,
-   "cancel": 1,
-   "create": 1,
-   "delete": 1,
-   "email": 1,
-   "export": 1,
-   "print": 1,
-   "read": 1,
-   "report": 1,
-   "role": "Accounts Manager",
-   "share": 1,
-   "submit": 1,
-   "write": 1
-  },
-  {
-   "amend": 1,
-   "cancel": 1,
-   "create": 1,
-   "delete": 1,
-   "email": 1,
-   "export": 1,
-   "print": 1,
-   "read": 1,
-   "report": 1,
-   "role": "Accounts User",
-   "share": 1,
-   "submit": 1,
-   "write": 1
-  }
- ],
- "row_format": "Dynamic",
- "sort_field": "modified",
- "sort_order": "DESC",
- "states": [],
- "track_changes": 1
+ "page_number": "Hide",
+ "pdf_generator": "wkhtmltopdf",
+ "print_format_builder": 0,
+ "print_format_builder_beta": 0,
+ "print_format_for": "DocType",
+ "print_format_type": "Jinja",
+ "raw_printing": 0,
+ "show_section_headings": 0,
+ "standard": "Yes"
 }

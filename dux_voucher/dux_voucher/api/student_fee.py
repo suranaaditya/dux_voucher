@@ -1,10 +1,15 @@
 """Helpers for the Student admission-fee module.
 
 Currently exposes one resolver — :func:`get_admission_fee_account` —
-that maps a company to its 'Admission Fee / Registration' liability
-account. The account is created manually by the user via the standard
-ERPNext CoA UI (`Current Liabilities → University Fee Payable →
-Admission Fee / Registration`); this resolver only locates it.
+that maps a company to its 'Admission/Registration Fee (Provisional)'
+liability account. The account is created manually by the user via
+the standard ERPNext CoA UI (``Current Liabilities → Admission Fee
+(Provisional) → Admission/Registration Fee (Provisional)``); this
+resolver only locates it.
+
+The "(Provisional)" qualifier reflects the fact that admission fees
+are held against the future enrolment — refundable in some cases —
+so the liability is provisional until confirmed.
 
 Why not auto-create? Auto-creation in code is fragile — if the parent
 group is named slightly differently across companies, or the user has
@@ -18,7 +23,8 @@ import frappe
 from frappe import _
 
 
-ADMISSION_FEE_LEAF = "Admission Fee / Registration"
+ADMISSION_FEE_LEAF = "Admission/Registration Fee (Provisional)"
+ADMISSION_FEE_GROUP = "Admission Fee (Provisional)"
 
 
 def get_admission_fee_account(company):
@@ -43,9 +49,9 @@ def get_admission_fee_account(company):
     if not frappe.db.exists("Account", name):
         frappe.throw(
             _("Account '{0}' does not exist. Create it under "
-              "<strong>Current Liabilities → University Fee Payable</strong> "
+              "<strong>Current Liabilities → {1}</strong> "
               "in the Chart of Accounts before posting Student Fee "
-              "Receipts for {1}.")
-            .format(name, company)
+              "Receipts for {2}.")
+            .format(name, ADMISSION_FEE_GROUP, company)
         )
     return name
