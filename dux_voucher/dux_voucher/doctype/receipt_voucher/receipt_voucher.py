@@ -16,6 +16,20 @@ from dux_voucher.dux_voucher.api.utils import (
 
 class ReceiptVoucher(Document):
 
+    def before_insert(self):
+        """Wipe inherited backend_references on amendment.
+
+        Frappe's amend flow copies the cancelled doc whole — including
+        the ``backend_references`` child table whose rows point at the
+        now-cancelled JE / Payment Entry. Save-time validation refuses
+        to link a Link field to a cancelled doc, so the amendment
+        can't even insert. The new submission will rebuild
+        ``backend_references`` from the fresh JE / PE it creates, so
+        the inherited rows are pure garbage and need to go.
+        """
+        if self.amended_from:
+            self.set("backend_references", [])
+
     def validate(self):
         self._validate_basics()
         if self.entry_mode == "Party-wise":
