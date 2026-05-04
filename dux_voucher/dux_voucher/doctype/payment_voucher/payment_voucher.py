@@ -19,19 +19,27 @@ class PaymentVoucher(Document):
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
-    def before_insert(self):
-        """Wipe inherited backend_references on amendment.
+    def insert(self, *args, **kwargs):
+        """Wipe inherited ``backend_references`` rows on amendment
+        *before* Frappe runs its cancelled-link validation.
 
         Frappe's amend flow copies the cancelled doc whole — including
         the ``backend_references`` child table whose rows point at the
-        now-cancelled Payment Entry / JE. Save-time validation refuses
-        to link a Link field to a cancelled doc, so the amendment
-        can't even insert. The new submission will rebuild
-        ``backend_references`` from the fresh PE / JE it creates, so
-        the inherited rows are pure garbage and need to go.
+        now-cancelled Payment Entry / JE. ``Document.insert`` then runs
+        ``_validate_links()`` ahead of ``before_insert``, so a
+        ``before_insert`` cleanup is too late: it has already thrown
+        ``Cannot link cancelled document``.
+
+        Overriding ``insert()`` lets us scrub the rows in the narrow
+        window between the doc being instantiated and the lifecycle
+        starting. The fresh submission will rebuild
+        ``backend_references`` from the PE / JE it posts, so the
+        inherited rows are pure garbage and there is nothing worth
+        preserving.
         """
         if self.amended_from:
             self.set("backend_references", [])
+        return super().insert(*args, **kwargs)
 
     # ------------------------------------------------------------------
     # Validate
