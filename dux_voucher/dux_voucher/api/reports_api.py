@@ -26,34 +26,45 @@ def get_ledger_statement(company, account, from_date, to_date,
 	use_party = bool(party and party_type)
 
 	# ── Opening Balance ───────────────────────────────────────────────
+	# Roll into opening: anything before the period, plus any entry within
+	# the period flagged is_opening='Yes' (matches ERPNext General Ledger
+	# behaviour with "Show Opening Entries" off).
 	if use_party:
 		ob_row = frappe.db.sql("""
 			SELECT COALESCE(SUM(debit_in_account_currency),0)  AS total_debit,
 			       COALESCE(SUM(credit_in_account_currency),0) AS total_credit
 			FROM `tabGL Entry`
 			WHERE party=%(party)s AND party_type=%(party_type)s
-			  AND company=%(company)s AND posting_date<%(from_date)s
-			  AND is_cancelled=0
+			  AND company=%(company)s AND is_cancelled=0
+			  AND (
+			        posting_date < %(from_date)s
+			     OR (is_opening='Yes' AND posting_date BETWEEN %(from_date)s AND %(to_date)s)
+			  )
 		""", dict(party=party, party_type=party_type, company=company,
-				  from_date=from_date), as_dict=True)
+				  from_date=from_date, to_date=to_date), as_dict=True)
 	else:
 		ob_row = frappe.db.sql("""
 			SELECT COALESCE(SUM(debit_in_account_currency),0)  AS total_debit,
 			       COALESCE(SUM(credit_in_account_currency),0) AS total_credit
 			FROM `tabGL Entry`
-			WHERE account=%(account)s AND company=%(company)s
-			  AND posting_date<%(from_date)s AND is_cancelled=0
-		""", dict(account=account, company=company, from_date=from_date), as_dict=True)
+			WHERE account=%(account)s AND company=%(company)s AND is_cancelled=0
+			  AND (
+			        posting_date < %(from_date)s
+			     OR (is_opening='Yes' AND posting_date BETWEEN %(from_date)s AND %(to_date)s)
+			  )
+		""", dict(account=account, company=company,
+				  from_date=from_date, to_date=to_date), as_dict=True)
 
 	ob_net = flt(ob_row[0].total_debit) - flt(ob_row[0].total_credit) if ob_row else 0.0
 
 	# ── Period GL Entries ─────────────────────────────────────────────
+	# Exclude is_opening='Yes' entries — they're already absorbed above.
 	if use_party:
-		where  = "gle.party=%(party)s AND gle.party_type=%(party_type)s AND gle.company=%(company)s AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s AND gle.is_cancelled=0"
+		where  = "gle.party=%(party)s AND gle.party_type=%(party_type)s AND gle.company=%(company)s AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s AND gle.is_opening='No' AND gle.is_cancelled=0"
 		params = dict(party=party, party_type=party_type, company=company,
 					  from_date=from_date, to_date=to_date)
 	else:
-		where  = "gle.account=%(account)s AND gle.company=%(company)s AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s AND gle.is_cancelled=0"
+		where  = "gle.account=%(account)s AND gle.company=%(company)s AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s AND gle.is_opening='No' AND gle.is_cancelled=0"
 		params = dict(account=account, company=company,
 					  from_date=from_date, to_date=to_date)
 
