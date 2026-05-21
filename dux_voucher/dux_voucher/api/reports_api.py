@@ -29,42 +29,71 @@ def get_ledger_statement(company, account, from_date, to_date,
 	# Roll into opening: anything before the period, plus any entry within
 	# the period flagged is_opening='Yes' (matches ERPNext General Ledger
 	# behaviour with "Show Opening Entries" off).
+	#
+	# Also exclude GL rows whose parent Payment Entry / Journal Entry is
+	# cancelled (docstatus=2). When a PE/JE is cancelled, ERPNext keeps
+	# the original GL rows AND posts sign-flipped reversal rows dated the
+	# cancel date — both with is_cancelled=0 — so filtering on is_cancelled
+	# alone leaves the cancelled voucher visible (and double-counted via
+	# the reversal). The parent-docstatus exclusion catches both.
+	cancelled_filter = """
+		AND CASE gle.voucher_type
+		      WHEN 'Payment Entry' THEN COALESCE(pe.docstatus, 0)
+		      WHEN 'Journal Entry' THEN COALESCE(je.docstatus, 0)
+		      ELSE 0
+		    END != 2
+	"""
+	ob_joins = """
+		FROM `tabGL Entry` gle
+		LEFT JOIN `tabPayment Entry` pe ON pe.name=gle.voucher_no AND gle.voucher_type='Payment Entry'
+		LEFT JOIN `tabJournal Entry`  je ON je.name=gle.voucher_no AND gle.voucher_type='Journal Entry'
+	"""
 	if use_party:
 		ob_row = frappe.db.sql("""
-			SELECT COALESCE(SUM(debit_in_account_currency),0)  AS total_debit,
-			       COALESCE(SUM(credit_in_account_currency),0) AS total_credit
-			FROM `tabGL Entry`
-			WHERE party=%(party)s AND party_type=%(party_type)s
-			  AND company=%(company)s AND is_cancelled=0
+			SELECT COALESCE(SUM(gle.debit_in_account_currency),0)  AS total_debit,
+			       COALESCE(SUM(gle.credit_in_account_currency),0) AS total_credit
+			{joins}
+			WHERE gle.party=%(party)s AND gle.party_type=%(party_type)s
+			  AND gle.company=%(company)s AND gle.is_cancelled=0
 			  AND (
-			        posting_date < %(from_date)s
-			     OR (is_opening='Yes' AND posting_date BETWEEN %(from_date)s AND %(to_date)s)
+			        gle.posting_date < %(from_date)s
+			     OR (gle.is_opening='Yes' AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s)
 			  )
-		""", dict(party=party, party_type=party_type, company=company,
-				  from_date=from_date, to_date=to_date), as_dict=True)
+			{cancelled}
+		""".format(joins=ob_joins, cancelled=cancelled_filter),
+		dict(party=party, party_type=party_type, company=company,
+			 from_date=from_date, to_date=to_date), as_dict=True)
 	else:
 		ob_row = frappe.db.sql("""
-			SELECT COALESCE(SUM(debit_in_account_currency),0)  AS total_debit,
-			       COALESCE(SUM(credit_in_account_currency),0) AS total_credit
-			FROM `tabGL Entry`
-			WHERE account=%(account)s AND company=%(company)s AND is_cancelled=0
+			SELECT COALESCE(SUM(gle.debit_in_account_currency),0)  AS total_debit,
+			       COALESCE(SUM(gle.credit_in_account_currency),0) AS total_credit
+			{joins}
+			WHERE gle.account=%(account)s AND gle.company=%(company)s AND gle.is_cancelled=0
 			  AND (
-			        posting_date < %(from_date)s
-			     OR (is_opening='Yes' AND posting_date BETWEEN %(from_date)s AND %(to_date)s)
+			        gle.posting_date < %(from_date)s
+			     OR (gle.is_opening='Yes' AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s)
 			  )
-		""", dict(account=account, company=company,
-				  from_date=from_date, to_date=to_date), as_dict=True)
+			{cancelled}
+		""".format(joins=ob_joins, cancelled=cancelled_filter),
+		dict(account=account, company=company,
+			 from_date=from_date, to_date=to_date), as_dict=True)
 
 	ob_net = flt(ob_row[0].total_debit) - flt(ob_row[0].total_credit) if ob_row else 0.0
 
 	# ── Period GL Entries ─────────────────────────────────────────────
 	# Exclude is_opening='Yes' entries — they're already absorbed above.
+	# Exclude rows whose parent PE/JE has docstatus=2 (see opening-balance
+	# comment above).
 	if use_party:
-		where  = "gle.party=%(party)s AND gle.party_type=%(party_type)s AND gle.company=%(company)s AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s AND gle.is_opening='No' AND gle.is_cancelled=0"
+		where  = ("gle.party=%(party)s AND gle.party_type=%(party_type)s AND gle.company=%(company)s "
+		          "AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s "
+		          "AND gle.is_opening='No' AND gle.is_cancelled=0" + cancelled_filter)
 		params = dict(party=party, party_type=party_type, company=company,
 					  from_date=from_date, to_date=to_date)
 	else:
-		where  = "gle.account=%(account)s AND gle.company=%(company)s AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s AND gle.is_opening='No' AND gle.is_cancelled=0"
+		where  = ("gle.account=%(account)s AND gle.company=%(company)s "
+		          "AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s "
+		          "AND gle.is_opening='No' AND gle.is_cancelled=0" + cancelled_filter)
 		params = dict(account=account, company=company,
 					  from_date=from_date, to_date=to_date)
 
