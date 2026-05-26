@@ -59,6 +59,28 @@ class StudentFeeReceipt(Document):
 
     # ── Lifecycle ────────────────────────────────────────────────────
 
+    def insert(self, *args, **kwargs):
+        """Wipe inherited ``backend_je`` + reset ``is_posted`` on
+        amendment *before* Frappe runs its cancelled-link validation.
+
+        Frappe's amend flow copies the cancelled doc whole — including
+        ``backend_je``, which points at the now-cancelled Journal Entry.
+        ``Document.insert`` then runs ``_validate_links()`` ahead of
+        ``before_insert``, so a ``before_insert`` cleanup is too late:
+        it has already thrown ``Cannot link cancelled document``.
+
+        Overriding ``insert()`` lets us scrub the field in the narrow
+        window between the doc being instantiated and the lifecycle
+        starting. The fresh submission will repopulate ``backend_je``
+        with the new JE posted by ``on_submit``, so the inherited value
+        is pure garbage. Mirrors the Payment Voucher / Receipt Voucher
+        fix.
+        """
+        if self.amended_from:
+            self.backend_je = None
+            self.is_posted = 0
+        return super().insert(*args, **kwargs)
+
     def before_insert(self):
         """Populate ``admission_year`` if the form / API caller didn't
         provide one. The field is required, but defaulting here means
