@@ -75,6 +75,8 @@ class DuxPartyLedger {
 #pl-from,#pl-to{width:148px}
 .pl-fg-co{position:relative}
 .pl-drop{position:absolute;z-index:9999;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.12);min-width:340px;max-height:300px;overflow-y:auto;margin-top:3px;left:0}
+/* Company picker dropdown — narrower so it doesn't bleed into the Party column to its right. */
+#pl-co-drop{min-width:240px}
 .pl-drop-section{padding:6px 12px 3px;font-size:10px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid #f3f4f6;background:#fafafa}
 .pl-drop-item{padding:9px 14px;cursor:pointer;display:flex;flex-direction:column;gap:2px;border-bottom:1px solid #f9fafb}
 .pl-drop-item:last-child{border-bottom:none}
@@ -170,7 +172,7 @@ class DuxPartyLedger {
       <div class="pl-drop" id="pl-co-drop" style="display:none"></div>
     </div>
     <div class="pl-fg pl-fg-acc">
-      <label>Account / Party</label>
+      <label>Party</label>
       <div id="pl-sel-pill-wrap"></div>
       <input id="pl-acc-inp" type="text" placeholder="Type to search suppliers, customers, employees…" autocomplete="off">
       <div class="pl-drop" id="pl-drop" style="display:none"></div>
