@@ -74,7 +74,12 @@ class DuxPartyLedger {
 #pl-acc-inp{min-width:280px}
 #pl-from,#pl-to{width:148px}
 .pl-fg-co{position:relative}
-.pl-drop{position:absolute;z-index:9999;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.12);min-width:340px;max-height:300px;overflow-y:auto;margin-top:3px;left:0}
+/* top:100% pins the dropdown to the bottom of its .pl-fg-* container.
+   The previous top:auto relied on the browser's "static position"
+   computation for absolute-inside-flex-column, which Chrome resolves
+   to 0 — the dropdown rendered on top of the label instead of below
+   the input. */
+.pl-drop{position:absolute;z-index:9999;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.12);min-width:340px;max-height:300px;overflow-y:auto;margin-top:3px;top:100%;left:0}
 /* Company picker dropdown — narrower so it doesn't bleed into the Party column to its right. */
 #pl-co-drop{min-width:240px}
 .pl-drop-section{padding:6px 12px 3px;font-size:10px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid #f3f4f6;background:#fafafa}

@@ -63,7 +63,7 @@ class DuxCashBook {
 .cb-fg select:focus,.cb-fg input:focus{border-color:#059669;box-shadow:0 0 0 3px rgba(5,150,105,.08)}
 #cb-co-inp{min-width:220px}
 .cb-fg-co{position:relative}
-.cb-drop{position:absolute;z-index:9999;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.12);min-width:240px;max-height:300px;overflow-y:auto;margin-top:3px;left:0}
+.cb-drop{position:absolute;z-index:9999;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.12);min-width:240px;max-height:300px;overflow-y:auto;margin-top:3px;top:100%;left:0}
 .cb-drop-item{padding:9px 14px;cursor:pointer;border-bottom:1px solid #f9fafb;font-size:13px;color:#111827}
 .cb-drop-item:last-child{border-bottom:none}
 .cb-drop-item:hover{background:#f0fdf4}
