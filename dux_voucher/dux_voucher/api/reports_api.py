@@ -176,27 +176,34 @@ def get_ledger_statement(company, account, from_date, to_date,
 
 
 @frappe.whitelist()
-def search_ledger(company, search_txt=""):
+def search_ledger(company, search_txt="", parties_only=0):
 	"""
 	Search accounts + Customer/Supplier/Employee parties.
 	Returns {type, value, label, meta, party_type, account} per item.
+
+	parties_only=1  → skip the Account branch entirely. Used by the
+	Party Ledger page where account-head selection is intentionally
+	hidden (purchase-team-facing view).
 	"""
 	if not company:
 		return []
+	# Frappe passes whitelisted args through as strings; coerce.
+	parties_only = bool(int(parties_only)) if parties_only else False
 	like = "%" + (search_txt or "") + "%"
 	results = []
 
-	# 1. Account master
-	for a in frappe.db.sql("""
-		SELECT name, account_name, account_type FROM `tabAccount`
-		WHERE company=%(co)s AND is_group=0 AND disabled=0
-		  AND (name LIKE %(l)s OR account_name LIKE %(l)s)
-		ORDER BY name LIMIT 15
-	""", dict(co=company, l=like), as_dict=True):
-		results.append(dict(type="account", value=a.name,
-			label=a.account_name,
-			meta=(a.account_type or "Account") + "  ·  " + a.name,
-			party_type=None, account=a.name))
+	# 1. Account master — skipped when caller asked for parties only.
+	if not parties_only:
+		for a in frappe.db.sql("""
+			SELECT name, account_name, account_type FROM `tabAccount`
+			WHERE company=%(co)s AND is_group=0 AND disabled=0
+			  AND (name LIKE %(l)s OR account_name LIKE %(l)s)
+			ORDER BY name LIMIT 15
+		""", dict(co=company, l=like), as_dict=True):
+			results.append(dict(type="account", value=a.name,
+				label=a.account_name,
+				meta=(a.account_type or "Account") + "  ·  " + a.name,
+				party_type=None, account=a.name))
 
 	# 2. Customers
 	if len(results) < 25:

@@ -1,0 +1,23 @@
+{
+ "content": null,
+ "creation": "2026-06-01 00:00:00",
+ "docstatus": 0,
+ "doctype": "Page",
+ "idx": 0,
+ "modified": "2026-06-01 00:00:00",
+ "modified_by": "Administrator",
+ "module": "Dux Voucher",
+ "name": "dux-party-ledger",
+ "owner": "Administrator",
+ "page_name": "dux-party-ledger",
+ "roles": [
+  {
+   "role": "System Manager"
+  }
+ ],
+ "script": null,
+ "standard": "Yes",
+ "style": null,
+ "system_page": 0,
+ "title": "Party Ledger"
+}
