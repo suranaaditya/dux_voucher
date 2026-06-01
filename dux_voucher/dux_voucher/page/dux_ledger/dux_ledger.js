@@ -35,6 +35,7 @@ class DuxLedger {
 		this.page      = page;
 		this._selected = null;
 		this._lastData = null;
+		this._companies = [];   // populated by _loadCompanies
 
 		this._injectStyles();
 		this._renderLayout();
@@ -58,9 +59,10 @@ class DuxLedger {
 .dl-fg label{font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.08em}
 .dl-fg select,.dl-fg input[type=text],.dl-fg input[type=date]{height:36px;border:1px solid #e5e7eb;border-radius:7px;padding:0 11px;font-size:13px;color:#111827;background:#fff;outline:none;transition:border .15s;font-family:inherit;box-sizing:border-box}
 .dl-fg select:focus,.dl-fg input:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.08)}
-#dl-co-sel{min-width:220px}
+#dl-co-inp{min-width:220px}
 #dl-acc-inp{min-width:280px}
 #dl-from,#dl-to{width:148px}
+.dl-fg-co{position:relative}
 .dl-drop{position:absolute;z-index:9999;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.12);min-width:340px;max-height:300px;overflow-y:auto;margin-top:3px;left:0}
 .dl-drop-section{padding:6px 12px 3px;font-size:10px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid #f3f4f6;background:#fafafa}
 .dl-drop-item{padding:9px 14px;cursor:pointer;display:flex;flex-direction:column;gap:2px;border-bottom:1px solid #f9fafb}
@@ -149,9 +151,12 @@ class DuxLedger {
 		$(this.wrapper).find(".layout-main-section").html(`
 <div class="dl-wrap">
   <div class="dl-filter-card">
-    <div class="dl-fg">
+    <div class="dl-fg dl-fg-co">
       <label>Company</label>
-      <select id="dl-co-sel"><option value="">Select company…</option></select>
+      <div id="dl-co-pill-wrap"></div>
+      <input id="dl-co-inp" type="text" placeholder="Type to search company…" autocomplete="off">
+      <input id="dl-co-sel" type="hidden">
+      <div class="dl-drop" id="dl-co-drop" style="display:none"></div>
     </div>
     <div class="dl-fg dl-fg-acc">
       <label>Account / Party</label>
@@ -194,7 +199,15 @@ class DuxLedger {
 
 	_bindEvents() {
 		var self = this;
-		_gel("dl-co-sel").addEventListener("change", function(){ self._clearSelection(); });
+		// Company picker — type-to-filter; click-to-select stays in
+		// _renderCompanyDropdown.
+		_gel("dl-co-inp").addEventListener("input", function(){
+			self._renderCompanyDropdown(this.value);
+		});
+		_gel("dl-co-inp").addEventListener("focus", function(){
+			self._renderCompanyDropdown(this.value);
+		});
+		// Account / party picker (unchanged).
 		_gel("dl-acc-inp").addEventListener("input", _debounce(function(){
 			var co=_gel("dl-co-sel").value, txt=this.value.trim();
 			if(co&&txt.length>=2) self._search(co,txt);
@@ -205,6 +218,7 @@ class DuxLedger {
 			if(co&&txt.length>=2) self._search(co,txt);
 		});
 		document.addEventListener("click", function(e){
+			if(!e.target.closest(".dl-fg-co"))  _gel("dl-co-drop").style.display="none";
 			if(!e.target.closest(".dl-fg-acc")) _gel("dl-drop").style.display="none";
 			if(!e.target.closest(".dl-print-split")) _gel("dl-print-menu").classList.remove("open");
 		});
@@ -214,7 +228,7 @@ class DuxLedger {
 		_gel("dl-print-caret").addEventListener("click", function(e){ e.stopPropagation(); _gel("dl-print-menu").classList.toggle("open"); });
 		_gel("dl-opt-p").addEventListener("click",  function(){ _gel("dl-print-menu").classList.remove("open"); self._printReport(false); });
 		_gel("dl-opt-l").addEventListener("click",  function(){ _gel("dl-print-menu").classList.remove("open"); self._printReport(true); });
-		["dl-co-sel","dl-acc-inp","dl-from","dl-to"].forEach(function(id){
+		["dl-co-inp","dl-acc-inp","dl-from","dl-to"].forEach(function(id){
 			_gel(id).addEventListener("keydown", function(ev){ if(ev.key==="Enter") self.fetchReport(); });
 		});
 	}
@@ -231,14 +245,54 @@ class DuxLedger {
 		frappe.call({
 			method:"dux_voucher.dux_voucher.api.reports_api.get_permitted_companies",
 			callback:function(r){
-				self._populateCompanies(r.message||[]);
+				self._companies = r.message || [];
+				// If only one company is permitted, auto-select so the
+				// counter operator doesn't have to click through a
+				// single-item picker.
+				if(self._companies.length === 1) self._selectCompany(self._companies[0]);
 			},
 		});
 	}
 
-	_populateCompanies(names){
-		var sel=_gel("dl-co-sel");
-		names.forEach(function(n){ sel.innerHTML+=`<option value="${_esc(n)}">${_esc(n)}</option>`; });
+	_renderCompanyDropdown(filterTxt){
+		var self=this, drop=_gel("dl-co-drop");
+		var lc=(filterTxt||"").toLowerCase();
+		var matched=this._companies.filter(function(c){ return c.toLowerCase().indexOf(lc)!==-1; });
+		if(!matched.length){
+			drop.innerHTML='<div class="dl-drop-empty">No companies match</div>';
+			drop.style.display="block";
+			return;
+		}
+		drop.innerHTML=matched.map(function(c){
+			return `<div class="dl-drop-item dl-co-item" data-v="${_esc(c)}"><span class="dl-drop-label">${_esc(c)}</span></div>`;
+		}).join("");
+		drop.style.display="block";
+		drop.querySelectorAll(".dl-co-item").forEach(function(el){
+			el.addEventListener("click", function(){ self._selectCompany(el.dataset.v); });
+		});
+	}
+
+	_selectCompany(name){
+		var self=this;
+		_gel("dl-co-sel").value=name;
+		_gel("dl-co-inp").value="";
+		_gel("dl-co-inp").placeholder="Selected ↑ — type to change";
+		_gel("dl-co-drop").style.display="none";
+		_gel("dl-co-pill-wrap").innerHTML=
+			`<div class="dl-sel-pill">${_esc(name)}<span class="dl-sel-pill-x" id="dl-co-clear">×</span></div>`;
+		_gel("dl-co-clear").addEventListener("click", function(){ self._clearCompany(); });
+		// Account / party choice is company-scoped — wipe it so the
+		// user re-picks one valid in the new company.
+		this._clearSelection();
+	}
+
+	_clearCompany(){
+		_gel("dl-co-sel").value="";
+		_gel("dl-co-inp").value="";
+		_gel("dl-co-inp").placeholder="Type to search company…";
+		_gel("dl-co-pill-wrap").innerHTML="";
+		_gel("dl-co-drop").style.display="none";
+		this._clearSelection();
 	}
 
 	_clearSelection(){
@@ -282,7 +336,7 @@ class DuxLedger {
 	}
 
 	applyRouteOptions(opts){
-		if(opts.company)   _gel("dl-co-sel").value=opts.company;
+		if(opts.company)   this._selectCompany(opts.company);
 		if(opts.account)   _gel("dl-acc-inp").value=opts.account;
 		if(opts.from_date) _gel("dl-from").value=opts.from_date;
 		if(opts.to_date)   _gel("dl-to").value=opts.to_date;

@@ -34,6 +34,7 @@ class DuxDayBook {
 		this.wrapper   = wrapper;
 		this.page      = page;
 		this._lastData = null;
+		this._companies = [];   // populated by _loadCompanies
 
 		this._injectStyles();
 		this._renderLayout();
@@ -55,9 +56,18 @@ class DuxDayBook {
 .db-filter-card{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:20px 24px;margin-bottom:20px;display:flex;flex-wrap:wrap;align-items:flex-end;gap:16px}
 .db-fg{display:flex;flex-direction:column;gap:5px}
 .db-fg label{font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.08em}
-.db-fg select,.db-fg input[type=date]{height:36px;border:1px solid #e5e7eb;border-radius:7px;padding:0 11px;font-size:13px;color:#111827;background:#fff;outline:none;transition:border .15s;font-family:inherit;box-sizing:border-box}
+.db-fg select,.db-fg input[type=date],.db-fg input[type=text]{height:36px;border:1px solid #e5e7eb;border-radius:7px;padding:0 11px;font-size:13px;color:#111827;background:#fff;outline:none;transition:border .15s;font-family:inherit;box-sizing:border-box}
 .db-fg select:focus,.db-fg input:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.08)}
-#db-co-sel{min-width:220px}
+#db-co-inp{min-width:220px}
+.db-fg-co{position:relative}
+.db-drop{position:absolute;z-index:9999;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.12);min-width:240px;max-height:300px;overflow-y:auto;margin-top:3px;left:0}
+.db-drop-item{padding:9px 14px;cursor:pointer;border-bottom:1px solid #f9fafb;font-size:13px;color:#111827}
+.db-drop-item:last-child{border-bottom:none}
+.db-drop-item:hover{background:#f0f4ff}
+.db-drop-empty{padding:16px;font-size:13px;color:#9ca3af;text-align:center}
+.db-sel-pill{display:inline-flex;align-items:center;gap:5px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:5px;padding:2px 8px;font-size:12px;font-weight:500;color:#1d4ed8;margin-bottom:4px;cursor:pointer}
+.db-sel-pill-x{font-size:14px;line-height:1;color:#93c5fd;margin-left:2px}
+.db-sel-pill-x:hover{color:#1d4ed8}
 #db-vt-sel{min-width:165px}
 #db-from,#db-to{width:148px}
 .db-btn-row{display:flex;gap:8px;align-items:flex-end}
@@ -131,9 +141,12 @@ class DuxDayBook {
 		$(this.wrapper).find(".layout-main-section").html(`
 <div class="db-wrap">
   <div class="db-filter-card">
-    <div class="db-fg">
+    <div class="db-fg db-fg-co">
       <label>Company</label>
-      <select id="db-co-sel"><option value="">Select company…</option></select>
+      <div id="db-co-pill-wrap"></div>
+      <input id="db-co-inp" type="text" placeholder="Type to search company…" autocomplete="off">
+      <input id="db-co-sel" type="hidden">
+      <div class="db-drop" id="db-co-drop" style="display:none"></div>
     </div>
     <div class="db-fg">
       <label>From</label>
@@ -188,7 +201,10 @@ class DuxDayBook {
 
 	_bindEvents() {
 		var self = this;
+		_gel("db-co-inp").addEventListener("input", function(){ self._renderCompanyDropdown(this.value); });
+		_gel("db-co-inp").addEventListener("focus", function(){ self._renderCompanyDropdown(this.value); });
 		document.addEventListener("click", function(e){
+			if(!e.target.closest(".db-fg-co"))      _gel("db-co-drop").style.display="none";
 			if(!e.target.closest(".db-print-split")) _gel("db-print-menu").classList.remove("open");
 		});
 		_gel("db-show-btn").addEventListener("click", function(){ self.fetchReport(); });
@@ -197,7 +213,7 @@ class DuxDayBook {
 		_gel("db-print-caret").addEventListener("click", function(e){ e.stopPropagation(); _gel("db-print-menu").classList.toggle("open"); });
 		_gel("db-opt-p").addEventListener("click",  function(){ _gel("db-print-menu").classList.remove("open"); self._printReport(false); });
 		_gel("db-opt-l").addEventListener("click",  function(){ _gel("db-print-menu").classList.remove("open"); self._printReport(true); });
-		["db-co-sel","db-from","db-to","db-vt-sel"].forEach(function(id){
+		["db-co-inp","db-from","db-to","db-vt-sel"].forEach(function(id){
 			_gel(id).addEventListener("keydown", function(ev){ if(ev.key==="Enter") self.fetchReport(); });
 		});
 	}
@@ -215,18 +231,51 @@ class DuxDayBook {
 		frappe.call({
 			method:"dux_voucher.dux_voucher.api.reports_api.get_permitted_companies",
 			callback:function(r){
-				self._populateCompanies(r.message||[]);
+				self._companies = r.message || [];
+				if(self._companies.length === 1) self._selectCompany(self._companies[0]);
 			},
 		});
 	}
 
-	_populateCompanies(names){
-		var sel=_gel("db-co-sel");
-		names.forEach(function(n){ sel.innerHTML+=`<option value="${dbEsc(n)}">${dbEsc(n)}</option>`; });
+	_renderCompanyDropdown(filterTxt){
+		var self=this, drop=_gel("db-co-drop");
+		var lc=(filterTxt||"").toLowerCase();
+		var matched=this._companies.filter(function(c){ return c.toLowerCase().indexOf(lc)!==-1; });
+		if(!matched.length){
+			drop.innerHTML='<div class="db-drop-empty">No companies match</div>';
+			drop.style.display="block";
+			return;
+		}
+		drop.innerHTML=matched.map(function(c){
+			return `<div class="db-drop-item db-co-item" data-v="${dbEsc(c)}">${dbEsc(c)}</div>`;
+		}).join("");
+		drop.style.display="block";
+		drop.querySelectorAll(".db-co-item").forEach(function(el){
+			el.addEventListener("click", function(){ self._selectCompany(el.dataset.v); });
+		});
+	}
+
+	_selectCompany(name){
+		var self=this;
+		_gel("db-co-sel").value=name;
+		_gel("db-co-inp").value="";
+		_gel("db-co-inp").placeholder="Selected ↑ — type to change";
+		_gel("db-co-drop").style.display="none";
+		_gel("db-co-pill-wrap").innerHTML=
+			`<div class="db-sel-pill">${dbEsc(name)}<span class="db-sel-pill-x" id="db-co-clear">×</span></div>`;
+		_gel("db-co-clear").addEventListener("click", function(){ self._clearCompany(); });
+	}
+
+	_clearCompany(){
+		_gel("db-co-sel").value="";
+		_gel("db-co-inp").value="";
+		_gel("db-co-inp").placeholder="Type to search company…";
+		_gel("db-co-pill-wrap").innerHTML="";
+		_gel("db-co-drop").style.display="none";
 	}
 
 	applyRouteOptions(opts){
-		if(opts.company)   _gel("db-co-sel").value=opts.company;
+		if(opts.company)   this._selectCompany(opts.company);
 		if(opts.from_date) _gel("db-from").value=opts.from_date;
 		if(opts.to_date)   _gel("db-to").value=opts.to_date;
 		if(opts.company)   this.fetchReport();

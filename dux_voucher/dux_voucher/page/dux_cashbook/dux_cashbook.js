@@ -37,6 +37,7 @@ class DuxCashBook {
 		this.page      = page;
 		this._lastData = null;
 		this._accounts = [];  // Bank/Cash accounts for current company
+		this._companies = []; // populated by _loadCompanies
 
 		this._injectStyles();
 		this._renderLayout();
@@ -58,9 +59,18 @@ class DuxCashBook {
 .cb-filter-card{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:20px 24px;margin-bottom:20px;display:flex;flex-wrap:wrap;align-items:flex-end;gap:16px}
 .cb-fg{display:flex;flex-direction:column;gap:5px}
 .cb-fg label{font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.08em}
-.cb-fg select,.cb-fg input[type=date]{height:36px;border:1px solid #e5e7eb;border-radius:7px;padding:0 11px;font-size:13px;color:#111827;background:#fff;outline:none;transition:border .15s;font-family:inherit;box-sizing:border-box}
+.cb-fg select,.cb-fg input[type=date],.cb-fg input[type=text]{height:36px;border:1px solid #e5e7eb;border-radius:7px;padding:0 11px;font-size:13px;color:#111827;background:#fff;outline:none;transition:border .15s;font-family:inherit;box-sizing:border-box}
 .cb-fg select:focus,.cb-fg input:focus{border-color:#059669;box-shadow:0 0 0 3px rgba(5,150,105,.08)}
-#cb-co-sel{min-width:220px}
+#cb-co-inp{min-width:220px}
+.cb-fg-co{position:relative}
+.cb-drop{position:absolute;z-index:9999;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.12);min-width:240px;max-height:300px;overflow-y:auto;margin-top:3px;left:0}
+.cb-drop-item{padding:9px 14px;cursor:pointer;border-bottom:1px solid #f9fafb;font-size:13px;color:#111827}
+.cb-drop-item:last-child{border-bottom:none}
+.cb-drop-item:hover{background:#f0fdf4}
+.cb-drop-empty{padding:16px;font-size:13px;color:#9ca3af;text-align:center}
+.cb-sel-pill{display:inline-flex;align-items:center;gap:5px;background:#f0fdf4;border:1px solid #a7f3d0;border-radius:5px;padding:2px 8px;font-size:12px;font-weight:500;color:#047857;margin-bottom:4px;cursor:pointer}
+.cb-sel-pill-x{font-size:14px;line-height:1;color:#6ee7b7;margin-left:2px}
+.cb-sel-pill-x:hover{color:#047857}
 #cb-acc-sel{min-width:280px}
 #cb-from,#cb-to{width:148px}
 .cb-btn-row{display:flex;gap:8px;align-items:flex-end}
@@ -140,9 +150,12 @@ class DuxCashBook {
 		$(this.wrapper).find(".layout-main-section").html(`
 <div class="cb-wrap">
   <div class="cb-filter-card">
-    <div class="cb-fg">
+    <div class="cb-fg cb-fg-co">
       <label>Company</label>
-      <select id="cb-co-sel"><option value="">Select company…</option></select>
+      <div id="cb-co-pill-wrap"></div>
+      <input id="cb-co-inp" type="text" placeholder="Type to search company…" autocomplete="off">
+      <input id="cb-co-sel" type="hidden">
+      <div class="cb-drop" id="cb-co-drop" style="display:none"></div>
     </div>
     <div class="cb-fg">
       <label>Bank / Cash Account</label>
@@ -183,13 +196,10 @@ class DuxCashBook {
 
 	_bindEvents() {
 		var self = this;
-		_gel("cb-co-sel").addEventListener("change", function(){
-			var co = this.value;
-			_gel("cb-acc-sel").innerHTML = '<option value="">Loading…</option>';
-			_gel("cb-print-split").style.display = "none";
-			if(co) self._loadAccounts(co);
-		});
+		_gel("cb-co-inp").addEventListener("input", function(){ self._renderCompanyDropdown(this.value); });
+		_gel("cb-co-inp").addEventListener("focus", function(){ self._renderCompanyDropdown(this.value); });
 		document.addEventListener("click", function(e){
+			if(!e.target.closest(".cb-fg-co"))      _gel("cb-co-drop").style.display="none";
 			if(!e.target.closest(".cb-print-split")) _gel("cb-print-menu").classList.remove("open");
 		});
 		_gel("cb-show-btn").addEventListener("click",   function(){ self.fetchReport(); });
@@ -198,7 +208,7 @@ class DuxCashBook {
 		_gel("cb-print-caret").addEventListener("click",function(e){ e.stopPropagation(); _gel("cb-print-menu").classList.toggle("open"); });
 		_gel("cb-opt-p").addEventListener("click",  function(){ _gel("cb-print-menu").classList.remove("open"); self._printReport(false); });
 		_gel("cb-opt-l").addEventListener("click",  function(){ _gel("cb-print-menu").classList.remove("open"); self._printReport(true); });
-		["cb-co-sel","cb-acc-sel","cb-from","cb-to"].forEach(function(id){
+		["cb-co-inp","cb-acc-sel","cb-from","cb-to"].forEach(function(id){
 			_gel(id).addEventListener("keydown", function(ev){ if(ev.key==="Enter") self.fetchReport(); });
 		});
 	}
@@ -215,14 +225,52 @@ class DuxCashBook {
 		frappe.call({
 			method:"dux_voucher.dux_voucher.api.reports_api.get_permitted_companies",
 			callback:function(r){
-				self._populateCompanies(r.message||[]);
+				self._companies = r.message || [];
+				if(self._companies.length === 1) self._selectCompany(self._companies[0]);
 			},
 		});
 	}
 
-	_populateCompanies(names){
-		var sel=_gel("cb-co-sel");
-		names.forEach(function(n){ sel.innerHTML+=`<option value="${cbEsc(n)}">${cbEsc(n)}</option>`; });
+	_renderCompanyDropdown(filterTxt){
+		var self=this, drop=_gel("cb-co-drop");
+		var lc=(filterTxt||"").toLowerCase();
+		var matched=this._companies.filter(function(c){ return c.toLowerCase().indexOf(lc)!==-1; });
+		if(!matched.length){
+			drop.innerHTML='<div class="cb-drop-empty">No companies match</div>';
+			drop.style.display="block";
+			return;
+		}
+		drop.innerHTML=matched.map(function(c){
+			return `<div class="cb-drop-item cb-co-item" data-v="${cbEsc(c)}">${cbEsc(c)}</div>`;
+		}).join("");
+		drop.style.display="block";
+		drop.querySelectorAll(".cb-co-item").forEach(function(el){
+			el.addEventListener("click", function(){ self._selectCompany(el.dataset.v); });
+		});
+	}
+
+	_selectCompany(name){
+		var self=this;
+		_gel("cb-co-sel").value=name;
+		_gel("cb-co-inp").value="";
+		_gel("cb-co-inp").placeholder="Selected ↑ — type to change";
+		_gel("cb-co-drop").style.display="none";
+		_gel("cb-co-pill-wrap").innerHTML=
+			`<div class="cb-sel-pill">${cbEsc(name)}<span class="cb-sel-pill-x" id="cb-co-clear">×</span></div>`;
+		_gel("cb-co-clear").addEventListener("click", function(){ self._clearCompany(); });
+		// Cash Book's bank/cash account picker is company-scoped — reload it.
+		_gel("cb-acc-sel").innerHTML = '<option value="">Loading…</option>';
+		_gel("cb-print-split").style.display = "none";
+		self._loadAccounts(name);
+	}
+
+	_clearCompany(){
+		_gel("cb-co-sel").value="";
+		_gel("cb-co-inp").value="";
+		_gel("cb-co-inp").placeholder="Type to search company…";
+		_gel("cb-co-pill-wrap").innerHTML="";
+		_gel("cb-co-drop").style.display="none";
+		_gel("cb-acc-sel").innerHTML='<option value="">— select company first —</option>';
 	}
 
 	_loadAccounts(company){
@@ -252,7 +300,7 @@ class DuxCashBook {
 	}
 
 	applyRouteOptions(opts){
-		if(opts.company)   _gel("cb-co-sel").value=opts.company;
+		if(opts.company)   this._selectCompany(opts.company);
 		if(opts.account)   _gel("cb-acc-sel").value=opts.account;
 		if(opts.from_date) _gel("cb-from").value=opts.from_date;
 		if(opts.to_date)   _gel("cb-to").value=opts.to_date;
