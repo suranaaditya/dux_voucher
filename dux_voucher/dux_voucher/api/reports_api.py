@@ -130,8 +130,15 @@ def get_ledger_statement(company, account, from_date, to_date,
 		total_cr += cr
 
 		display_type, display_vch, vch_url = _resolve_voucher(e)
-		prefix  = "To" if dr > 0 else "By"
-		contra  = e.account if use_party else (e.party or _clean_against(e.against or ""))
+		if use_party:
+			# Party ledger — RGI house convention (inverse of textbook):
+			# party debited (payment) -> "By", party credited (receipt) -> "To"
+			prefix = "By" if dr > 0 else "To"
+			contra = _clean_against(e.against or "") or e.account
+		else:
+			# Account / Cash & Bank book — standard convention
+			prefix = "To" if dr > 0 else "By"
+			contra = e.party or _clean_against(e.against or "")
 
 		rows.append(dict(
 			posting_date  = formatdate(e.posting_date, "dd-MMM-yy"),
