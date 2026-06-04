@@ -130,7 +130,11 @@ ledger). Submittable doctypes:
 - **Ex Student** — per-student master with mixed Dr/Cr opening balance
 - **Ex Student Opening Batch** — bulk-upload opening balances with CSV
   import
-- **Ex Student Receipt** — fee collection → posts JE
+- **Ex Student Receipt** — fee collection → posts JE (Dr Bank/Cash, Cr
+  Receivable)
+- **Ex Student Refund** — pay a credit balance back → posts JE (Dr
+  Receivable, Cr Bank/Cash); mirror of Receipt with reversed legs,
+  orange-accented print format, soft-warn on Dr balance and overpay
 - **Ex Student Writeoff** — partial / full writeoff → posts JE
 - **Ex Student Ledger Entry** — denormalised running-balance rows for
   the Outstanding report
@@ -179,15 +183,15 @@ on `frappe.query_reports["Trial Balance"]` to wrap the report's
 
 A System-Manager-only Single doctype `Dux Backdating Settings`
 controls whether back-dated and forward-dated postings are accepted on
-seven controlled doctypes. Each rule has independent `allow_*` flags
+nine controlled doctypes. Each rule has independent `allow_*` flags
 plus day caps; **`max_days_* = 0` is treated as unlimited**, mirroring
 the natural "checked = open, integer = limit" semantics. A global
 bypass-roles list short-circuits the check for users holding any of
 those roles.
 
-The seven controlled doctypes:
+The nine controlled doctypes:
 
-- Payment Voucher · Receipt Voucher · Ex Student Receipt · Journal Entry
+- Payment Voucher · Receipt Voucher · Ex Student Receipt · Ex Student Refund · Student Fee Receipt · Journal Entry
 - Purchase Order (uses `transaction_date`, configured per-rule via the
   optional `date_field` override)
 - Purchase Receipt · Purchase Invoice
@@ -275,8 +279,8 @@ row on already-deployed sites.
 ## Pending Work
 
 - [ ] Production deploy of `feature/new-student-module` — pull,
-      `bench migrate` (runs `v1_2` patch to add 8th backdating rule),
-      HUP gunicorn. No `bench restart`.
+      `bench migrate` (runs `v1_2` + `v1_3` patches to add the 8th and
+      9th backdating rules), HUP gunicorn. No `bench restart`.
 - [ ] Smoke tests for Formatted TB and Backdating (planned in
       `formatted_reports/PLAN.md` §5.3 — needs the marker assertion
       against the built bundle)
@@ -287,6 +291,15 @@ row on already-deployed sites.
 
 ## Recently Completed
 
+- [x] **Ex Student Refund** — submittable doctype mirroring Ex Student
+      Receipt with reversed JE legs (Dr Receivable, Cr Bank/Cash) and
+      a ledger entry on the debit side. Soft-warns when paying a Dr-
+      balance student or when refund exceeds available Cr; never hard-
+      blocks. Orange-accented print format. Wired into the Backdating
+      Policy as the 9th controlled doctype via `v1_3` patch. Reuses
+      `_get_ex_student_accounts`, `_validate_bank_cash_account`,
+      `_submit_doc`, `_safe_cancel`, and the existing generic
+      `on_journal_entry_cancel` cascade hook
 - [x] **New Student Admission Receipts** — Course + Course Fee Head +
       Student + Student Fee Receipt + child table; receipt posts a
       single 2-line JE; polished print format; Admission Fee Register
@@ -295,7 +308,7 @@ row on already-deployed sites.
       controlled doctype via `v1_2` patch
 - [x] **Backdating Policy** — Single doctype + 3 child tables + seed
       patch + backfill patch + per-rule `date_field` override; 27 unit
-      tests; wired into 8 controlled doctypes via `doc_events`
+      tests; wired into 9 controlled doctypes via `doc_events`
 - [x] **Formatted Trial Balance** — two-sheet polished xlsx, hooked via
       `app_include_js` with `Object.defineProperty` setter to survive
       ERPNext's lazy load

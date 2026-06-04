@@ -7,3 +7,4 @@
 dux_voucher.dux_voucher.patches.v1_0.seed_backdating_rules
 dux_voucher.dux_voucher.patches.v1_1.backfill_date_field
 dux_voucher.dux_voucher.patches.v1_2.seed_student_fee_receipt_rule
+dux_voucher.dux_voucher.patches.v1_3.seed_ex_student_refund_rule
