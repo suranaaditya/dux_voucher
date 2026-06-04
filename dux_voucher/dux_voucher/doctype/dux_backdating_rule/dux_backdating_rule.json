@@ -21,7 +21,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "DocType",
-   "options": "\nPayment Voucher\nReceipt Voucher\nEx Student Receipt\nStudent Fee Receipt\nJournal Entry\nPurchase Order\nPurchase Receipt\nPurchase Invoice",
+   "options": "\nPayment Voucher\nReceipt Voucher\nEx Student Receipt\nEx Student Refund\nStudent Fee Receipt\nJournal Entry\nPurchase Order\nPurchase Receipt\nPurchase Invoice",
    "reqd": 1
   },
   {
@@ -70,7 +70,7 @@
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-04-30 00:00:00",
+ "modified": "2026-06-04 00:00:00",
  "modified_by": "Administrator",
  "module": "Dux Voucher",
  "name": "Dux Backdating Rule",
