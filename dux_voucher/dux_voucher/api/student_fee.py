@@ -70,21 +70,31 @@ def _total_paid_by_student(student, admission_year=None):
 
     Returns ``(paid_amount, receipt_count)``. Cancelled receipts are
     naturally excluded by the ``docstatus=1`` filter.
+
+    Implemented with raw SQL because frappe.db.get_value rejects
+    aggregate functions written as column strings (it requires the
+    less-readable dict form for those). One round-trip query is fine
+    for the form's headline.
     """
     if not student:
         return 0.0, 0
 
-    filters = {"docstatus": 1, "student": student}
+    params = {"student": student}
+    extra = ""
     if admission_year:
-        filters["admission_year"] = admission_year
+        extra = " AND admission_year=%(year)s"
+        params["year"] = admission_year
 
-    row = frappe.db.get_value(
-        "Student Fee Receipt",
-        filters,
-        ["SUM(total_amount) AS paid", "COUNT(name) AS receipt_count"],
-        as_dict=True,
-    ) or {}
-    return flt(row.get("paid") or 0), int(row.get("receipt_count") or 0)
+    row = frappe.db.sql(
+        f"""SELECT COALESCE(SUM(total_amount), 0) AS paid,
+                  COUNT(name)                    AS receipt_count
+            FROM `tabStudent Fee Receipt`
+            WHERE docstatus=1 AND student=%(student)s {extra}""",
+        params, as_dict=True,
+    )
+    if not row:
+        return 0.0, 0
+    return flt(row[0].get("paid") or 0), int(row[0].get("receipt_count") or 0)
 
 
 @frappe.whitelist()
