@@ -25,6 +25,23 @@ def get_ledger_statement(company, account, from_date, to_date,
 
 	use_party = bool(party and party_type)
 
+	# Resolve account_type up-front: needed both for the row-rendering
+	# convention (Cash & Bank Book inverts To/By per the RGI house rule,
+	# plain non-bank accounts keep the textbook rule) and for the closing
+	# display label further down.
+	acc_meta = frappe.db.get_value(
+		"Account", account, ["account_name", "account_type"], as_dict=True,
+	) or {}
+	acc_type = acc_meta.get("account_type", "") or ""
+	# Inverted convention applies to:
+	#   * the party ledger (already in this function via use_party=True)
+	#   * any Cash or Bank account (i.e. the Cash & Bank Book page, and
+	#     also anyone opening such an account via the Ledger Statement
+	#     account picker — same account, same convention)
+	# Plain non-bank accounts (Sales, Expense, Sundry Creditors viewed
+	# as an account rather than a party, …) keep the textbook convention.
+	invert_to_by = use_party or acc_type in ("Bank", "Cash")
+
 	# ── Opening Balance ───────────────────────────────────────────────
 	# Roll into opening: anything before the period, plus any entry within
 	# the period flagged is_opening='Yes' (matches ERPNext General Ledger
@@ -135,8 +152,14 @@ def get_ledger_statement(company, account, from_date, to_date,
 			# party debited (payment) -> "By", party credited (receipt) -> "To"
 			prefix = "By" if dr > 0 else "To"
 			contra = _clean_against(e.against or "") or e.account
+		elif invert_to_by:
+			# Cash & Bank Book — RGI house convention (same inversion as
+			# party ledger). Bank Dr (receipt) reads as "By <source>",
+			# Bank Cr (payment) reads as "To <destination>".
+			prefix = "By" if dr > 0 else "To"
+			contra = e.party or _clean_against(e.against or "")
 		else:
-			# Account / Cash & Bank book — standard convention
+			# Plain non-bank account view — standard textbook convention.
 			prefix = "To" if dr > 0 else "By"
 			contra = e.party or _clean_against(e.against or "")
 
@@ -157,12 +180,12 @@ def get_ledger_statement(company, account, from_date, to_date,
 	closing = running
 	if use_party:
 		display_name = party
+		# Party ledger: surface the party type as the "account type"
+		# label so the front-end renders the right badge.
 		acc_type     = party_type
 	else:
-		meta = frappe.db.get_value("Account", account,
-			["account_name","account_type"], as_dict=True) or {}
-		display_name = meta.get("account_name", account)
-		acc_type     = meta.get("account_type", "")
+		display_name = acc_meta.get("account_name", account)
+		# acc_type already fetched up-front (used by invert_to_by); reuse.
 
 	return dict(
 		company         = company,
