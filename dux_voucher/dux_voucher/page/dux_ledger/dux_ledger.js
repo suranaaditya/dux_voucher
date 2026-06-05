@@ -42,10 +42,6 @@ class DuxLedger {
 		this._bindEvents();
 		this._setDefaultDates();
 		this._loadCompanies();
-
-		page.add_inner_button("← Home", function () {
-			window.location.href = "/rgi-home";
-		});
 	}
 
 	_injectStyles() {
