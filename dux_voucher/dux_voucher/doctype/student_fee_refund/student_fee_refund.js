@@ -110,7 +110,13 @@ frappe.ui.form.on("Student Fee Refund", {
     validate(frm) {
         if (frm._refund_warning_confirmed) return;
 
-        const total = flt(frm.doc.total_amount);
+        // total_amount on the parent is read-only and computed by the
+        // server-side controller in _compute_total. JS validate fires
+        // BEFORE that runs, so frm.doc.total_amount is still 0 at this
+        // point. Sum the heads grid live — same approach the headline
+        // uses — so the warning sees the right number.
+        const total = (frm.doc.heads || [])
+            .reduce((s, r) => s + flt(r.amount), 0);
         const summary = frm._paid_summary || { paid: 0, receipt_count: 0 };
         const paid = flt(summary.paid);
         const receipt_count = parseInt(summary.receipt_count || 0, 10);
