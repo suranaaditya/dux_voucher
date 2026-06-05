@@ -183,15 +183,15 @@ on `frappe.query_reports["Trial Balance"]` to wrap the report's
 
 A System-Manager-only Single doctype `Dux Backdating Settings`
 controls whether back-dated and forward-dated postings are accepted on
-nine controlled doctypes. Each rule has independent `allow_*` flags
+ten controlled doctypes. Each rule has independent `allow_*` flags
 plus day caps; **`max_days_* = 0` is treated as unlimited**, mirroring
 the natural "checked = open, integer = limit" semantics. A global
 bypass-roles list short-circuits the check for users holding any of
 those roles.
 
-The nine controlled doctypes:
+The ten controlled doctypes:
 
-- Payment Voucher · Receipt Voucher · Ex Student Receipt · Ex Student Refund · Student Fee Receipt · Journal Entry
+- Payment Voucher · Receipt Voucher · Ex Student Receipt · Ex Student Refund · Student Fee Receipt · Student Fee Refund · Journal Entry
 - Purchase Order (uses `transaction_date`, configured per-rule via the
   optional `date_field` override)
 - Purchase Receipt · Purchase Invoice
@@ -232,6 +232,16 @@ report and a print format:
   Cash). Cancel cascade in both directions reuses
   `utils.on_journal_entry_cancel` (generic over source doctype).
 - **Student Fee Receipt Head** — child row holding `(head, amount)`.
+- **Student Fee Refund** (submittable, `SRF-.YYYY.-`) — refund a paid
+  admission fee. Mirror of Receipt with reversed JE legs: debits
+  `Admission/Registration Fee (Provisional)`, credits `paid_from_account`.
+  Same heads child table for itemised refunds. Soft-warns when the
+  refund exceeds the student's total paid to date or when the student
+  has no fee receipt on file; never hard-blocks. Orange-accented print
+  format ("Admission Fee Refund Voucher"). Wired into the Backdating
+  Policy as the 10th controlled doctype via `v1_3`/`v1_4` patches.
+- **Student Fee Refund Head** — child row mirror of Student Fee
+  Receipt Head: `(head, amount)`.
 
 Receipt form behaviour (`student_fee_receipt.js`): admission_year
 auto-defaulted to the current Indian FY (computed sync in JS, format
@@ -279,8 +289,9 @@ row on already-deployed sites.
 ## Pending Work
 
 - [ ] Production deploy of `feature/new-student-module` — pull,
-      `bench migrate` (runs `v1_2` + `v1_3` patches to add the 8th and
-      9th backdating rules), HUP gunicorn. No `bench restart`.
+      `bench migrate` (runs `v1_2` + `v1_3` + `v1_4` patches to add the
+      8th, 9th and 10th backdating rules), HUP gunicorn. No `bench
+      restart`.
 - [ ] Smoke tests for Formatted TB and Backdating (planned in
       `formatted_reports/PLAN.md` §5.3 — needs the marker assertion
       against the built bundle)
@@ -291,6 +302,18 @@ row on already-deployed sites.
 
 ## Recently Completed
 
+- [x] **Student Fee Refund** — submittable doctype mirroring Student
+      Fee Receipt with reversed JE legs (Dr Admission/Registration Fee
+      (Provisional), Cr Bank/Cash) and the same `heads` child table
+      for itemised refunds. Soft-warns when the refund exceeds the
+      student's total paid to date (via `get_student_paid_summary`)
+      or when the student has no fee receipt on file. Never hard-
+      blocks. Orange-accented print format ("Admission Fee Refund
+      Voucher"). Wired into the Backdating Policy as the 10th
+      controlled doctype via `v1_4` patch. Reuses
+      `get_admission_fee_account`, `_validate_bank_cash_account`,
+      `_submit_doc`, `_safe_cancel`, and the existing generic
+      `on_journal_entry_cancel` cascade hook
 - [x] **Ex Student Refund** — submittable doctype mirroring Ex Student
       Receipt with reversed JE legs (Dr Receivable, Cr Bank/Cash) and
       a ledger entry on the debit side. Soft-warns when paying a Dr-
@@ -308,7 +331,7 @@ row on already-deployed sites.
       controlled doctype via `v1_2` patch
 - [x] **Backdating Policy** — Single doctype + 3 child tables + seed
       patch + backfill patch + per-rule `date_field` override; 27 unit
-      tests; wired into 9 controlled doctypes via `doc_events`
+      tests; wired into 10 controlled doctypes via `doc_events`
 - [x] **Formatted Trial Balance** — two-sheet polished xlsx, hooked via
       `app_include_js` with `Object.defineProperty` setter to survive
       ERPNext's lazy load

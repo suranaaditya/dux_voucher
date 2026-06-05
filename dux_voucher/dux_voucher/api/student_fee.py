@@ -21,6 +21,7 @@ safer pattern.
 
 import frappe
 from frappe import _
+from frappe.utils import flt
 
 
 ADMISSION_FEE_LEAF = "Admission/Registration Fee (Provisional)"
@@ -55,3 +56,45 @@ def get_admission_fee_account(company):
             .format(name, ADMISSION_FEE_GROUP, company)
         )
     return name
+
+
+# =====================================================================
+# Paid-summary helper (used by Student Fee Refund's form headline +
+# soft-warn dialogs to compare the proposed refund against the
+# student's total receipts to date)
+# =====================================================================
+
+def _total_paid_by_student(student, admission_year=None):
+    """Sum of ``total_amount`` over the student's submitted Student
+    Fee Receipts. Optionally constrained to a single admission year.
+
+    Returns ``(paid_amount, receipt_count)``. Cancelled receipts are
+    naturally excluded by the ``docstatus=1`` filter.
+    """
+    if not student:
+        return 0.0, 0
+
+    filters = {"docstatus": 1, "student": student}
+    if admission_year:
+        filters["admission_year"] = admission_year
+
+    row = frappe.db.get_value(
+        "Student Fee Receipt",
+        filters,
+        ["SUM(total_amount) AS paid", "COUNT(name) AS receipt_count"],
+        as_dict=True,
+    ) or {}
+    return flt(row.get("paid") or 0), int(row.get("receipt_count") or 0)
+
+
+@frappe.whitelist()
+def get_student_paid_summary(student, admission_year=None):
+    """Whitelisted endpoint for the Student Fee Refund form to render
+    its headline and to populate the cache that the validate-time
+    soft-warn dialogs consult.
+
+    Always returns a dict so the JS doesn't have to handle ``null``:
+        {"paid": <float>, "receipt_count": <int>}
+    """
+    paid, count = _total_paid_by_student(student, admission_year)
+    return {"paid": paid, "receipt_count": count}
