@@ -468,10 +468,19 @@ def _build_day_book_particulars_map(rows_raw):
 		elif vt == "Stock Entry":
 			se_names.append(r.voucher_no)
 		elif src_dt == "Payment Voucher" and src_vch:
+			# Head-wise PV — look up the friendly account heads on the
+			# PV doc itself (not the JE accounts, which are the technical
+			# posting accounts).
 			pv_names.append((r.voucher_no, src_vch))
 		elif src_dt == "Receipt Voucher" and src_vch:
 			rv_names.append((r.voucher_no, src_vch))
-		elif vt == "Journal Entry" and not src_dt:
+		elif vt == "Journal Entry":
+			# Any other Journal Entry — plain manual JE, Inter-Company
+			# Transfer, Ex Student Receipt/Refund, Student Fee Receipt,
+			# whatever module posted it. The first JE Account row is a
+			# meaningful label in every case (Cash - DD / Ex-Students
+			# Receivable - GHRCE / Admission/Registration Fee, etc.), so
+			# fall through to that regardless of source_doctype.
 			je_names.append(r.voucher_no)
 
 	# ── Purchase Receipt → supplier_name ─────────────────────────────
