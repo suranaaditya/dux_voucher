@@ -339,6 +339,15 @@ def get_day_book(company, from_date, to_date, voucher_type_filter=None):
 		ORDER BY gle.posting_date, MIN(gle.creation)
 	""", dict(company=company, from_date=from_date, to_date=to_date), as_dict=True)
 
+	# ── Enrich rows that have no party with a more meaningful label.
+	# "Various" is uninformative when the operator is scanning the day
+	# book — for Stock Entries it should read as the department, for
+	# Purchase Receipts the supplier, for Head-wise PV/RV and standalone
+	# JEs the first account head (with " & more" if the voucher has more
+	# than one row). Everything is pre-fetched in batches keyed by
+	# voucher_no so the loop below stays a constant number of queries.
+	particulars_map = _build_day_book_particulars_map(rows_raw)
+
 	rows   = []
 	totals = dict(debit=0.0, credit=0.0, count=0)
 
@@ -354,12 +363,13 @@ def get_day_book(company, from_date, to_date, voucher_type_filter=None):
 		cr  = flt(e.total_credit)
 		amt = dr  # debit = credit in balanced entry; show debit side as amount
 
-		# Particulars: prefer party names, fall back to "Various"
+		# Particulars: prefer party names; otherwise the per-voucher-type
+		# label we resolved above; else fall back to "Various".
 		parties = (e.parties or "").strip()
 		if parties:
 			particulars = parties
 		else:
-			particulars = "Various"
+			particulars = particulars_map.get(e.voucher_no) or "Various"
 
 		totals["debit"]  += dr
 		totals["credit"] += cr
@@ -407,6 +417,150 @@ def get_bank_cash_accounts(company):
 		  AND disabled=0
 		ORDER BY account_type, account_name
 	""", dict(company=company), as_dict=True)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# DAY BOOK — particulars enrichment
+# ══════════════════════════════════════════════════════════════════════
+
+def _build_day_book_particulars_map(rows_raw):
+	"""For Day Book vouchers that have no party on their GL entries,
+	resolve a more meaningful label than the bare "Various" fallback.
+
+	Returns a dict keyed by ``voucher_no``. Values come from per-voucher-
+	type lookups, all batched into one query per category so the cost
+	stays O(1) per Day Book load:
+
+	  * Purchase Receipt → ``supplier_name``
+	  * Stock Entry      → ``custom_department`` (falls back to
+	                       ``stock_entry_type`` if the custom field
+	                       isn't installed on this site)
+	  * Payment Voucher  → first PV Account Row's account head, plus
+	    (Head-wise mode)   " & more" if the PV has more than one row
+	  * Receipt Voucher  → mirror of PV via rv_account_row
+	  * Standalone JE    → first Journal Entry Account, plus " & more"
+	                       if the JE has more than one row
+
+	Rows whose voucher type doesn't match any of these (Sales Invoice,
+	Contra Entry, etc.) are absent from the returned map — the caller
+	will then fall back to "Various".
+	"""
+	out = {}
+
+	# Group voucher names by the lookup we need to perform.
+	pr_names = []   # Purchase Receipts
+	se_names = []   # Stock Entries
+	pv_names = []   # PV via Head-wise (no party on GL)
+	rv_names = []   # RV via Head-wise (no party on GL)
+	je_names = []   # standalone JEs (no PV/RV source)
+
+	for r in rows_raw:
+		# Only enrich rows that the main loop will treat as "Various".
+		if (r.get("parties") or "").strip():
+			continue
+
+		vt = r.voucher_type
+		src_dt = (r.get("source_doctype") or "").strip()
+		src_vch = (r.get("source_voucher") or "").strip()
+
+		if vt == "Purchase Receipt":
+			pr_names.append(r.voucher_no)
+		elif vt == "Stock Entry":
+			se_names.append(r.voucher_no)
+		elif src_dt == "Payment Voucher" and src_vch:
+			pv_names.append((r.voucher_no, src_vch))
+		elif src_dt == "Receipt Voucher" and src_vch:
+			rv_names.append((r.voucher_no, src_vch))
+		elif vt == "Journal Entry" and not src_dt:
+			je_names.append(r.voucher_no)
+
+	# ── Purchase Receipt → supplier_name ─────────────────────────────
+	if pr_names:
+		for r in frappe.db.sql(
+			"""SELECT name, COALESCE(supplier_name, supplier) AS label
+			   FROM `tabPurchase Receipt` WHERE name IN %(names)s""",
+			{"names": tuple(pr_names)}, as_dict=True,
+		):
+			if r.label:
+				out[r.name] = r.label
+
+	# ── Stock Entry → custom_department (fallback: stock_entry_type) ─
+	if se_names:
+		has_custom_dept = frappe.db.has_column(
+			"Stock Entry", "custom_department"
+		)
+		field = "custom_department" if has_custom_dept else "stock_entry_type"
+		for r in frappe.db.sql(
+			f"""SELECT name, COALESCE(`{field}`, stock_entry_type) AS label
+			    FROM `tabStock Entry` WHERE name IN %(names)s""",
+			{"names": tuple(se_names)}, as_dict=True,
+		):
+			if r.label:
+				out[r.name] = r.label
+
+	# ── PV (Head-wise) → first PV Account Row's account + " & more" ──
+	# pv_names is [(voucher_no, pv_doc_name)]; we group rows of the
+	# child table by the PV parent, then attribute each child's first
+	# row back to the voucher_no the Day Book sees.
+	pv_doc_to_vch = {p: v for v, p in pv_names}
+	if pv_doc_to_vch:
+		_resolve_head_row_label(
+			out          = out,
+			doc_to_vch   = pv_doc_to_vch,
+			child_table  = "tabPV Account Row",
+		)
+
+	# ── RV (Head-wise) → mirror of PV ────────────────────────────────
+	rv_doc_to_vch = {p: v for v, p in rv_names}
+	if rv_doc_to_vch:
+		_resolve_head_row_label(
+			out          = out,
+			doc_to_vch   = rv_doc_to_vch,
+			child_table  = "tabRV Account Row",
+		)
+
+	# ── Standalone Journal Entry → first JE Account + " & more" ─────
+	if je_names:
+		_resolve_head_row_label(
+			out          = out,
+			doc_to_vch   = {n: n for n in je_names},
+			child_table  = "tabJournal Entry Account",
+		)
+
+	return out
+
+
+def _resolve_head_row_label(out, doc_to_vch, child_table):
+	"""Shared body for PV / RV / JE head-row enrichment.
+
+	Reads ``account`` and ``idx`` from ``child_table`` for every parent
+	doc in ``doc_to_vch``, then sets ``out[voucher_no]`` to the first
+	row's account, plus " & more" when the parent has more than one
+	row. ``doc_to_vch`` maps the parent doc name to the Day Book
+	voucher_no that should receive the label (they are usually the same
+	for JE, and different for PV/RV where voucher_no is the backend JE).
+	"""
+	parents = tuple(doc_to_vch.keys())
+	rows = frappe.db.sql(
+		f"""SELECT parent, account, idx
+		    FROM `{child_table}` WHERE parent IN %(parents)s
+		    ORDER BY parent, idx""",
+		{"parents": parents}, as_dict=True,
+	)
+	# Group consecutively by parent (already ordered by parent, idx)
+	by_parent = {}
+	for r in rows:
+		by_parent.setdefault(r.parent, []).append(r.account)
+	for parent, accounts in by_parent.items():
+		if not accounts:
+			continue
+		first = accounts[0]
+		label = first
+		if len(accounts) > 1:
+			label = f"{first} & more"
+		vch = doc_to_vch.get(parent)
+		if vch:
+			out[vch] = label
 
 
 # ══════════════════════════════════════════════════════════════════════
