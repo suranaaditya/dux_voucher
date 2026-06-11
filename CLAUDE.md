@@ -83,9 +83,11 @@ dux_voucher/                              repo root (pyproject, README, CLAUDE.m
         │   ├── student_fee_receipt/           submittable; SFR-.YYYY.-
         │   └── student_fee_receipt_head/      child rows on receipt
         ├── page/
-        │   ├── dux_ledger/                    Party Ledger
+        │   ├── dux_ledger/                    Ledger Statement
         │   ├── dux_daybook/                   Day Book
-        │   └── dux_cashbook/                  Cash & Bank Book
+        │   ├── dux_cashbook/                  Cash & Bank Book
+        │   ├── dux_party_ledger/              Party Ledger (System Manager)
+        │   └── dux_student_ledger/            Student Ledger (ex + new student)
         ├── report/
         │   ├── ex_student_outstanding/
         │   ├── ict_pending_confirmation/
@@ -158,6 +160,16 @@ expectations of an accountant familiar with Tally:
 - **Dux Daybook** (`/app/dux-daybook`) — chronological voucher list,
   voucher-type filter
 - **Dux Cashbook** (`/app/dux-cashbook`) — bank/cash account ledger
+- **Dux Student Ledger** (`/app/dux-student-ledger`) — unified Dr/Cr
+  statement for a single **Ex Student** or **New Student**, picked via a
+  company-scoped toggle + student picker. NOT GL-Entry based (neither
+  student kind is a GL party, and both share one company-wide account):
+  the ex-student side reads the `Ex Student Ledger Entry` table, the
+  new-student side unions submitted Student Fee Receipts (→ Credit) and
+  Refunds (→ Debit). Backend `get_student_ledger` / `search_students`
+  return the SAME dict shape as `get_ledger_statement`, so the page
+  renderer and the openpyxl workbook builder are reused verbatim.
+  Role-gated (System Manager / Accounts Manager / Accounts User).
 
 Each page has filters, an in-window print (portrait/landscape), and a
 green **Excel** button → calls `api/reports_export.py`. The Excel
@@ -378,6 +390,8 @@ Notable cross-cutting files when you need to find something fast:
 | Posting-date enforcement | `dux_voucher/dux_voucher/api/backdating.py` |
 | Admission-fee account resolver | `dux_voucher/dux_voucher/api/student_fee.py` |
 | Page reports + xlsx exports | `dux_voucher/dux_voucher/api/reports_api.py`, `reports_export.py` |
+| Student Ledger page (ex + new student) | `dux_voucher/dux_voucher/page/dux_student_ledger/` |
+| Student Ledger backend (`get_student_ledger`, `search_students`) | `dux_voucher/dux_voucher/api/reports_api.py` |
 | Formatted TB workbook builder | `dux_voucher/formatted_reports/trial_balance/builder.py` |
 | Site-wide settings doctype | `dux_voucher/dux_voucher/doctype/dux_backdating_settings/` |
 | Student Fee Receipt controller + JE posting | `dux_voucher/dux_voucher/doctype/student_fee_receipt/student_fee_receipt.py` |

@@ -652,3 +652,235 @@ def get_permitted_companies():
         limit=200
     )
     return [c.name for c in companies]
+
+
+# ══════════════════════════════════════════════════════════════════════
+# STUDENT LEDGER  (Ex Student + New Student unified statement)
+# ══════════════════════════════════════════════════════════════════════
+#
+# Unlike the Ledger / Day Book / Cash Book pages above, this statement is
+# NOT built from GL Entry. Neither student kind is a GL party, and both
+# share one company-wide account (Ex-Students Receivable / Admission Fee
+# Provisional), so a single student cannot be isolated from GL.
+#
+# Instead we read the app's own data:
+#   * Ex Student  → the denormalised `Ex Student Ledger Entry` table
+#                   (Opening Batch / Receipt / Refund / Write-off rows).
+#   * New Student → the union of submitted Student Fee Receipts (money in
+#                   → Credit) and Student Fee Refunds (money out → Debit).
+#
+# Both paths normalise to the same row shape, then `_build_student_ledger`
+# folds everything before From-date into the opening balance, runs a
+# Dr/Cr balance over the period, and returns the SAME dict that
+# get_ledger_statement returns — so the page renderer and the openpyxl
+# workbook builder are reused verbatim.
+
+# Ex Student ledger voucher_type → (Particulars label, short pill label)
+_EX_VT_LABEL = {
+	"Ex Student Opening Batch": ("Opening Balance", "Opening Batch"),
+	"Ex Student Receipt":       ("Fee Receipt",     "Receipt"),
+	"Ex Student Refund":        ("Fee Refund",      "Refund"),
+	"Ex Student Writeoff":      ("Write-off",       "Write-off"),
+}
+
+
+@frappe.whitelist()
+def get_student_ledger(company, kind, student, from_date, to_date):
+	"""Unified Dr/Cr ledger statement for one Ex Student or New Student.
+
+	kind: "ex"  → Ex Student (reads Ex Student Ledger Entry)
+	      "new" → New Student (reads Student Fee Receipt + Student Fee Refund)
+	"""
+	if not all([company, kind, student, from_date, to_date]):
+		frappe.throw(_("Company, Student Type, Student, From Date and To Date are all required"))
+
+	kind = (kind or "").strip().lower()
+	if kind not in ("ex", "new"):
+		frappe.throw(_("Invalid student type: {0}").format(kind))
+
+	from_date = getdate(from_date)
+	to_date   = getdate(to_date)
+	if from_date > to_date:
+		frappe.throw(_("From Date cannot be after To Date"))
+
+	entries = []
+
+	if kind == "ex":
+		master = frappe.db.get_value(
+			"Ex Student", student, ["student_name", "father_name"], as_dict=True)
+		if not master:
+			frappe.throw(_("Ex Student {0} not found").format(student))
+		display_name = master.student_name or student
+		kind_label   = "Ex Student"
+
+		for e in frappe.db.sql("""
+			SELECT posting_date, debit, credit, voucher_type, voucher_no,
+			       remarks, creation
+			FROM `tabEx Student Ledger Entry`
+			WHERE ex_student=%(s)s AND company=%(co)s AND is_cancelled=0
+		""", dict(s=student, co=company), as_dict=True):
+			particulars, vt = _EX_VT_LABEL.get(
+				e.voucher_type, (e.voucher_type, e.voucher_type))
+			slug = (e.voucher_type or "").lower().replace(" ", "-")
+			vno  = e.voucher_no or ""
+			entries.append(dict(
+				posting_date = getdate(e.posting_date),
+				debit        = flt(e.debit),
+				credit       = flt(e.credit),
+				particulars  = particulars,
+				vtype        = vt,
+				vno          = vno,
+				vurl         = ("/desk/" + slug + "/" + vno) if vno else "",
+				remarks      = (e.remarks or "").strip(),
+				seq          = e.creation,
+			))
+
+	else:  # kind == "new"
+		master = frappe.db.get_value(
+			"Student", student, ["student_name", "student_display"], as_dict=True)
+		if not master:
+			frappe.throw(_("Student {0} not found").format(student))
+		display_name = master.student_display or master.student_name or student
+		kind_label   = "New Student"
+
+		# Receipts — money in → Credit on the Admission Fee liability.
+		for r in frappe.db.sql("""
+			SELECT name, posting_date, total_amount, remarks, reference_no,
+			       mode_of_payment, received_in_account AS account, creation
+			FROM `tabStudent Fee Receipt`
+			WHERE student=%(s)s AND company=%(co)s AND docstatus=1
+		""", dict(s=student, co=company), as_dict=True):
+			entries.append(dict(
+				posting_date = getdate(r.posting_date),
+				debit        = 0.0,
+				credit       = flt(r.total_amount),
+				particulars  = "Fee Receipt",
+				vtype        = "Fee Receipt",
+				vno          = r.name,
+				vurl         = "/desk/student-fee-receipt/" + r.name,
+				remarks      = (r.remarks or "").strip()
+				               or _student_remark("Received in", r.account,
+				                                  r.mode_of_payment, r.reference_no),
+				seq          = r.creation,
+			))
+
+		# Refunds — money out → Debit on the Admission Fee liability.
+		for r in frappe.db.sql("""
+			SELECT name, posting_date, total_amount, remarks, reference_no,
+			       mode_of_payment, paid_from_account AS account, creation
+			FROM `tabStudent Fee Refund`
+			WHERE student=%(s)s AND company=%(co)s AND docstatus=1
+		""", dict(s=student, co=company), as_dict=True):
+			entries.append(dict(
+				posting_date = getdate(r.posting_date),
+				debit        = flt(r.total_amount),
+				credit       = 0.0,
+				particulars  = "Fee Refund",
+				vtype        = "Fee Refund",
+				vno          = r.name,
+				vurl         = "/desk/student-fee-refund/" + r.name,
+				remarks      = (r.remarks or "").strip()
+				               or _student_remark("Paid from", r.account,
+				                                  r.mode_of_payment, r.reference_no),
+				seq          = r.creation,
+			))
+
+	return _build_student_ledger(company, display_name, kind_label,
+								 from_date, to_date, entries)
+
+
+def _build_student_ledger(company, display_name, kind_label,
+						  from_date, to_date, entries):
+	"""Fold pre-period entries into the opening balance, run a Dr/Cr
+	balance over the period, and return the get_ledger_statement-shaped
+	dict the page + Excel builder both consume."""
+	entries.sort(key=lambda e: (e["posting_date"], e["seq"]))
+
+	ob_net = sum(e["debit"] - e["credit"]
+				 for e in entries if e["posting_date"] < from_date)
+
+	running  = ob_net
+	total_dr = 0.0
+	total_cr = 0.0
+	rows     = []
+
+	for e in entries:
+		if not (from_date <= e["posting_date"] <= to_date):
+			continue
+		dr = flt(e["debit"])
+		cr = flt(e["credit"])
+		running  += (dr - cr)
+		total_dr += dr
+		total_cr += cr
+		rows.append(dict(
+			posting_date = formatdate(e["posting_date"], "dd-MMM-yy"),
+			prefix       = "",            # student ledger drops the To/By prefix
+			contra       = e["particulars"],
+			voucher_type = e["vtype"],
+			voucher_no   = e["vno"],
+			voucher_url  = e["vurl"],
+			debit        = dr,
+			credit       = cr,
+			balance      = abs(running),
+			balance_type = "Dr" if running >= 0 else "Cr",
+			remarks      = e["remarks"],
+		))
+
+	closing = running
+	return dict(
+		company         = company,
+		account         = display_name,
+		account_name    = display_name,
+		account_type    = kind_label,
+		from_date       = formatdate(from_date, "dd-MMM-yyyy"),
+		to_date         = formatdate(to_date,   "dd-MMM-yyyy"),
+		opening_balance = abs(ob_net),
+		opening_type    = "Dr" if ob_net >= 0 else "Cr",
+		closing_balance = abs(closing),
+		closing_type    = "Dr" if closing >= 0 else "Cr",
+		total_debit     = total_dr,
+		total_credit    = total_cr,
+		rows            = rows,
+		row_count       = len(rows),
+	)
+
+
+def _student_remark(verb, account, mop, ref):
+	"""Build a fallback remark for a New Student row that has no remarks
+	of its own — e.g. "Received in HDFC - DD  ·  UPI  ·  Ref 99887"."""
+	bits = []
+	if account: bits.append(f"{verb} {account}")
+	if mop:     bits.append(mop)
+	if ref:     bits.append("Ref " + ref)
+	return "  ·  ".join(bits)
+
+
+@frappe.whitelist()
+def search_students(company, kind, search_txt=""):
+	"""Autocomplete for the Student Ledger picker — Ex Students or new
+	Students scoped to the chosen company. Empty search lists the first
+	25 (useful for small institutions). Returns {value, label, meta}."""
+	if not company or not kind:
+		return []
+	kind = (kind or "").strip().lower()
+	like = "%" + (search_txt or "") + "%"
+	doctype = "Ex Student" if kind == "ex" else "Student"
+
+	out = []
+	for r in frappe.db.sql(f"""
+		SELECT name, student_name, father_name, course
+		FROM `tab{doctype}`
+		WHERE company=%(co)s AND COALESCE(is_disabled, 0)=0
+		  AND (name LIKE %(l)s OR student_name LIKE %(l)s
+		       OR father_name LIKE %(l)s)
+		ORDER BY student_name
+		LIMIT 25
+	""", dict(co=company, l=like), as_dict=True):
+		meta_bits = []
+		if r.father_name: meta_bits.append("S/o " + r.father_name)
+		if r.course:      meta_bits.append(r.course)
+		meta_bits.append(r.name)
+		out.append(dict(value=r.name,
+						label=r.student_name or r.name,
+						meta="  ·  ".join(meta_bits)))
+	return out

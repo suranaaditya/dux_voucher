@@ -35,6 +35,7 @@ PERIOD_BG   = "F8FAFC"
 ACCENT_LEDGER = "2563EB"
 ACCENT_CASH   = "059669"
 ACCENT_DAY    = "7C3AED"
+ACCENT_STUDENT = "0D9488"
 
 THIN       = Side(style="thin",   color="E2E8F0")
 HAIR       = Side(style="hair",   color="F1F5F9")
@@ -76,6 +77,19 @@ def export_cash_bank_book_xlsx(company, account, from_date, to_date):
                                  accent_color=ACCENT_CASH)
     label = d.get("account_name") or account
     fname = f"{title.replace(' ', '')}_{_safe(label)}_{from_date}_to_{to_date}.xlsx"
+    _stream(wb, fname)
+
+
+@frappe.whitelist()
+def export_student_ledger_xlsx(company, kind, student, from_date, to_date):
+    from dux_voucher.dux_voucher.api.reports_api import get_student_ledger
+    d = get_student_ledger(company, kind, student, from_date, to_date)
+    wb = _build_ledger_workbook(d, "Student Ledger",
+                                 debit_label="Debit",
+                                 credit_label="Credit",
+                                 accent_color=ACCENT_STUDENT)
+    label = d.get("account_name") or student
+    fname = f"StudentLedger_{_safe(label)}_{from_date}_to_{to_date}.xlsx"
     _stream(wb, fname)
 
 
