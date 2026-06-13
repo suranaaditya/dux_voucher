@@ -341,7 +341,7 @@ class DuxCashBook {
 		var isBank = d.account_type === "Bank";
 		var badgeClass = isBank ? "cb-acc-type-badge-bank" : "cb-acc-type-badge-cash";
 
-		rows+=`<tr class="cb-tr-ob"><td colspan="4"><span class="cb-ob-label">Opening Balance</span></td><td class="cb-c-amt"></td><td class="cb-c-amt"></td><td class="cb-c-bal">${cbBal(d.opening_balance,d.opening_type)}</td></tr>`;
+		rows+=`<tr class="cb-tr-ob"><td colspan="4"><span class="cb-ob-label">Opening Balance</span></td><td class="cb-c-amt">${d.opening_debit>0?`<span class="cb-dr">${cbFmt(d.opening_debit)}</span>`:'<span class="cb-nil">—</span>'}</td><td class="cb-c-amt">${d.opening_credit>0?`<span class="cb-cr">${cbFmt(d.opening_credit)}</span>`:'<span class="cb-nil">—</span>'}</td><td class="cb-c-bal">${cbBal(d.opening_balance,d.opening_type)}</td></tr>`;
 
 		if(!d.rows.length) rows+=`<tr><td colspan="7" class="cb-placeholder" style="padding:32px">No transactions in this period.</td></tr>`;
 
@@ -361,8 +361,8 @@ class DuxCashBook {
 			if(row.remarks) rows+=`<tr class="cb-tr-r"><td colspan="7">${cbEsc(row.remarks)}</td></tr>`;
 		});
 
-		rows+=`<tr class="cb-tr-cb"><td colspan="4"><span class="cb-cb-label">Closing Balance</span></td><td class="cb-c-amt"></td><td class="cb-c-amt"></td><td class="cb-c-bal" style="font-size:13px">${cbBal(d.closing_balance,d.closing_type)}</td></tr>`;
-		rows+=`<tr class="cb-tr-tot"><td colspan="4" class="cb-tot-label">Period Totals</td><td class="cb-c-amt"><span class="cb-dr">${cbFmt(d.total_debit)}</span></td><td class="cb-c-amt"><span class="cb-cr">${cbFmt(d.total_credit)}</span></td><td class="cb-c-bal"></td></tr>`;
+		rows+=`<tr class="cb-tr-cb"><td colspan="4"><span class="cb-cb-label">Closing Balance</span></td><td class="cb-c-amt">${d.closing_balancing_debit>0?`<span class="cb-dr">${cbFmt(d.closing_balancing_debit)}</span>`:'<span class="cb-nil">—</span>'}</td><td class="cb-c-amt">${d.closing_balancing_credit>0?`<span class="cb-cr">${cbFmt(d.closing_balancing_credit)}</span>`:'<span class="cb-nil">—</span>'}</td><td class="cb-c-bal" style="font-size:13px">${cbBal(d.closing_balance,d.closing_type)}</td></tr>`;
+		rows+=`<tr class="cb-tr-tot"><td colspan="4" class="cb-tot-label">Total</td><td class="cb-c-amt"><span class="cb-dr">${cbFmt(d.grand_total_debit)}</span></td><td class="cb-c-amt"><span class="cb-cr">${cbFmt(d.grand_total_credit)}</span></td><td class="cb-c-bal"></td></tr>`;
 
 		_gel("cb-area").innerHTML=`
 <div class="cb-report-card">
@@ -420,7 +420,7 @@ class DuxCashBook {
 		var printedDate=new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"long",year:"numeric"});
 
 		var tRows="";
-		tRows+=`<tr class="p-ob"><td colspan="4" class="p-ob-lbl">Opening Balance</td><td class="p-num"></td><td class="p-num"></td><td class="p-num p-fw ${d.opening_type==="Dr"?"p-dr":"p-cr"}">${cbFmt(d.opening_balance)}<span class="p-suf">${d.opening_type}</span></td></tr>`;
+		tRows+=`<tr class="p-ob"><td colspan="4" class="p-ob-lbl">Opening Balance</td><td class="p-num">${d.opening_debit>0?`<span class="p-dr">${cbFmt(d.opening_debit)}</span>`:'<span class="p-nil">—</span>'}</td><td class="p-num">${d.opening_credit>0?`<span class="p-cr">${cbFmt(d.opening_credit)}</span>`:'<span class="p-nil">—</span>'}</td><td class="p-num p-fw ${d.opening_type==="Dr"?"p-dr":"p-cr"}">${cbFmt(d.opening_balance)}<span class="p-suf">${d.opening_type}</span></td></tr>`;
 
 		d.rows.forEach(function(row,idx){
 			var kwHtml=row.prefix==="To"?'<span class="p-to">To</span>':'<span class="p-by">By</span>';
@@ -439,8 +439,8 @@ class DuxCashBook {
 			if(row.remarks) tRows+=`<tr class="p-rmk"><td colspan="7">${cbEsc(row.remarks)}</td></tr>`;
 		});
 
-		tRows+=`<tr class="p-cb"><td colspan="4" class="p-ob-lbl">Closing Balance</td><td class="p-num"></td><td class="p-num"></td><td class="p-num p-fw ${d.closing_type==="Dr"?"p-dr":"p-cr"}" style="font-size:12.5px">${cbFmt(d.closing_balance)}<span class="p-suf">${d.closing_type}</span></td></tr>`;
-		tRows+=`<tr class="p-tot"><td colspan="4" class="p-tot-lbl">Period Totals</td><td class="p-num p-dr">${cbFmt(d.total_debit)}</td><td class="p-num p-cr">${cbFmt(d.total_credit)}</td><td class="p-num"></td></tr>`;
+		tRows+=`<tr class="p-cb"><td colspan="4" class="p-ob-lbl">Closing Balance</td><td class="p-num">${d.closing_balancing_debit>0?`<span class="p-dr">${cbFmt(d.closing_balancing_debit)}</span>`:'<span class="p-nil">—</span>'}</td><td class="p-num">${d.closing_balancing_credit>0?`<span class="p-cr">${cbFmt(d.closing_balancing_credit)}</span>`:'<span class="p-nil">—</span>'}</td><td class="p-num p-fw ${d.closing_type==="Dr"?"p-dr":"p-cr"}" style="font-size:12.5px">${cbFmt(d.closing_balance)}<span class="p-suf">${d.closing_type}</span></td></tr>`;
+		tRows+=`<tr class="p-tot"><td colspan="4" class="p-tot-lbl">Total</td><td class="p-num p-dr">${cbFmt(d.grand_total_debit)}</td><td class="p-num p-cr">${cbFmt(d.grand_total_credit)}</td><td class="p-num"></td></tr>`;
 
 		win.document.write(`<!DOCTYPE html>
 <html><head><meta charset="UTF-8">

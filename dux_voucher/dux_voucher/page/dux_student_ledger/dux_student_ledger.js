@@ -406,7 +406,7 @@ class DuxStudentLedger {
 
 	_render(d){
 		var rows="";
-		rows+=`<tr class="sl-tr-ob"><td colspan="4"><span class="sl-ob-label">Opening Balance</span></td><td class="sl-c-amt"></td><td class="sl-c-amt"></td><td class="sl-c-bal">${_bal(d.opening_balance,d.opening_type)}</td></tr>`;
+		rows+=`<tr class="sl-tr-ob"><td colspan="4"><span class="sl-ob-label">Opening Balance</span></td><td class="sl-c-amt">${d.opening_debit>0?`<span class="sl-dr">${_fmt(d.opening_debit)}</span>`:'<span class="sl-nil">—</span>'}</td><td class="sl-c-amt">${d.opening_credit>0?`<span class="sl-cr">${_fmt(d.opening_credit)}</span>`:'<span class="sl-nil">—</span>'}</td><td class="sl-c-bal">${_bal(d.opening_balance,d.opening_type)}</td></tr>`;
 		if(!d.rows.length) rows+=`<tr><td colspan="7" class="sl-placeholder" style="padding:32px">No transactions in this period.</td></tr>`;
 		d.rows.forEach(function(row){
 			var drHtml=row.debit>0?`<span class="sl-dr">${_fmt(row.debit)}</span>`:`<span class="sl-nil">—</span>`;
@@ -415,8 +415,8 @@ class DuxStudentLedger {
 			rows+=`<tr class="sl-tr-e"><td class="sl-c-date">${_esc(row.posting_date)}</td><td class="sl-c-part"><span class="sl-contra-name">${_esc(row.contra)}</span></td><td class="sl-c-vt">${_pill(row.voucher_type)}</td><td class="sl-c-vno">${vno}</td><td class="sl-c-amt">${drHtml}</td><td class="sl-c-amt">${crHtml}</td><td class="sl-c-bal">${_bal(row.balance,row.balance_type)}</td></tr>`;
 			if(row.remarks) rows+=`<tr class="sl-tr-r"><td colspan="7">${_esc(row.remarks)}</td></tr>`;
 		});
-		rows+=`<tr class="sl-tr-cb"><td colspan="4"><span class="sl-cb-label">Closing Balance</span></td><td class="sl-c-amt"></td><td class="sl-c-amt"></td><td class="sl-c-bal" style="font-size:13px">${_bal(d.closing_balance,d.closing_type)}</td></tr>`;
-		rows+=`<tr class="sl-tr-tot"><td colspan="4" class="sl-tot-label">Period Totals</td><td class="sl-c-amt"><span class="sl-dr">${_fmt(d.total_debit)}</span></td><td class="sl-c-amt"><span class="sl-cr">${_fmt(d.total_credit)}</span></td><td class="sl-c-bal"></td></tr>`;
+		rows+=`<tr class="sl-tr-cb"><td colspan="4"><span class="sl-cb-label">Closing Balance</span></td><td class="sl-c-amt">${d.closing_balancing_debit>0?`<span class="sl-dr">${_fmt(d.closing_balancing_debit)}</span>`:'<span class="sl-nil">—</span>'}</td><td class="sl-c-amt">${d.closing_balancing_credit>0?`<span class="sl-cr">${_fmt(d.closing_balancing_credit)}</span>`:'<span class="sl-nil">—</span>'}</td><td class="sl-c-bal" style="font-size:13px">${_bal(d.closing_balance,d.closing_type)}</td></tr>`;
+		rows+=`<tr class="sl-tr-tot"><td colspan="4" class="sl-tot-label">Total</td><td class="sl-c-amt"><span class="sl-dr">${_fmt(d.grand_total_debit)}</span></td><td class="sl-c-amt"><span class="sl-cr">${_fmt(d.grand_total_credit)}</span></td><td class="sl-c-bal"></td></tr>`;
 		var badge=d.account_type?`<span class="sl-kind-badge">${_esc(d.account_type)}</span>`:"";
 		_gel("sl-area").innerHTML=`
 <div class="sl-report-card">
@@ -473,7 +473,7 @@ class DuxStudentLedger {
 
 		tRows+=`<tr class="p-ob">
 			<td colspan="4" class="p-ob-lbl">Opening Balance</td>
-			<td class="p-num"></td><td class="p-num"></td>
+			<td class="p-num">${d.opening_debit>0?`<span class="p-dr">${_fmt(d.opening_debit)}</span>`:'<span class="p-nil">—</span>'}</td><td class="p-num">${d.opening_credit>0?`<span class="p-cr">${_fmt(d.opening_credit)}</span>`:'<span class="p-nil">—</span>'}</td>
 			<td class="p-num p-fw ${d.opening_type==="Dr"?"p-dr":"p-cr"}">${_fmt(d.opening_balance)}<span class="p-suf">${d.opening_type}</span></td>
 		</tr>`;
 
@@ -495,14 +495,14 @@ class DuxStudentLedger {
 
 		tRows+=`<tr class="p-cb">
 			<td colspan="4" class="p-ob-lbl">Closing Balance</td>
-			<td class="p-num"></td><td class="p-num"></td>
+			<td class="p-num">${d.closing_balancing_debit>0?`<span class="p-dr">${_fmt(d.closing_balancing_debit)}</span>`:'<span class="p-nil">—</span>'}</td><td class="p-num">${d.closing_balancing_credit>0?`<span class="p-cr">${_fmt(d.closing_balancing_credit)}</span>`:'<span class="p-nil">—</span>'}</td>
 			<td class="p-num p-fw" style="font-size:12.5px;${d.closing_type==="Dr"?"color:#dc2626":"color:#16a34a"}">${_fmt(d.closing_balance)}<span class="p-suf">${d.closing_type}</span></td>
 		</tr>`;
 
 		tRows+=`<tr class="p-tot">
-			<td colspan="4" class="p-tot-lbl">Period Totals</td>
-			<td class="p-num p-dr">${_fmt(d.total_debit)}</td>
-			<td class="p-num p-cr">${_fmt(d.total_credit)}</td>
+			<td colspan="4" class="p-tot-lbl">Total</td>
+			<td class="p-num p-dr">${_fmt(d.grand_total_debit)}</td>
+			<td class="p-num p-cr">${_fmt(d.grand_total_credit)}</td>
 			<td class="p-num"></td>
 		</tr>`;
 

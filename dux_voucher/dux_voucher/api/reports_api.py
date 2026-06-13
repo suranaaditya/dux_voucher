@@ -187,7 +187,7 @@ def get_ledger_statement(company, account, from_date, to_date,
 		display_name = acc_meta.get("account_name", account)
 		# acc_type already fetched up-front (used by invert_to_by); reuse.
 
-	return dict(
+	result = dict(
 		company         = company,
 		account         = account,
 		account_name    = display_name,
@@ -203,6 +203,8 @@ def get_ledger_statement(company, account, from_date, to_date,
 		rows            = rows,
 		row_count       = len(rows),
 	)
+	result.update(_taccount_summary(ob_net, total_dr, total_cr))
+	return result
 
 
 @frappe.whitelist()
@@ -627,6 +629,48 @@ def _clean_against(against_str):
 	return "Various"
 
 
+def _taccount_summary(ob_net, period_dr, period_cr):
+	"""Strict T-account presentation fields for a ledger statement.
+
+	Tally-style ledger: the opening balance sits in its NATURAL column
+	(Dr balance → Debit, Cr balance → Credit), and the closing balance is
+	carried down as a BALANCING contra on the OPPOSITE column (a Dr closing
+	balances into Credit, a Cr closing into Debit). The grand totals then
+	tie exactly — Total Debit == Total Credit — which is how an accountant
+	verifies the ledger.
+
+	  ob_net    : opening net, Dr positive / Cr negative (debit − credit)
+	  period_dr : sum of period debit movements (opening excluded)
+	  period_cr : sum of period credit movements (opening excluded)
+
+	Returns the extra dict keys the page / print / Excel renderers consume.
+	"""
+	opening_debit  = ob_net if ob_net >= 0 else 0.0
+	opening_credit = -ob_net if ob_net < 0 else 0.0
+
+	# All movements on each side, opening folded in.
+	total_debit_side  = opening_debit  + period_dr
+	total_credit_side = opening_credit + period_cr
+
+	# Closing balance carried down on the side OPPOSITE its nature, so the
+	# columns balance: |Debit side − Credit side| placed against the smaller.
+	closing_balancing_debit  = (total_credit_side - total_debit_side
+								 ) if total_credit_side > total_debit_side else 0.0
+	closing_balancing_credit = (total_debit_side - total_credit_side
+								 ) if total_debit_side > total_credit_side else 0.0
+
+	grand_total = max(total_debit_side, total_credit_side)
+
+	return dict(
+		opening_debit            = flt(opening_debit),
+		opening_credit           = flt(opening_credit),
+		closing_balancing_debit  = flt(closing_balancing_debit),
+		closing_balancing_credit = flt(closing_balancing_credit),
+		grand_total_debit        = flt(grand_total),
+		grand_total_credit       = flt(grand_total),
+	)
+
+
 @frappe.whitelist()
 def get_permitted_companies():
     """
@@ -827,7 +871,7 @@ def _build_student_ledger(company, display_name, kind_label,
 		))
 
 	closing = running
-	return dict(
+	result = dict(
 		company         = company,
 		account         = display_name,
 		account_name    = display_name,
@@ -843,6 +887,8 @@ def _build_student_ledger(company, display_name, kind_label,
 		rows            = rows,
 		row_count       = len(rows),
 	)
+	result.update(_taccount_summary(ob_net, total_dr, total_cr))
+	return result
 
 
 def _student_remark(verb, account, mop, ref):

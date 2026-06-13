@@ -139,9 +139,11 @@ def _build_ledger_workbook(d, title, debit_label, credit_label, accent_color):
 
     row = header_row + 1
 
-    # Opening Balance
+    # Opening Balance — figure on its natural Dr/Cr side
     row = _write_balance_row(ws, row, "Opening Balance",
-                              d['opening_balance'], d['opening_type'], n_cols)
+                              d['opening_balance'], d['opening_type'], n_cols,
+                              col_debit=d.get('opening_debit'),
+                              col_credit=d.get('opening_credit'))
 
     # Data rows
     for i, r in enumerate(d['rows']):
@@ -202,14 +204,16 @@ def _build_ledger_workbook(d, title, debit_label, credit_label, accent_color):
                     ws.cell(row=row, column=c).fill = fill
             row += 1
 
-    # Closing Balance
+    # Closing Balance — carried down as a balancing contra (opposite side)
     row = _write_balance_row(ws, row, "Closing Balance",
-                              d['closing_balance'], d['closing_type'], n_cols)
+                              d['closing_balance'], d['closing_type'], n_cols,
+                              col_debit=d.get('closing_balancing_debit'),
+                              col_credit=d.get('closing_balancing_credit'))
 
-    # Period Totals
+    # Total — balanced grand total (Debit == Credit)
     row = _write_totals_row(ws, row, n_cols,
-                              total_debit=d['total_debit'],
-                              total_credit=d['total_credit'])
+                              total_debit=d['grand_total_debit'],
+                              total_credit=d['grand_total_credit'])
 
     # Footer
     row += 1
@@ -361,7 +365,16 @@ def _apply_widths(ws, widths):
         ws.column_dimensions[get_column_letter(idx)].width = w
 
 
-def _write_balance_row(ws, row, label, balance, balance_type, n_cols):
+def _write_balance_row(ws, row, label, balance, balance_type, n_cols,
+                        col_debit=None, col_credit=None):
+    """Opening / Closing balance row.
+
+    The label spans the text columns (Date … Vch No); the Debit and Credit
+    columns carry the figure on the appropriate side — opening on its
+    NATURAL side, closing carried down as a BALANCING contra on the
+    OPPOSITE side — and the rightmost Balance column shows the running
+    balance with its Dr/Cr suffix.
+    """
     fill = PatternFill("solid", fgColor=OB_BG)
     border = Border(top=Side(style="thin", color=OB_BORDER),
                      bottom=Side(style="thin", color=OB_BORDER))
@@ -373,8 +386,20 @@ def _write_balance_row(ws, row, label, balance, balance_type, n_cols):
     label_cell = ws.cell(row=row, column=1, value=label.upper())
     label_cell.font = Font(name="Calibri", size=10, bold=True, color=NAVY)
     label_cell.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    # Label spans the four text columns; Debit / Credit / Balance carry figures.
     ws.merge_cells(start_row=row, start_column=1,
-                    end_row=row, end_column=n_cols - 1)
+                    end_row=row, end_column=n_cols - 3)
+
+    if col_debit:
+        dc = ws.cell(row=row, column=n_cols - 2, value=flt(col_debit))
+        dc.font = Font(name="Calibri", size=10, bold=True, color=DR_RED)
+        dc.alignment = Alignment(horizontal="right", vertical="center")
+        dc.number_format = NUM_FMT
+    if col_credit:
+        cc = ws.cell(row=row, column=n_cols - 1, value=flt(col_credit))
+        cc.font = Font(name="Calibri", size=10, bold=True, color=CR_GREEN)
+        cc.alignment = Alignment(horizontal="right", vertical="center")
+        cc.number_format = NUM_FMT
 
     bal_cell = ws.cell(row=row, column=n_cols, value=flt(balance))
     bal_cell.font = Font(name="Calibri", size=11, bold=True,
@@ -394,7 +419,7 @@ def _write_totals_row(ws, row, n_cols, total_debit, total_credit):
         cell.fill = fill
         cell.border = border
 
-    label_cell = ws.cell(row=row, column=1, value="PERIOD TOTALS")
+    label_cell = ws.cell(row=row, column=1, value="TOTAL")
     label_cell.font = Font(name="Calibri", size=10, bold=True, color=GRAY_TXT)
     label_cell.alignment = Alignment(horizontal="right", vertical="center")
     ws.merge_cells(start_row=row, start_column=1,
