@@ -15,8 +15,25 @@ def on_payment_entry_cancel(doc, method):
 
 
 def on_journal_entry_cancel(doc, method):
-    """When a Journal Entry is cancelled directly, cancel its parent voucher."""
+    """When a Journal Entry is cancelled directly, cancel its parent voucher.
+
+    Special case — a retained-fee income-booking JE is referenced the OTHER
+    way (Student Fee Refund.income_je) rather than via custom_source_voucher.
+    Cancelling it must NOT cancel the refund; it just clears the booking so
+    the operator can re-book. Handle that first, then return.
+    """
     if frappe.flags.in_dux_voucher_cancel:
+        return
+
+    booked_refund = frappe.db.get_value(
+        "Student Fee Refund", {"income_je": doc.name}, "name")
+    if booked_refund:
+        frappe.db.set_value("Student Fee Refund", booked_refund, {
+            "income_booked": 0,
+            "income_je": None,
+            "income_amount": 0,
+            "income_booked_date": None,
+        })
         return
 
     voucher_doctype = doc.get("custom_source_voucher_doctype")

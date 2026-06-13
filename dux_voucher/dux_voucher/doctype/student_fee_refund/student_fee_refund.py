@@ -55,6 +55,12 @@ class StudentFeeRefund(Document):
         if self.amended_from:
             self.backend_je = None
             self.is_posted = 0
+            # An amended refund starts with no income booked — the original's
+            # income JE (if any) lives on its own cancelled record.
+            self.income_booked = 0
+            self.income_je = None
+            self.income_amount = 0
+            self.income_booked_date = None
         return super().insert(*args, **kwargs)
 
     def before_insert(self):
@@ -78,12 +84,24 @@ class StudentFeeRefund(Document):
         self.db_set("is_posted", 1)
 
     def on_cancel(self):
-        """Cancel the linked JE if it's still active. ``_safe_cancel``
-        is idempotent — if the JE was cancelled already (e.g. via the
-        cascade hook from JE → refund), this is a no-op."""
+        """Cancel the linked JE(s) if still active. ``_safe_cancel`` is
+        idempotent — if a JE was cancelled already (e.g. via the cascade
+        hook from JE → refund), this is a no-op.
+
+        Cancelling a refund also reverses any retained-fee income booking:
+        the income JE is cancelled and the income_* fields are cleared, so
+        the provisional liability returns to where it was before the
+        booking.
+        """
+        if self.income_je:
+            _safe_cancel("Journal Entry", self.income_je)
         if self.backend_je:
             _safe_cancel("Journal Entry", self.backend_je)
         self.db_set("is_posted", 0)
+        self.db_set("income_booked", 0)
+        self.db_set("income_je", None)
+        self.db_set("income_amount", 0)
+        self.db_set("income_booked_date", None)
 
     # ── Validations ──────────────────────────────────────────────────
 

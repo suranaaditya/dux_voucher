@@ -1,0 +1,67 @@
+{
+ "actions": [],
+ "creation": "2026-06-13 00:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "intro_html",
+  "income_section",
+  "retained_fee_income_account"
+ ],
+ "fields": [
+  {
+   "fieldname": "intro_html",
+   "fieldtype": "HTML",
+   "options": "<div style=\"padding:8px 0 4px;color:#475569;font-size:13px;line-height:1.55\">\nWhen an admission fee is only <em>partly</em> refunded, the amount the institution keeps stays in the <strong>Admission Fee (Provisional)</strong> liability for that student. Booking it as income (from a Student Fee Refund, or the <strong>Student Fee Refund Income</strong> report) debits the provisional liability and credits the income account.<br><br>\nBy default this is the per-company account <strong>Income From Admi Cancellation - {abbr}</strong> under <strong>Income &rarr; Indirect Income</strong> &mdash; create it once per company in the Chart of Accounts. The override below is only needed if you want a differently-named account.\n</div>"
+  },
+  {
+   "fieldname": "income_section",
+   "fieldtype": "Section Break",
+   "label": "Retained Fee Income"
+  },
+  {
+   "description": "Optional override. Leave blank to use the per-company account 'Income From Admi Cancellation - {abbr}' under Income → Indirect Income. If set, this account is used instead — it must be a ledger (non-group) account belonging to the company the refund is posted under.",
+   "fieldname": "retained_fee_income_account",
+   "fieldtype": "Link",
+   "label": "Retained Fee Income Account (override)",
+   "options": "Account"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-06-13 00:00:00",
+ "modified_by": "Administrator",
+ "module": "Dux Voucher",
+ "name": "Student Fee Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "Accounts User"
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

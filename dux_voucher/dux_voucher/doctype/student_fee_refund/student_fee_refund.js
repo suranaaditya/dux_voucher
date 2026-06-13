@@ -66,6 +66,13 @@ frappe.ui.form.on("Student Fee Refund", {
     },
 
     refresh(frm) {
+        // Detect the draft → submitted transition so the income-booking
+        // dialog can auto-pop once, right after the operator submits.
+        if (frm._prev_docstatus === 0 && frm.doc.docstatus === 1) {
+            frm._just_submitted = true;
+        }
+        frm._prev_docstatus = frm.doc.docstatus;
+
         _refresh_mop_account_type(frm);
         _default_admission_year(frm);
         _refresh_paid_summary(frm);
@@ -76,6 +83,8 @@ frappe.ui.form.on("Student Fee Refund", {
                 () => frappe.set_route("Form", "Journal Entry", frm.doc.backend_je)
             );
         }
+
+        _setup_income_booking(frm);
     },
 
     student(frm) {
@@ -268,6 +277,103 @@ function _show_paid_summary_headline(frm) {
            [format_currency(paid), format_currency(remaining)]),
         "green"
     );
+}
+
+
+/**
+ * Income-booking entry points on a submitted refund:
+ *   * already booked  → "View Income JE" button
+ *   * remaining > 0    → primary "Book as income" button, and the dialog
+ *                        auto-pops once right after submit
+ *   * remaining <= 0   → nothing (fully refunded, or refund left a Dr)
+ */
+function _setup_income_booking(frm) {
+    if (frm.doc.docstatus !== 1) return;
+
+    // Consume the one-shot submit flag synchronously up-front so it can
+    // never linger into a later refresh (e.g. a submit that had nothing
+    // to book, where the async callback returns early).
+    const justSubmitted = frm._just_submitted;
+    frm._just_submitted = false;
+
+    if (frm.doc.income_booked) {
+        frm.add_custom_button(__("View Income JE"), () =>
+            frappe.set_route("Form", "Journal Entry", frm.doc.income_je));
+        return;
+    }
+
+    if (!frm.doc.student || !frm.doc.company) return;
+    frappe.call({
+        method: "dux_voucher.dux_voucher.api.student_fee.get_student_remaining",
+        args: { student: frm.doc.student, company: frm.doc.company },
+        callback: (r) => {
+            const remaining = flt((r.message || {}).remaining);
+            if (remaining <= 0.005) return;
+            const btn = frm.add_custom_button(__("Book as income"), () =>
+                _open_income_dialog(frm, remaining));
+            if (btn) $(btn).removeClass("btn-default").addClass("btn-primary");
+            if (justSubmitted) _open_income_dialog(frm, remaining);
+        },
+    });
+}
+
+
+/**
+ * The booking dialog — shows the full remaining (read-only, per the
+ * agreed "book full remaining in one click") and an editable income
+ * posting date (defaults to today). Posts via student_fee.book_income.
+ */
+function _open_income_dialog(frm, remaining) {
+    const d = new frappe.ui.Dialog({
+        title: __("Book retained fee as income"),
+        fields: [
+            {
+                fieldtype: "HTML",
+                fieldname: "info",
+                options:
+                    '<div style="font-size:13px;line-height:1.6;color:#475569">'
+                    + __("{0} is still held in the Admission Fee (Provisional) account for this student after the refund.",
+                         [format_currency(remaining)])
+                    + "<br>"
+                    + __("Booking will <b>Dr</b> the provisional liability and <b>Cr</b> your income account, clearing the balance.")
+                    + "</div>",
+            },
+            {
+                fieldtype: "Currency",
+                fieldname: "amount",
+                label: __("Amount to book"),
+                default: remaining,
+                read_only: 1,
+            },
+            {
+                fieldtype: "Date",
+                fieldname: "posting_date",
+                label: __("Income posting date"),
+                default: frappe.datetime.get_today(),
+                reqd: 1,
+            },
+        ],
+        primary_action_label: __("Book as income"),
+        primary_action(values) {
+            frappe.call({
+                method: "dux_voucher.dux_voucher.api.student_fee.book_income",
+                args: { refund: frm.doc.name, posting_date: values.posting_date },
+                freeze: true,
+                freeze_message: __("Booking income…"),
+                callback: (r) => {
+                    if (!r.message) return;
+                    d.hide();
+                    frappe.show_alert({
+                        message: __("Booked {0} as income (JE {1})",
+                                    [format_currency(r.message.amount), r.message.je]),
+                        indicator: "green",
+                    }, 7);
+                    frm.reload_doc();
+                },
+            });
+        },
+    });
+    d.show();
 }
 
 
