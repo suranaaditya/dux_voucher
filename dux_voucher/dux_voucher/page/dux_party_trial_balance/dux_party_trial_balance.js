@@ -3,9 +3,10 @@
    Dux DigiTech  —  dux_voucher app
 
    Trial balance for every party of one type (Customer / Supplier /
-   Employee) in a company: opening, period debit/credit and closing per
-   party. Clicking a party opens that exact party's ledger in the Party
-   Ledger page (same company + same party).
+   Employee) in a company: Opening (Dr/Cr), period Debit, period Credit
+   and Closing (Dr/Cr) per party — column layout matching ERPNext's
+   "Trial Balance for Party". Clicking a party opens that exact party's
+   ledger in the Party Ledger page (same company + same party).
    ============================================================ */
 
 frappe.pages["dux-party-trial-balance"].on_page_load = function (wrapper) {
@@ -63,6 +64,8 @@ class DuxPartyTrialBalance {
 #ptb-pt-sel{min-width:150px}
 #ptb-from,#ptb-to{width:148px}
 .ptb-fg-co{position:relative}
+.ptb-zero-wrap{display:flex;align-items:center;gap:7px;height:36px;font-size:12.5px;color:#374151;font-weight:500;white-space:nowrap}
+.ptb-zero-wrap input{width:15px;height:15px;cursor:pointer}
 .ptb-drop{position:absolute;z-index:9999;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.12);min-width:240px;max-height:300px;overflow-y:auto;margin-top:3px;top:100%;left:0}
 .ptb-drop-item{padding:9px 14px;cursor:pointer;border-bottom:1px solid #f9fafb;font-size:13px;color:#111827}
 .ptb-drop-item:last-child{border-bottom:none}
@@ -99,38 +102,34 @@ class DuxPartyTrialBalance {
 .ptb-rpt-period span{background:#f9fafb;border:1px solid #f3f4f6;border-radius:4px;padding:1px 7px}
 .ptb-tbl-wrap{overflow-x:auto}
 .ptb-tbl{width:100%;border-collapse:collapse;font-size:12.5px}
-.ptb-tbl thead th{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#9ca3af;padding:9px 16px;background:#fafafa;border-bottom:1px solid #f3f4f6;white-space:nowrap;font-family:inherit}
+.ptb-tbl thead th{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#9ca3af;padding:9px 12px;background:#fafafa;border-bottom:1px solid #f3f4f6;white-space:nowrap;font-family:inherit}
 .ptb-tbl thead th.r{text-align:right}
-.ptb-tr-e td{padding:10px 16px;border-bottom:1px solid #f9fafb;vertical-align:top}
+.ptb-tr-e td{padding:10px 12px;border-bottom:1px solid #f9fafb;vertical-align:top}
 .ptb-tr-e:hover td{background:#fafbff}
-.ptb-tr-tot td{padding:10px 16px;border-top:2px solid #e5e7eb;font-size:12.5px;font-weight:700}
+.ptb-tr-tot td{padding:10px 12px;border-top:2px solid #e5e7eb;font-size:12.5px;font-weight:700}
 .ptb-tot-label{text-align:right;font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:.08em;font-weight:700}
-.ptb-c-party{width:160px;white-space:nowrap}
-.ptb-c-name{min-width:180px;color:#111827;word-break:break-word}
-.ptb-c-amt{width:120px;text-align:right;white-space:nowrap;font-family:'SFMono-Regular',Consolas,monospace}
+.ptb-c-party{width:140px;white-space:nowrap}
+.ptb-c-name{min-width:150px;color:#111827;word-break:break-word}
+.ptb-c-amt{width:100px;text-align:right;white-space:nowrap;font-family:'SFMono-Regular',Consolas,monospace}
 .ptb-party-link{color:#2563eb;text-decoration:none;font-weight:600;font-size:13px;cursor:pointer;font-family:'SFMono-Regular',Consolas,monospace}
 .ptb-party-link:hover{text-decoration:underline}
 .ptb-dr{color:#dc2626;font-weight:500}
 .ptb-cr{color:#059669;font-weight:500}
 .ptb-nil{color:#d1d5db}
-.ptb-bal-dr{color:#dc2626;font-weight:700}
-.ptb-bal-cr{color:#059669;font-weight:700}
-.ptb-bsuf{font-size:9px;margin-left:2px;font-weight:700;opacity:.65;letter-spacing:.04em}
-.ptb-tot-drcr{display:flex;flex-direction:column;line-height:1.35;font-size:11.5px}
-@media(max-width:900px){
+@media(max-width:1000px){
   .ptb-tbl{font-size:11.5px}
-  .ptb-tbl thead th{padding:8px 9px}
-  .ptb-tr-e td,.ptb-tr-tot td{padding:8px 9px}
-  .ptb-c-party{width:120px}
-  .ptb-c-name{min-width:110px}
-  .ptb-c-amt{width:90px}
+  .ptb-tbl thead th{padding:8px 8px}
+  .ptb-tr-e td,.ptb-tr-tot td{padding:8px 8px}
+  .ptb-c-party{width:110px}
+  .ptb-c-name{min-width:100px}
+  .ptb-c-amt{width:84px}
 }
-@media(max-width:600px){
+@media(max-width:640px){
   .ptb-tbl{font-size:11px}
-  .ptb-tbl thead th,.ptb-tr-e td,.ptb-tr-tot td{padding:6px 6px}
-  .ptb-c-party{width:96px}
-  .ptb-c-name{min-width:80px}
-  .ptb-c-amt{width:78px}
+  .ptb-tbl thead th,.ptb-tr-e td,.ptb-tr-tot td{padding:6px 5px}
+  .ptb-c-party{width:84px}
+  .ptb-c-name{min-width:74px}
+  .ptb-c-amt{width:72px}
 }
 		`;
 		document.head.appendChild(s);
@@ -157,6 +156,10 @@ class DuxPartyTrialBalance {
     </div>
     <div class="ptb-fg"><label>From</label><input id="ptb-from" type="date"></div>
     <div class="ptb-fg"><label>To</label><input id="ptb-to" type="date"></div>
+    <div class="ptb-fg">
+      <label>&nbsp;</label>
+      <div class="ptb-zero-wrap"><input type="checkbox" id="ptb-zero"><span>Show zero-balance</span></div>
+    </div>
     <div class="ptb-btn-row">
       <button class="ptb-btn ptb-btn-primary" id="ptb-show-btn">Show</button>
       <button class="ptb-excel-btn" id="ptb-excel-btn">
@@ -194,6 +197,7 @@ class DuxPartyTrialBalance {
 			if(!e.target.closest(".ptb-print-split")) _gel("ptb-print-menu").classList.remove("open");
 		});
 		_gel("ptb-show-btn").addEventListener("click", function(){ self.fetchReport(); });
+		_gel("ptb-zero").addEventListener("change", function(){ if(self._lastData) self.fetchReport(); });
 		_gel("ptb-excel-btn").addEventListener("click", function(){ self._exportExcel(); });
 		_gel("ptb-print-p-btn").addEventListener("click", function(){ _gel("ptb-print-menu").classList.remove("open"); self._printReport(false); });
 		_gel("ptb-print-caret").addEventListener("click", function(e){ e.stopPropagation(); _gel("ptb-print-menu").classList.toggle("open"); });
@@ -208,7 +212,7 @@ class DuxPartyTrialBalance {
 		var now=new Date(), m=now.getMonth(), yr=now.getFullYear();
 		var fy=m>=3?yr:yr-1;
 		_gel("ptb-from").value=fy+"-04-01";
-		_gel("ptb-to").value=now.toISOString().split("T")[0];
+		_gel("ptb-to").value=(fy+1)+"-03-31";
 	}
 
 	_loadCompanies() {
@@ -264,7 +268,8 @@ class DuxPartyTrialBalance {
 		var company=_gel("ptb-co-sel").value,
 		    party_type=_gel("ptb-pt-sel").value,
 		    from_date=_gel("ptb-from").value,
-		    to_date=_gel("ptb-to").value;
+		    to_date=_gel("ptb-to").value,
+		    show_zero=_gel("ptb-zero").checked?1:0;
 		if(!company){ frappe.msgprint({message:"Please select a Company.",indicator:"orange"}); return; }
 		if(!from_date||!to_date){ frappe.msgprint({message:"Please set both dates.",indicator:"orange"}); return; }
 		this._company=company; this._partyType=party_type;
@@ -275,7 +280,7 @@ class DuxPartyTrialBalance {
 		var self=this;
 		frappe.call({
 			method:"dux_voucher.dux_voucher.api.reports_api.get_party_trial_balance",
-			args:{company,party_type,from_date,to_date},
+			args:{company,party_type,from_date,to_date,show_zero},
 			callback:function(r){
 				if(r.message && r.message.rows.length){ self._lastData=r.message; self._render(r.message); _gel("ptb-print-split").style.display="block"; _gel("ptb-excel-btn").style.display="inline-flex"; }
 				else{ _gel("ptb-area").innerHTML='<div class="ptb-placeholder">No '+_esc(party_type)+' balances found for this period.</div>'; }
@@ -287,23 +292,27 @@ class DuxPartyTrialBalance {
 	_render(d){
 		var self=this, rows="";
 		d.rows.forEach(function(row,i){
-			var drHtml=row.debit>0?`<span class="ptb-dr">${_fmt(row.debit)}</span>`:`<span class="ptb-nil">—</span>`;
-			var crHtml=row.credit>0?`<span class="ptb-cr">${_fmt(row.credit)}</span>`:`<span class="ptb-nil">—</span>`;
+			var od=row.opening_type==="Dr"?row.opening:0, oc=row.opening_type==="Cr"?row.opening:0;
+			var cd=row.closing_type==="Dr"?row.closing:0, cc=row.closing_type==="Cr"?row.closing:0;
 			rows+=`<tr class="ptb-tr-e">
 				<td class="ptb-c-party"><a class="ptb-party-link" data-i="${i}" title="Open ledger">${_esc(row.party)}</a></td>
 				<td class="ptb-c-name">${_esc(row.party_name)}</td>
-				<td class="ptb-c-amt">${_bal(row.opening,row.opening_type)}</td>
-				<td class="ptb-c-amt">${drHtml}</td>
-				<td class="ptb-c-amt">${crHtml}</td>
-				<td class="ptb-c-amt">${_bal(row.closing,row.closing_type)}</td>
+				<td class="ptb-c-amt">${_amt(od,"ptb-dr")}</td>
+				<td class="ptb-c-amt">${_amt(oc,"ptb-cr")}</td>
+				<td class="ptb-c-amt">${_amt(row.debit,"ptb-dr")}</td>
+				<td class="ptb-c-amt">${_amt(row.credit,"ptb-cr")}</td>
+				<td class="ptb-c-amt">${_amt(cd,"ptb-dr")}</td>
+				<td class="ptb-c-amt">${_amt(cc,"ptb-cr")}</td>
 			</tr>`;
 		});
 		rows+=`<tr class="ptb-tr-tot">
 			<td colspan="2" class="ptb-tot-label">Total — ${d.row_count} part${d.row_count!==1?"ies":"y"}</td>
-			<td class="ptb-c-amt">${_totDrCr(d.total_opening_debit,d.total_opening_credit)}</td>
+			<td class="ptb-c-amt"><span class="ptb-dr">${_fmt(d.total_opening_debit)}</span></td>
+			<td class="ptb-c-amt"><span class="ptb-cr">${_fmt(d.total_opening_credit)}</span></td>
 			<td class="ptb-c-amt"><span class="ptb-dr">${_fmt(d.total_debit)}</span></td>
 			<td class="ptb-c-amt"><span class="ptb-cr">${_fmt(d.total_credit)}</span></td>
-			<td class="ptb-c-amt">${_totDrCr(d.total_closing_debit,d.total_closing_credit)}</td>
+			<td class="ptb-c-amt"><span class="ptb-dr">${_fmt(d.total_closing_debit)}</span></td>
+			<td class="ptb-c-amt"><span class="ptb-cr">${_fmt(d.total_closing_credit)}</span></td>
 		</tr>`;
 
 		_gel("ptb-area").innerHTML=`
@@ -317,8 +326,9 @@ class DuxPartyTrialBalance {
     <table class="ptb-tbl">
       <thead><tr>
         <th class="ptb-c-party">Party</th><th class="ptb-c-name">Name</th>
-        <th class="ptb-c-amt r">Opening</th><th class="ptb-c-amt r">Debit</th>
-        <th class="ptb-c-amt r">Credit</th><th class="ptb-c-amt r">Closing</th>
+        <th class="ptb-c-amt r">Opening (Dr)</th><th class="ptb-c-amt r">Opening (Cr)</th>
+        <th class="ptb-c-amt r">Debit</th><th class="ptb-c-amt r">Credit</th>
+        <th class="ptb-c-amt r">Closing (Dr)</th><th class="ptb-c-amt r">Closing (Cr)</th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>
@@ -352,6 +362,7 @@ class DuxPartyTrialBalance {
 			party_type:_gel("ptb-pt-sel").value,
 			from_date:_gel("ptb-from").value,
 			to_date:_gel("ptb-to").value,
+			show_zero:_gel("ptb-zero").checked?1:0,
 		});
 		window.location.href="/api/method/dux_voucher.dux_voucher.api.reports_export.export_party_trial_balance_xlsx?"+params.toString();
 	}
@@ -361,28 +372,32 @@ class DuxPartyTrialBalance {
 		var d=this._lastData;
 		var win=window.open("","_blank","width=1100,height=750");
 		if(!win){ frappe.msgprint("Please allow pop-ups for this site."); return; }
-		var pageRule=landscape?"@page{size:A4 landscape;margin:12mm 14mm 14mm}":"@page{size:A4 portrait;margin:14mm 10mm 14mm}";
+		var pageRule=landscape?"@page{size:A4 landscape;margin:12mm 12mm 14mm}":"@page{size:A4 portrait;margin:12mm 8mm 14mm}";
 		var printedDate=new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"long",year:"numeric"});
 
 		var tRows="";
 		d.rows.forEach(function(row,idx){
-			var drH=row.debit>0?`<span class="p-dr">${_fmt(row.debit)}</span>`:'<span class="p-nil">—</span>';
-			var crH=row.credit>0?`<span class="p-cr">${_fmt(row.credit)}</span>`:'<span class="p-nil">—</span>';
+			var od=row.opening_type==="Dr"?row.opening:0, oc=row.opening_type==="Cr"?row.opening:0;
+			var cd=row.closing_type==="Dr"?row.closing:0, cc=row.closing_type==="Cr"?row.closing:0;
 			tRows+=`<tr class="${idx%2===0?"p-even":"p-odd"}">
 				<td class="p-party">${_esc(row.party)}</td>
 				<td class="p-name">${_esc(row.party_name)}</td>
-				<td class="p-num p-fw ${row.opening_type==="Dr"?"p-dr":"p-cr"}">${_fmt(row.opening)}<span class="p-suf">${row.opening_type}</span></td>
-				<td class="p-num">${drH}</td>
-				<td class="p-num">${crH}</td>
-				<td class="p-num p-fw ${row.closing_type==="Dr"?"p-dr":"p-cr"}">${_fmt(row.closing)}<span class="p-suf">${row.closing_type}</span></td>
+				<td class="p-num">${_pamt(od,"p-dr")}</td>
+				<td class="p-num">${_pamt(oc,"p-cr")}</td>
+				<td class="p-num">${_pamt(row.debit,"p-dr")}</td>
+				<td class="p-num">${_pamt(row.credit,"p-cr")}</td>
+				<td class="p-num">${_pamt(cd,"p-dr")}</td>
+				<td class="p-num">${_pamt(cc,"p-cr")}</td>
 			</tr>`;
 		});
 		tRows+=`<tr class="p-tot">
 			<td colspan="2" class="p-tot-lbl">Total — ${d.row_count} part${d.row_count!==1?"ies":"y"}</td>
-			<td class="p-num">${_printDrCr(d.total_opening_debit,d.total_opening_credit)}</td>
+			<td class="p-num p-dr p-fw">${_fmt(d.total_opening_debit)}</td>
+			<td class="p-num p-cr p-fw">${_fmt(d.total_opening_credit)}</td>
 			<td class="p-num p-dr p-fw">${_fmt(d.total_debit)}</td>
 			<td class="p-num p-cr p-fw">${_fmt(d.total_credit)}</td>
-			<td class="p-num">${_printDrCr(d.total_closing_debit,d.total_closing_credit)}</td>
+			<td class="p-num p-dr p-fw">${_fmt(d.total_closing_debit)}</td>
+			<td class="p-num p-cr p-fw">${_fmt(d.total_closing_credit)}</td>
 		</tr>`;
 
 		win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
@@ -390,33 +405,31 @@ class DuxPartyTrialBalance {
 <style>
 ${pageRule}
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Segoe UI',Arial,sans-serif;font-size:11px;background:#fff;color:#1e293b}
+body{font-family:'Segoe UI',Arial,sans-serif;font-size:10.5px;background:#fff;color:#1e293b}
 *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
-.p-hdr{display:flex;justify-content:space-between;align-items:flex-end;padding-bottom:10px;margin-bottom:14px;border-bottom:3px solid #0f172a}
+.p-hdr{display:flex;justify-content:space-between;align-items:flex-end;padding-bottom:10px;margin-bottom:12px;border-bottom:3px solid #0f172a}
 .p-rtype{font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:.18em;color:#94a3b8;margin-bottom:5px}
-.p-coname{font-size:21px;font-weight:800;color:#0f172a;letter-spacing:-.4px}
+.p-coname{font-size:20px;font-weight:800;color:#0f172a;letter-spacing:-.4px}
 .p-hdr-right{text-align:right;font-size:9px;color:#94a3b8}
-.p-info{display:flex;justify-content:space-between;align-items:center;background:#f8fafc;border:1px solid #e2e8f0;border-left:4.5px solid #16a34a;border-radius:0 6px 6px 0;padding:10px 16px;margin-bottom:16px}
+.p-info{display:flex;justify-content:space-between;align-items:center;background:#f8fafc;border:1px solid #e2e8f0;border-left:4.5px solid #16a34a;border-radius:0 6px 6px 0;padding:9px 14px;margin-bottom:14px}
 .p-info-name{font-size:13px;font-weight:800;color:#0f172a}
 .p-period{font-size:10px;color:#475569;font-family:monospace}
 table{width:100%;border-collapse:collapse}
 thead tr{background:#1e293b}
-thead th{font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#f1f5f9;padding:7px 9px;white-space:nowrap}
+thead th{font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#f1f5f9;padding:6px 6px;white-space:nowrap}
 thead th.r{text-align:right}
-.p-even td{background:#fff;padding:6px 9px;border-bottom:1px solid #f1f5f9;vertical-align:top}
-.p-odd td{background:#fafbfc;padding:6px 9px;border-bottom:1px solid #f1f5f9;vertical-align:top}
-.p-tot td{border-top:2.5px solid #0f172a;padding:8px 9px;font-weight:800;background:#f8fafc}
-.p-tot-lbl{text-align:right;font-size:8.5px;text-transform:uppercase;letter-spacing:.1em;color:#64748b}
-.p-party{width:130px;font-family:monospace;font-size:10px;color:#1d4ed8;font-weight:700;word-break:break-word}
-.p-name{font-size:10.5px;color:#0f172a;word-break:break-word}
-.p-num{width:90px;text-align:right;font-family:monospace;font-size:10.5px;white-space:nowrap}
+.p-even td{background:#fff;padding:5px 6px;border-bottom:1px solid #f1f5f9;vertical-align:top}
+.p-odd td{background:#fafbfc;padding:5px 6px;border-bottom:1px solid #f1f5f9;vertical-align:top}
+.p-tot td{border-top:2.5px solid #0f172a;padding:7px 6px;font-weight:800;background:#f8fafc}
+.p-tot-lbl{text-align:right;font-size:8px;text-transform:uppercase;letter-spacing:.08em;color:#64748b}
+.p-party{width:80px;font-family:monospace;font-size:9.5px;color:#1d4ed8;font-weight:700;word-break:break-word}
+.p-name{font-size:9.5px;color:#0f172a;word-break:break-word}
+.p-num{width:62px;text-align:right;font-family:monospace;font-size:9.5px;white-space:nowrap}
 .p-fw{font-weight:700}
 .p-dr{color:#dc2626}
 .p-cr{color:#16a34a}
 .p-nil{color:#cbd5e1}
-.p-suf{font-size:8px;margin-left:1px;font-weight:800;opacity:.7}
-.p-drcr{display:flex;flex-direction:column;line-height:1.3}
-.p-foot{margin-top:20px;padding-top:10px;border-top:1px solid #e2e8f0;text-align:right;font-size:9px;color:#94a3b8}
+.p-foot{margin-top:18px;padding-top:10px;border-top:1px solid #e2e8f0;text-align:right;font-size:9px;color:#94a3b8}
 @media print{thead{display:table-header-group}tr{page-break-inside:avoid}}
 </style></head><body>
 <div class="p-hdr"><div><div class="p-rtype">Party Trial Balance · ${_esc(d.party_type)}</div><div class="p-coname">${_esc(d.company)}</div></div><div class="p-hdr-right">Printed: ${_esc(printedDate)}</div></div>
@@ -424,8 +437,9 @@ thead th.r{text-align:right}
 <table>
   <thead><tr>
     <th class="p-party">Party</th><th class="p-name">Name</th>
-    <th class="p-num r">Opening</th><th class="p-num r">Debit</th>
-    <th class="p-num r">Credit</th><th class="p-num r">Closing</th>
+    <th class="p-num r">Opening (Dr)</th><th class="p-num r">Opening (Cr)</th>
+    <th class="p-num r">Debit</th><th class="p-num r">Credit</th>
+    <th class="p-num r">Closing (Dr)</th><th class="p-num r">Closing (Cr)</th>
   </tr></thead>
   <tbody>${tRows}</tbody>
 </table>
@@ -440,22 +454,5 @@ thead th.r{text-align:right}
 function _gel(id){ return document.getElementById(id); }
 function _fmt(val){ return new Intl.NumberFormat("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}).format(val||0); }
 function _esc(str){ if(str===null||str===undefined) return ""; return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
-function _bal(val,type){
-	if(!val) return '<span style="color:#9ca3af;font-family:monospace">0.00</span>';
-	var cls=type==="Dr"?"ptb-bal-dr":"ptb-bal-cr";
-	return `<span class="${cls}">${_fmt(val)}<span class="ptb-bsuf">${type}</span></span>`;
-}
-function _totDrCr(dr,cr){
-	var parts=[];
-	if(dr>0) parts.push(`<span class="ptb-bal-dr">${_fmt(dr)}<span class="ptb-bsuf">Dr</span></span>`);
-	if(cr>0) parts.push(`<span class="ptb-bal-cr">${_fmt(cr)}<span class="ptb-bsuf">Cr</span></span>`);
-	if(!parts.length) return '<span style="color:#9ca3af;font-family:monospace">0.00</span>';
-	return `<span class="ptb-tot-drcr">${parts.join("")}</span>`;
-}
-function _printDrCr(dr,cr){
-	var parts=[];
-	if(dr>0) parts.push(`<span class="p-dr p-fw">${_fmt(dr)}<span class="p-suf">Dr</span></span>`);
-	if(cr>0) parts.push(`<span class="p-cr p-fw">${_fmt(cr)}<span class="p-suf">Cr</span></span>`);
-	if(!parts.length) return "0.00";
-	return `<span class="p-drcr">${parts.join("")}</span>`;
-}
+function _amt(val,cls){ return val>0?`<span class="${cls}">${_fmt(val)}</span>`:'<span class="ptb-nil">—</span>'; }
+function _pamt(val,cls){ return val>0?`<span class="${cls}">${_fmt(val)}</span>`:'<span class="p-nil">—</span>'; }
