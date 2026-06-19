@@ -394,10 +394,24 @@ class DuxPartyLedger {
 
 	applyRouteOptions(opts){
 		if(opts.company)   this._selectCompany(opts.company);
-		if(opts.account)   _gel("pl-acc-inp").value=opts.account;
 		if(opts.from_date) _gel("pl-from").value=opts.from_date;
 		if(opts.to_date)   _gel("pl-to").value=opts.to_date;
-		if(opts.company&&opts.account) this.fetchReport();
+		if(opts.party && opts.party_type){
+			// Deep-link from the Party Trial Balance — select this exact
+			// party (not just the shared account) so the ledger filters by
+			// party + party_type and loads straight away.
+			this._selectItem({
+				type:       "party",
+				value:      opts.party,
+				party_type: opts.party_type,
+				account:    opts.account || "",
+				label:      opts.party_label || opts.party,
+			});
+			if(opts.company) this.fetchReport();
+		} else if(opts.account){
+			_gel("pl-acc-inp").value=opts.account;
+			if(opts.company) this.fetchReport();
+		}
 	}
 
 	fetchReport(){

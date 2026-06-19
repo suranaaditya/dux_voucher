@@ -317,6 +317,145 @@ def search_ledger(company, search_txt="", parties_only=0):
 
 
 # ══════════════════════════════════════════════════════════════════════
+# PARTY TRIAL BALANCE
+# ══════════════════════════════════════════════════════════════════════
+
+_PARTY_NAME_FIELD = {
+	"Customer": "customer_name",
+	"Supplier": "supplier_name",
+	"Employee": "employee_name",
+}
+
+
+@frappe.whitelist()
+def get_party_trial_balance(company, party_type, from_date, to_date, show_zero=0):
+	"""Trial balance for every party of one type in a company.
+
+	Per party: opening (Dr/Cr), period debit, period credit, closing
+	(Dr/Cr) — aggregated GROUP BY party in two batched GL queries that
+	reuse the ledger's opening rule and cancelled-voucher exclusion.
+
+	Each row carries the party's account so the front-end can deep-link
+	straight into the Party Ledger page for that exact party.
+	"""
+	if not all([company, party_type, from_date, to_date]):
+		frappe.throw(_("Company, Party Type, From Date and To Date are all required"))
+	from_date = getdate(from_date)
+	to_date   = getdate(to_date)
+	if from_date > to_date:
+		frappe.throw(_("From Date cannot be after To Date"))
+	if party_type not in _PARTY_NAME_FIELD:
+		frappe.throw(_("Invalid Party Type: {0}").format(party_type))
+	show_zero = bool(int(show_zero)) if show_zero else False
+
+	cancelled_filter = """
+		AND CASE gle.voucher_type
+		      WHEN 'Payment Entry' THEN COALESCE(pe.docstatus, 0)
+		      WHEN 'Journal Entry' THEN COALESCE(je.docstatus, 0)
+		      ELSE 0
+		    END != 2
+	"""
+	joins = """
+		FROM `tabGL Entry` gle
+		LEFT JOIN `tabPayment Entry` pe ON pe.name=gle.voucher_no AND gle.voucher_type='Payment Entry'
+		LEFT JOIN `tabJournal Entry`  je ON je.name=gle.voucher_no AND gle.voucher_type='Journal Entry'
+	"""
+	base_where = ("gle.company=%(company)s AND gle.party_type=%(pt)s "
+	              "AND gle.party IS NOT NULL AND gle.party<>'' AND gle.is_cancelled=0")
+	params = dict(company=company, pt=party_type, from_date=from_date, to_date=to_date)
+
+	# Opening net per party (everything before the period, plus in-period openings).
+	opening_rows = frappe.db.sql(f"""
+		SELECT gle.party AS party,
+		       COALESCE(SUM(gle.debit_in_account_currency),0)
+		         - COALESCE(SUM(gle.credit_in_account_currency),0) AS net,
+		       MAX(gle.account) AS account
+		{joins}
+		WHERE {base_where}
+		  AND ( gle.posting_date < %(from_date)s
+		     OR (gle.is_opening='Yes' AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s) )
+		  {cancelled_filter}
+		GROUP BY gle.party
+	""", params, as_dict=True)
+
+	# Period debit / credit per party (in-period, non-opening).
+	period_rows = frappe.db.sql(f"""
+		SELECT gle.party AS party,
+		       COALESCE(SUM(gle.debit_in_account_currency),0)  AS debit,
+		       COALESCE(SUM(gle.credit_in_account_currency),0) AS credit,
+		       MAX(gle.account) AS account
+		{joins}
+		WHERE {base_where} AND gle.is_opening='No'
+		  AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s
+		  {cancelled_filter}
+		GROUP BY gle.party
+	""", params, as_dict=True)
+
+	opening_map = {r.party: r for r in opening_rows}
+	period_map  = {r.party: r for r in period_rows}
+	parties = sorted(set(opening_map) | set(period_map))
+
+	# Party display names.
+	names = {}
+	if parties:
+		nf = _PARTY_NAME_FIELD[party_type]
+		for n, dn in frappe.db.sql(
+			f"SELECT name, `{nf}` FROM `tab{party_type}` WHERE name IN %(p)s",
+			{"p": tuple(parties)}):
+			names[n] = dn
+
+	rows = []
+	tot = dict(opening_debit=0.0, opening_credit=0.0, debit=0.0, credit=0.0,
+	           closing_debit=0.0, closing_credit=0.0)
+	for p in parties:
+		orow = opening_map.get(p)
+		prow = period_map.get(p)
+		ob = flt(orow.net) if orow else 0.0
+		dr = flt(prow.debit) if prow else 0.0
+		cr = flt(prow.credit) if prow else 0.0
+		closing = ob + dr - cr
+
+		if (not show_zero and abs(ob) < 0.005 and abs(dr) < 0.005
+				and abs(cr) < 0.005 and abs(closing) < 0.005):
+			continue
+
+		account = ((prow.account if prow else None)
+		           or (orow.account if orow else None) or "")
+		rows.append(dict(
+			party        = p,
+			party_name   = names.get(p) or p,
+			account      = account,
+			opening      = abs(ob),
+			opening_type = "Dr" if ob >= 0 else "Cr",
+			debit        = dr,
+			credit       = cr,
+			closing      = abs(closing),
+			closing_type = "Dr" if closing >= 0 else "Cr",
+		))
+		if ob >= 0: tot["opening_debit"]  += ob
+		else:       tot["opening_credit"] += -ob
+		tot["debit"]  += dr
+		tot["credit"] += cr
+		if closing >= 0: tot["closing_debit"]  += closing
+		else:            tot["closing_credit"] += -closing
+
+	return dict(
+		company              = company,
+		party_type           = party_type,
+		from_date            = formatdate(from_date, "dd-MMM-yyyy"),
+		to_date              = formatdate(to_date,   "dd-MMM-yyyy"),
+		rows                 = rows,
+		row_count            = len(rows),
+		total_opening_debit  = flt(tot["opening_debit"]),
+		total_opening_credit = flt(tot["opening_credit"]),
+		total_debit          = flt(tot["debit"]),
+		total_credit         = flt(tot["credit"]),
+		total_closing_debit  = flt(tot["closing_debit"]),
+		total_closing_credit = flt(tot["closing_credit"]),
+	)
+
+
+# ══════════════════════════════════════════════════════════════════════
 # DAY BOOK
 # ══════════════════════════════════════════════════════════════════════
 
