@@ -459,6 +459,12 @@ def get_party_trial_balance(company, party_type, from_date, to_date, show_zero=0
 # DAY BOOK
 # ══════════════════════════════════════════════════════════════════════
 
+# Voucher display-types whose value belongs in the Day Book's CREDIT
+# column (money-in / income side, à la Tally); everything else (Payment,
+# Journal, Contra, Purchase, …) goes in the Debit column.
+_DAYBOOK_CREDIT_TYPES = {"Receipt Voucher", "Receipt Entry", "Sales Invoice"}
+
+
 @frappe.whitelist()
 def get_day_book(company, from_date, to_date, voucher_type_filter=None):
 	"""
@@ -533,7 +539,15 @@ def get_day_book(company, from_date, to_date, voucher_type_filter=None):
 
 		dr  = flt(e.total_debit)
 		cr  = flt(e.total_credit)
-		amt = dr  # debit = credit in balanced entry; show debit side as amount
+		amt = dr or cr  # voucher value (debit total == credit total)
+
+		# Tally-style single-column placement: the voucher value sits in
+		# Debit OR Credit by its nature — Receipts / Sales on the Credit
+		# side, Payments / Journals / Contra / everything else on the Debit
+		# side — never in both columns (that double-shows a balanced voucher).
+		side       = "Cr" if display_type in _DAYBOOK_CREDIT_TYPES else "Dr"
+		row_debit  = amt if side == "Dr" else 0.0
+		row_credit = amt if side == "Cr" else 0.0
 
 		# Particulars: prefer party names; otherwise the per-voucher-type
 		# label we resolved above; else fall back to "Various".
@@ -543,8 +557,8 @@ def get_day_book(company, from_date, to_date, voucher_type_filter=None):
 		else:
 			particulars = particulars_map.get(e.voucher_no) or "Various"
 
-		totals["debit"]  += dr
-		totals["credit"] += cr
+		totals["debit"]  += row_debit
+		totals["credit"] += row_credit
 		totals["count"]  += 1
 
 		rows.append(dict(
@@ -554,8 +568,8 @@ def get_day_book(company, from_date, to_date, voucher_type_filter=None):
 			voucher_url   = vch_url,
 			particulars   = particulars,
 			amount        = amt,
-			debit         = dr,
-			credit        = cr,
+			debit         = row_debit,
+			credit        = row_credit,
 			remarks       = (e.remarks or "").strip(),
 		))
 

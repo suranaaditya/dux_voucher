@@ -346,8 +346,8 @@ class DuxDayBook {
 				<td class="db-c-vt">${dbPill(row.voucher_type)}</td>
 				<td class="db-c-vno"><a class="db-vno" href="${dbEsc(row.voucher_url)}" target="_blank">${dbEsc(row.voucher_no)}</a></td>
 				<td class="db-c-part">${dbEsc(row.particulars)}</td>
-				<td class="db-c-amt db-deb">${dbFmt(row.debit)}</td>
-				<td class="db-c-amt db-cred">${dbFmt(row.credit)}</td>
+				<td class="db-c-amt">${row.debit>0?`<span class="db-deb">${dbFmt(row.debit)}</span>`:'<span class="db-nilamt">—</span>'}</td>
+				<td class="db-c-amt">${row.credit>0?`<span class="db-cred">${dbFmt(row.credit)}</span>`:'<span class="db-nilamt">—</span>'}</td>
 			</tr>`;
 
 			if(row.remarks){
@@ -422,8 +422,8 @@ class DuxDayBook {
 				<td class="p-vt">${dbEsc(row.voucher_type)}</td>
 				<td class="p-vno">${dbEsc(row.voucher_no)}</td>
 				<td class="p-part">${dbEsc(row.particulars)}</td>
-				<td class="p-amt p-deb">${dbFmt(row.debit)}</td>
-				<td class="p-amt p-cred">${dbFmt(row.credit)}</td>
+				<td class="p-amt">${row.debit>0?`<span class="p-deb">${dbFmt(row.debit)}</span>`:'<span class="p-nil">—</span>'}</td>
+				<td class="p-amt">${row.credit>0?`<span class="p-cred">${dbFmt(row.credit)}</span>`:'<span class="p-nil">—</span>'}</td>
 			</tr>`;
 
 			if(row.remarks){
@@ -468,6 +468,7 @@ thead th.r{text-align:right}
 .p-amt{width:82px;text-align:right;font-family:monospace;font-size:11px;color:#0f172a}
 .p-deb{color:#dc2626}
 .p-cred{color:#16a34a}
+.p-nil{color:#cbd5e1}
 .p-fw{font-weight:700}
 .p-foot{margin-top:20px;padding-top:10px;border-top:1px solid #e2e8f0;text-align:right;font-size:9px;color:#94a3b8}
 @media print{thead{display:table-header-group}tr{page-break-inside:avoid}}
