@@ -38,6 +38,8 @@ class DuxCashBook {
 		this._lastData = null;
 		this._accounts = [];  // Bank/Cash accounts for current company
 		this._companies = []; // populated by _loadCompanies
+		this._showAllDetails = false;       // global "Show details" toggle
+		this._expandedRows = new Set();     // per-row drill-down state
 
 		this._injectStyles();
 		this._renderLayout();
@@ -138,6 +140,16 @@ class DuxCashBook {
 .cb-pill-cv{background:#f5f3ff;color:#5b21b6}
 .cb-pill-pi{background:#fff7ed;color:#c2410c}
 .cb-pill-other{background:#f3f4f6;color:#4b5563;border:1px solid #e5e7eb}
+.cb-detail-btn{display:none;height:36px;padding:0 14px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid #e5e7eb;background:#fff;color:#374151;font-family:inherit;transition:all .15s;align-items:center;gap:6px}
+.cb-detail-btn:hover{background:#f9fafb}
+.cb-detail-btn.active{background:#f0fdf4;border-color:#a7f3d0;color:#047857}
+.cb-chev{display:inline-block;width:13px;color:#9ca3af;font-size:10px;margin-right:3px;user-select:none}
+.cb-expandable{cursor:pointer}
+.cb-expandable:hover .cb-chev{color:#059669}
+.cb-bd-count{color:#9ca3af;font-size:11px;margin-left:5px}
+.cb-tr-bd td{padding:5px 16px;border-bottom:1px solid #f9fafb;background:#fcfcfd;font-size:11.5px;vertical-align:top}
+.cb-bd-part{color:#475569;padding-left:42px!important}
+.cb-bd-arrow{color:#9ca3af;margin-right:5px}
 		`;
 		document.head.appendChild(s);
 	}
@@ -163,6 +175,9 @@ class DuxCashBook {
       <button class="cb-btn cb-btn-primary" id="cb-show-btn">Show</button>
       <button class="cb-excel-btn" id="cb-excel-btn">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/><path d="M8 13l3 3-3 3M14 13l-3 3 3 3"/></svg>Excel
+      </button>
+      <button class="cb-detail-btn" id="cb-detail-btn" title="Expand every 'Various' row into its individual heads">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg><span class="cb-detail-lbl">Show details</span>
       </button>
       <div class="cb-print-split" id="cb-print-split">
         <div class="cb-print-split-inner">
@@ -200,6 +215,7 @@ class DuxCashBook {
 		});
 		_gel("cb-show-btn").addEventListener("click",   function(){ self.fetchReport(); });
 		_gel("cb-excel-btn").addEventListener("click",  function(){ self._exportExcel(); });
+		_gel("cb-detail-btn").addEventListener("click", function(){ self._toggleAllDetails(); });
 		_gel("cb-print-p-btn").addEventListener("click",function(){ _gel("cb-print-menu").classList.remove("open"); self._printReport(false); });
 		_gel("cb-print-caret").addEventListener("click",function(e){ e.stopPropagation(); _gel("cb-print-menu").classList.toggle("open"); });
 		_gel("cb-opt-p").addEventListener("click",  function(){ _gel("cb-print-menu").classList.remove("open"); self._printReport(false); });
@@ -337,6 +353,10 @@ class DuxCashBook {
 	}
 
 	_render(d){
+		var self=this;
+		// Fresh data — start collapsed.
+		this._showAllDetails=false;
+		this._expandedRows=new Set();
 		var rows="";
 		var isBank = d.account_type === "Bank";
 		var badgeClass = isBank ? "cb-acc-type-badge-bank" : "cb-acc-type-badge-cash";
@@ -345,19 +365,30 @@ class DuxCashBook {
 
 		if(!d.rows.length) rows+=`<tr><td colspan="7" class="cb-placeholder" style="padding:32px">No transactions in this period.</td></tr>`;
 
-		d.rows.forEach(function(row){
+		d.rows.forEach(function(row,i){
 			var pCls=row.prefix==="To"?"cb-to":"cb-by";
 			var drHtml=row.debit>0?`<span class="cb-dr">${cbFmt(row.debit)}</span>`:`<span class="cb-nil">—</span>`;
 			var crHtml=row.credit>0?`<span class="cb-cr">${cbFmt(row.credit)}</span>`:`<span class="cb-nil">—</span>`;
-			rows+=`<tr class="cb-tr-e">
+			var hasBd=row.breakdown&&row.breakdown.length;
+			var chev=hasBd?`<span class="cb-chev">▸</span>`:"";
+			var cnt=hasBd?`<span class="cb-bd-count">(${row.breakdown.length})</span>`:"";
+			rows+=`<tr class="cb-tr-e${hasBd?" cb-expandable":""}" data-r="${i}">
 				<td class="cb-c-date">${cbEsc(row.posting_date)}</td>
-				<td class="cb-c-part"><span class="${pCls}">${row.prefix}</span><span class="cb-contra-name">${cbEsc(row.contra)}</span></td>
+				<td class="cb-c-part">${chev}<span class="${pCls}">${row.prefix}</span><span class="cb-contra-name">${cbEsc(row.contra)}</span>${cnt}</td>
 				<td class="cb-c-vt">${cbPill(row.voucher_type)}</td>
 				<td class="cb-c-vno"><a class="cb-vno" href="${cbEsc(row.voucher_url)}" target="_blank">${cbEsc(row.voucher_no)}</a></td>
 				<td class="cb-c-amt">${drHtml}</td>
 				<td class="cb-c-amt">${crHtml}</td>
 				<td class="cb-c-bal">${cbBal(row.balance,row.balance_type)}</td>
 			</tr>`;
+			if(hasBd){
+				row.breakdown.forEach(function(b){
+					var amtCells=b.side==="Cr"
+						?`<td class="cb-c-amt"></td><td class="cb-c-amt"><span class="cb-cr">${cbFmt(b.amount)}</span></td>`
+						:`<td class="cb-c-amt"><span class="cb-dr">${cbFmt(b.amount)}</span></td><td class="cb-c-amt"></td>`;
+					rows+=`<tr class="cb-tr-bd" data-bd="${i}" style="display:none"><td class="cb-c-date"></td><td class="cb-c-part cb-bd-part"><span class="cb-bd-arrow">↳</span>${cbEsc(b.label)}</td><td class="cb-c-vt"></td><td class="cb-c-vno"></td>${amtCells}<td class="cb-c-bal"></td></tr>`;
+				});
+			}
 			if(row.remarks) rows+=`<tr class="cb-tr-r"><td colspan="7">${cbEsc(row.remarks)}</td></tr>`;
 		});
 
@@ -391,6 +422,57 @@ class DuxCashBook {
     </table>
   </div>
 </div>`;
+		// Show the "Show details" toggle only when something is expandable.
+		var anyBd=d.rows.some(function(r){ return r.breakdown&&r.breakdown.length; });
+		var dbtn=_gel("cb-detail-btn");
+		if(dbtn){
+			dbtn.style.display=anyBd?"inline-flex":"none";
+			dbtn.classList.remove("active");
+			var lbl=dbtn.querySelector(".cb-detail-lbl"); if(lbl) lbl.textContent="Show details";
+		}
+		this._attachDetailHandlers();
+	}
+
+	/* ── "Various" drill-down: per-row click + global toggle ─────── */
+	_attachDetailHandlers(){
+		var self=this, area=_gel("cb-area");
+		if(!area) return;
+		area.querySelectorAll(".cb-expandable").forEach(function(tr){
+			tr.addEventListener("click", function(ev){
+				if(ev.target.closest("a")) return;   // let the Vch No link work
+				self._toggleRow(parseInt(tr.dataset.r,10));
+			});
+		});
+	}
+
+	_toggleRow(i){
+		if(this._expandedRows.has(i)) this._expandedRows.delete(i);
+		else this._expandedRows.add(i);
+		this._applyRowVisibility(i);
+	}
+
+	_applyRowVisibility(i){
+		var expanded=this._showAllDetails||this._expandedRows.has(i);
+		var area=_gel("cb-area");
+		area.querySelectorAll('.cb-tr-bd[data-bd="'+i+'"]').forEach(function(tr){
+			tr.style.display=expanded?"":"none";
+		});
+		var chev=area.querySelector('.cb-expandable[data-r="'+i+'"] .cb-chev');
+		if(chev) chev.textContent=expanded?"▾":"▸";
+	}
+
+	_toggleAllDetails(){
+		this._showAllDetails=!this._showAllDetails;
+		var self=this, area=_gel("cb-area");
+		if(area) area.querySelectorAll(".cb-expandable").forEach(function(tr){
+			self._applyRowVisibility(parseInt(tr.dataset.r,10));
+		});
+		var dbtn=_gel("cb-detail-btn");
+		if(dbtn){
+			dbtn.classList.toggle("active", this._showAllDetails);
+			var lbl=dbtn.querySelector(".cb-detail-lbl");
+			if(lbl) lbl.textContent=this._showAllDetails?"Hide details":"Show details";
+		}
 	}
 
 	/* ── Excel Export ─────────────────────────────────────────────── */
@@ -408,7 +490,7 @@ class DuxCashBook {
 	/* ── Professional Print ───────────────────────────────────────── */
 	_printReport(landscape){
 		if(!this._lastData) return;
-		var d=this._lastData;
+		var self=this, d=this._lastData;
 		var win=window.open("","_blank","width=1100,height=750");
 		if(!win){ frappe.msgprint("Please allow pop-ups for this site."); return; }
 
@@ -436,6 +518,14 @@ class DuxCashBook {
 				<td class="p-num">${crHtml}</td>
 				<td class="p-num p-fw ${balCls}">${cbFmt(row.balance)}<span class="p-suf">${row.balance_type}</span></td>
 			</tr>`;
+			if(self._showAllDetails||self._expandedRows.has(idx)){
+				(row.breakdown||[]).forEach(function(b){
+					var bd=b.side==="Cr"
+						?`<td class="p-num"></td><td class="p-num"><span class="p-cr">${cbFmt(b.amount)}</span></td>`
+						:`<td class="p-num"><span class="p-dr">${cbFmt(b.amount)}</span></td><td class="p-num"></td>`;
+					tRows+=`<tr class="${idx%2===0?"p-even":"p-odd"}"><td></td><td class="p-part" style="padding-left:18px;color:#475569;font-size:9.5px">↳ ${cbEsc(b.label)}</td><td></td><td></td>${bd}<td class="p-num"></td></tr>`;
+				});
+			}
 			if(row.remarks) tRows+=`<tr class="p-rmk"><td colspan="7">${cbEsc(row.remarks)}</td></tr>`;
 		});
 

@@ -36,6 +36,8 @@ class DuxLedger {
 		this._selected = null;
 		this._lastData = null;
 		this._companies = [];   // populated by _loadCompanies
+		this._showAllDetails = false;       // global "Show details" toggle
+		this._expandedRows = new Set();     // per-row drill-down state
 
 		this._injectStyles();
 		this._renderLayout();
@@ -146,6 +148,16 @@ class DuxLedger {
 .dl-pill-pi{background:#fff7ed;color:#c2410c}
 .dl-pill-si{background:#f0fdf4;color:#166534}
 .dl-pill-other{background:#f3f4f6;color:#4b5563;border:1px solid #e5e7eb}
+.dl-detail-btn{display:none;height:36px;padding:0 14px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid #e5e7eb;background:#fff;color:#374151;font-family:inherit;transition:all .15s;align-items:center;gap:6px}
+.dl-detail-btn:hover{background:#f9fafb}
+.dl-detail-btn.active{background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8}
+.dl-chev{display:inline-block;width:13px;color:#9ca3af;font-size:10px;margin-right:3px;user-select:none}
+.dl-expandable{cursor:pointer}
+.dl-expandable:hover .dl-chev{color:#2563eb}
+.dl-bd-count{color:#9ca3af;font-size:11px;margin-left:5px}
+.dl-tr-bd td{padding:5px 16px;border-bottom:1px solid #f9fafb;background:#fcfcfd;font-size:11.5px;vertical-align:top}
+.dl-bd-part{color:#475569;padding-left:42px!important}
+.dl-bd-arrow{color:#9ca3af;margin-right:5px}
 		`;
 		document.head.appendChild(s);
 	}
@@ -173,6 +185,9 @@ class DuxLedger {
       <button class="dl-btn dl-btn-primary" id="dl-show-btn">Show</button>
       <button class="dl-excel-btn" id="dl-excel-btn">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/><path d="M8 13l3 3-3 3M14 13l-3 3 3 3"/></svg>Excel
+      </button>
+      <button class="dl-detail-btn" id="dl-detail-btn" title="Expand every 'Various' row into its individual heads">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg><span class="dl-detail-lbl">Show details</span>
       </button>
       <div class="dl-print-split" id="dl-print-split">
         <div class="dl-print-split-inner">
@@ -227,6 +242,7 @@ class DuxLedger {
 		});
 		_gel("dl-show-btn").addEventListener("click", function(){ self.fetchReport(); });
 		_gel("dl-excel-btn").addEventListener("click", function(){ self._exportExcel(); });
+		_gel("dl-detail-btn").addEventListener("click", function(){ self._toggleAllDetails(); });
 		_gel("dl-print-p-btn").addEventListener("click", function(){ _gel("dl-print-menu").classList.remove("open"); self._printReport(false); });
 		_gel("dl-print-caret").addEventListener("click", function(e){ e.stopPropagation(); _gel("dl-print-menu").classList.toggle("open"); });
 		_gel("dl-opt-p").addEventListener("click",  function(){ _gel("dl-print-menu").classList.remove("open"); self._printReport(false); });
@@ -377,14 +393,29 @@ class DuxLedger {
 	}
 
 	_render(d){
+		var self=this;
+		// Fresh data — start collapsed.
+		this._showAllDetails=false;
+		this._expandedRows=new Set();
 		var rows="";
 		rows+=`<tr class="dl-tr-ob"><td colspan="4"><span class="dl-ob-label">Opening Balance</span></td><td class="dl-c-amt">${d.opening_debit>0?`<span class="dl-dr">${_fmt(d.opening_debit)}</span>`:'<span class="dl-nil">—</span>'}</td><td class="dl-c-amt">${d.opening_credit>0?`<span class="dl-cr">${_fmt(d.opening_credit)}</span>`:'<span class="dl-nil">—</span>'}</td><td class="dl-c-bal">${_bal(d.opening_balance,d.opening_type)}</td></tr>`;
 		if(!d.rows.length) rows+=`<tr><td colspan="7" class="dl-placeholder" style="padding:32px">No transactions in this period.</td></tr>`;
-		d.rows.forEach(function(row){
+		d.rows.forEach(function(row,i){
 			var pCls=row.prefix==="To"?"dl-to":"dl-by";
 			var drHtml=row.debit>0?`<span class="dl-dr">${_fmt(row.debit)}</span>`:`<span class="dl-nil">—</span>`;
 			var crHtml=row.credit>0?`<span class="dl-cr">${_fmt(row.credit)}</span>`:`<span class="dl-nil">—</span>`;
-			rows+=`<tr class="dl-tr-e"><td class="dl-c-date">${_esc(row.posting_date)}</td><td class="dl-c-part"><span class="${pCls}">${row.prefix}</span><span class="dl-contra-name">${_esc(row.contra)}</span></td><td class="dl-c-vt">${_pill(row.voucher_type)}</td><td class="dl-c-vno"><a class="dl-vno" href="${_esc(row.voucher_url)}" target="_blank">${_esc(row.voucher_no)}</a></td><td class="dl-c-amt">${drHtml}</td><td class="dl-c-amt">${crHtml}</td><td class="dl-c-bal">${_bal(row.balance,row.balance_type)}</td></tr>`;
+			var hasBd=row.breakdown&&row.breakdown.length;
+			var chev=hasBd?`<span class="dl-chev">▸</span>`:"";
+			var cnt=hasBd?`<span class="dl-bd-count">(${row.breakdown.length})</span>`:"";
+			rows+=`<tr class="dl-tr-e${hasBd?" dl-expandable":""}" data-r="${i}"><td class="dl-c-date">${_esc(row.posting_date)}</td><td class="dl-c-part">${chev}<span class="${pCls}">${row.prefix}</span><span class="dl-contra-name">${_esc(row.contra)}</span>${cnt}</td><td class="dl-c-vt">${_pill(row.voucher_type)}</td><td class="dl-c-vno"><a class="dl-vno" href="${_esc(row.voucher_url)}" target="_blank">${_esc(row.voucher_no)}</a></td><td class="dl-c-amt">${drHtml}</td><td class="dl-c-amt">${crHtml}</td><td class="dl-c-bal">${_bal(row.balance,row.balance_type)}</td></tr>`;
+			if(hasBd){
+				row.breakdown.forEach(function(b){
+					var amtCells=b.side==="Cr"
+						?`<td class="dl-c-amt"></td><td class="dl-c-amt"><span class="dl-cr">${_fmt(b.amount)}</span></td>`
+						:`<td class="dl-c-amt"><span class="dl-dr">${_fmt(b.amount)}</span></td><td class="dl-c-amt"></td>`;
+					rows+=`<tr class="dl-tr-bd" data-bd="${i}" style="display:none"><td class="dl-c-date"></td><td class="dl-c-part dl-bd-part"><span class="dl-bd-arrow">↳</span>${_esc(b.label)}</td><td class="dl-c-vt"></td><td class="dl-c-vno"></td>${amtCells}<td class="dl-c-bal"></td></tr>`;
+				});
+			}
 			if(row.remarks) rows+=`<tr class="dl-tr-r"><td colspan="7">${_esc(row.remarks)}</td></tr>`;
 		});
 		rows+=`<tr class="dl-tr-cb"><td colspan="4"><span class="dl-cb-label">Closing Balance</span></td><td class="dl-c-amt">${d.closing_balancing_debit>0?`<span class="dl-dr">${_fmt(d.closing_balancing_debit)}</span>`:'<span class="dl-nil">—</span>'}</td><td class="dl-c-amt">${d.closing_balancing_credit>0?`<span class="dl-cr">${_fmt(d.closing_balancing_credit)}</span>`:'<span class="dl-nil">—</span>'}</td><td class="dl-c-bal" style="font-size:13px">${_bal(d.closing_balance,d.closing_type)}</td></tr>`;
@@ -410,6 +441,57 @@ class DuxLedger {
     </table>
   </div>
 </div>`;
+		// Show the "Show details" toggle only when something is expandable.
+		var anyBd=d.rows.some(function(r){ return r.breakdown&&r.breakdown.length; });
+		var dbtn=_gel("dl-detail-btn");
+		if(dbtn){
+			dbtn.style.display=anyBd?"inline-flex":"none";
+			dbtn.classList.remove("active");
+			var lbl=dbtn.querySelector(".dl-detail-lbl"); if(lbl) lbl.textContent="Show details";
+		}
+		this._attachDetailHandlers();
+	}
+
+	/* ── "Various" drill-down: per-row click + global toggle ─────── */
+	_attachDetailHandlers(){
+		var self=this, area=_gel("dl-area");
+		if(!area) return;
+		area.querySelectorAll(".dl-expandable").forEach(function(tr){
+			tr.addEventListener("click", function(ev){
+				if(ev.target.closest("a")) return;   // let the Vch No link work
+				self._toggleRow(parseInt(tr.dataset.r,10));
+			});
+		});
+	}
+
+	_toggleRow(i){
+		if(this._expandedRows.has(i)) this._expandedRows.delete(i);
+		else this._expandedRows.add(i);
+		this._applyRowVisibility(i);
+	}
+
+	_applyRowVisibility(i){
+		var expanded=this._showAllDetails||this._expandedRows.has(i);
+		var area=_gel("dl-area");
+		area.querySelectorAll('.dl-tr-bd[data-bd="'+i+'"]').forEach(function(tr){
+			tr.style.display=expanded?"":"none";
+		});
+		var chev=area.querySelector('.dl-expandable[data-r="'+i+'"] .dl-chev');
+		if(chev) chev.textContent=expanded?"▾":"▸";
+	}
+
+	_toggleAllDetails(){
+		this._showAllDetails=!this._showAllDetails;
+		var self=this, area=_gel("dl-area");
+		if(area) area.querySelectorAll(".dl-expandable").forEach(function(tr){
+			self._applyRowVisibility(parseInt(tr.dataset.r,10));
+		});
+		var dbtn=_gel("dl-detail-btn");
+		if(dbtn){
+			dbtn.classList.toggle("active", this._showAllDetails);
+			var lbl=dbtn.querySelector(".dl-detail-lbl");
+			if(lbl) lbl.textContent=this._showAllDetails?"Hide details":"Show details";
+		}
 	}
 
 	/* ══════════════════════════════════════════════════════════
@@ -437,7 +519,7 @@ class DuxLedger {
 	   ══════════════════════════════════════════════════════════ */
 	_printReport(landscape){
 		if(!this._lastData) return;
-		var d=this._lastData;
+		var self=this, d=this._lastData;
 		var win=window.open("","_blank","width=1100,height=750");
 		if(!win){ frappe.msgprint("Please allow pop-ups for this site."); return; }
 
@@ -473,6 +555,14 @@ class DuxLedger {
 				<td class="p-num">${crHtml}</td>
 				<td class="p-num p-fw ${balCls}">${_fmt(row.balance)}<span class="p-suf">${row.balance_type}</span></td>
 			</tr>`;
+			if(self._showAllDetails||self._expandedRows.has(idx)){
+				(row.breakdown||[]).forEach(function(b){
+					var bd=b.side==="Cr"
+						?`<td class="p-num"></td><td class="p-num"><span class="p-cr">${_fmt(b.amount)}</span></td>`
+						:`<td class="p-num"><span class="p-dr">${_fmt(b.amount)}</span></td><td class="p-num"></td>`;
+					tRows+=`<tr class="p-erow ${idx%2===0?"p-even":"p-odd"}"><td></td><td class="p-part" style="padding-left:18px;color:#475569;font-size:9.5px">↳ ${_esc(b.label)}</td><td></td><td></td>${bd}<td class="p-num"></td></tr>`;
+				});
+			}
 			if(row.remarks) tRows+=`<tr class="p-rmk"><td colspan="7">${_esc(row.remarks)}</td></tr>`;
 		});
 

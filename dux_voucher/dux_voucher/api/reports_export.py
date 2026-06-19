@@ -190,6 +190,26 @@ def _build_ledger_workbook(d, title, debit_label, credit_label, accent_color):
 
         row += 1
 
+        # Drill-down sub-rows for a "Various" particular — the individual
+        # heads that make it up, indented under the row, each on its side.
+        for b in (r.get('breakdown') or []):
+            for col_idx in range(1, n_cols + 1):
+                cell = ws.cell(row=row, column=col_idx)
+                cell.border = Border(bottom=HAIR)
+                if zebra:
+                    cell.fill = PatternFill("solid", fgColor=ZEBRA_BG)
+            lc = ws.cell(row=row, column=2, value="↳  " + (b.get('label') or ""))
+            lc.font = Font(name="Calibri", size=9, italic=True, color=GRAY_TXT)
+            lc.alignment = Alignment(horizontal="left", vertical="top",
+                                       wrap_text=True, indent=2)
+            is_cr = (b.get('side') == 'Cr')
+            ac = ws.cell(row=row, column=(6 if is_cr else 5), value=flt(b.get('amount')))
+            ac.font = Font(name="Calibri", size=9,
+                            color=(CR_GREEN if is_cr else DR_RED))
+            ac.alignment = Alignment(horizontal="right", vertical="top")
+            ac.number_format = NUM_FMT
+            row += 1
+
         # Remarks (italic, gray, merged across particulars→last col)
         if r.get('remarks'):
             cell = ws.cell(row=row, column=2, value=r['remarks'])

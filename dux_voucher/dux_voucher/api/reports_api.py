@@ -134,6 +134,17 @@ def get_ledger_statement(company, account, from_date, to_date,
 		ORDER BY gle.posting_date, gle.creation
 	""".format(where=where), params, as_dict=True)
 
+	# ── "Various" breakdowns ──────────────────────────────────────────
+	# A row whose counter side spans 2+ accounts renders as "Various".
+	# Pre-fetch each such voucher's GL lines (batched, keyed by voucher_no)
+	# so the front-end can drill the row open into its real make-up —
+	# the individual accounts + amounts on the opposite side.
+	various_keys = set()
+	for e in entries:
+		if len([p for p in (e.against or "").split(",") if p.strip()]) >= 2:
+			various_keys.add((e.voucher_type, e.voucher_no))
+	breakdown_map = _fetch_against_breakdowns(company, various_keys)
+
 	running  = ob_net
 	total_dr = 0.0
 	total_cr = 0.0
@@ -163,6 +174,25 @@ def get_ledger_statement(company, account, from_date, to_date,
 			prefix = "To" if dr > 0 else "By"
 			contra = e.party or _clean_against(e.against or "")
 
+		# Drill-down rows for a "Various" particular — the opposite-side
+		# accounts that make up this row's amount (sums back to it for a
+		# simple voucher).
+		breakdown = []
+		if contra == "Various":
+			want_credit = dr > 0   # viewed account debited → counter is credit side
+			for b in breakdown_map.get((e.voucher_type, e.voucher_no), []):
+				if b.account == e.account:
+					continue
+				amt = flt(b.credit) if want_credit else flt(b.debit)
+				if amt <= 0:
+					continue
+				breakdown.append(dict(
+					label  = b.account,
+					party  = b.party or "",
+					amount = amt,
+					side   = "Cr" if want_credit else "Dr",
+				))
+
 		rows.append(dict(
 			posting_date  = formatdate(e.posting_date, "dd-MMM-yy"),
 			prefix        = prefix,
@@ -175,6 +205,7 @@ def get_ledger_statement(company, account, from_date, to_date,
 			balance       = abs(running),
 			balance_type  = "Dr" if running >= 0 else "Cr",
 			remarks       = (e.remarks or "").strip(),
+			breakdown     = breakdown,
 		))
 
 	closing = running
@@ -627,6 +658,37 @@ def _clean_against(against_str):
 	if not parts:    return ""
 	if len(parts) == 1: return parts[0]
 	return "Various"
+
+
+def _fetch_against_breakdowns(company, voucher_keys):
+	"""Make-up of every "Various" voucher, for the ledger drill-down.
+
+	``voucher_keys`` is a set of ``(voucher_type, voucher_no)``. Returns
+	``{(voucher_type, voucher_no): [ {account, party_type, party, debit,
+	credit}, … ]}`` — every GL account line of those vouchers, summed per
+	account+party. The caller subtracts the viewed account and keeps the
+	opposite side to show what the "Various" actually consists of.
+
+	One batched query (keyed on voucher_no, since the type is carried in
+	the row and re-keyed in Python).
+	"""
+	if not voucher_keys:
+		return {}
+	vnos = tuple({vno for (_vt, vno) in voucher_keys})
+	rows = frappe.db.sql("""
+		SELECT voucher_type, voucher_no, account, party_type, party,
+		       SUM(debit_in_account_currency)  AS debit,
+		       SUM(credit_in_account_currency) AS credit
+		FROM `tabGL Entry`
+		WHERE company=%(company)s AND is_cancelled=0
+		  AND voucher_no IN %(vnos)s
+		GROUP BY voucher_type, voucher_no, account, party_type, party
+		ORDER BY voucher_type, voucher_no, account
+	""", dict(company=company, vnos=vnos), as_dict=True)
+	out = {}
+	for r in rows:
+		out.setdefault((r.voucher_type, r.voucher_no), []).append(r)
+	return out
 
 
 def _taccount_summary(ob_net, period_dr, period_cr):
