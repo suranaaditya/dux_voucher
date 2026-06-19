@@ -100,6 +100,9 @@ class DuxPartyTrialBalance {
 .ptb-pt-badge{font-size:10px;font-weight:700;background:#f0fdf4;color:#166534;border-radius:4px;padding:2px 7px;letter-spacing:.03em}
 .ptb-rpt-period{font-size:11px;color:#9ca3af;font-family:'SFMono-Regular',Consolas,monospace;display:flex;align-items:center;gap:8px}
 .ptb-rpt-period span{background:#f9fafb;border:1px solid #f3f4f6;border-radius:4px;padding:1px 7px}
+.ptb-rpt-hdr-top{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
+.ptb-search{height:34px;border:1px solid #e5e7eb;border-radius:7px;padding:0 12px;font-size:13px;color:#111827;background:#fff;outline:none;min-width:200px;font-family:inherit;box-sizing:border-box}
+.ptb-search:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.08)}
 .ptb-tbl-wrap{overflow-x:auto}
 .ptb-tbl{width:100%;border-collapse:collapse;font-size:12.5px}
 .ptb-tbl thead th{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#9ca3af;padding:9px 12px;background:#fafafa;border-bottom:1px solid #f3f4f6;white-space:nowrap;font-family:inherit}
@@ -108,11 +111,11 @@ class DuxPartyTrialBalance {
 .ptb-tr-e:hover td{background:#fafbff}
 .ptb-tr-tot td{padding:10px 12px;border-top:2px solid #e5e7eb;font-size:12.5px;font-weight:700}
 .ptb-tot-label{text-align:right;font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:.08em;font-weight:700}
-.ptb-c-party{width:140px;white-space:nowrap}
-.ptb-c-name{min-width:150px;color:#111827;word-break:break-word}
+.ptb-c-party{min-width:180px;word-break:break-word}
 .ptb-c-amt{width:100px;text-align:right;white-space:nowrap;font-family:'SFMono-Regular',Consolas,monospace}
-.ptb-party-link{color:#2563eb;text-decoration:none;font-weight:600;font-size:13px;cursor:pointer;font-family:'SFMono-Regular',Consolas,monospace}
+.ptb-party-link{color:#2563eb;text-decoration:none;font-weight:600;font-size:13px;cursor:pointer}
 .ptb-party-link:hover{text-decoration:underline}
+.ptb-party-id{font-size:10px;color:#9ca3af;font-family:'SFMono-Regular',Consolas,monospace;margin-top:2px}
 .ptb-dr{color:#dc2626;font-weight:500}
 .ptb-cr{color:#059669;font-weight:500}
 .ptb-nil{color:#d1d5db}
@@ -120,15 +123,13 @@ class DuxPartyTrialBalance {
   .ptb-tbl{font-size:11.5px}
   .ptb-tbl thead th{padding:8px 8px}
   .ptb-tr-e td,.ptb-tr-tot td{padding:8px 8px}
-  .ptb-c-party{width:110px}
-  .ptb-c-name{min-width:100px}
+  .ptb-c-party{min-width:130px}
   .ptb-c-amt{width:84px}
 }
 @media(max-width:640px){
   .ptb-tbl{font-size:11px}
   .ptb-tbl thead th,.ptb-tr-e td,.ptb-tr-tot td{padding:6px 5px}
-  .ptb-c-party{width:84px}
-  .ptb-c-name{min-width:74px}
+  .ptb-c-party{min-width:96px}
   .ptb-c-amt{width:72px}
 }
 		`;
@@ -290,13 +291,49 @@ class DuxPartyTrialBalance {
 	}
 
 	_render(d){
-		var self=this, rows="";
-		d.rows.forEach(function(row,i){
+		var self=this;
+		_gel("ptb-area").innerHTML=`
+<div class="ptb-report-card">
+  <div class="ptb-rpt-hdr">
+    <div class="ptb-rpt-hdr-top">
+      <div class="ptb-rpt-hdr-left">
+        <div class="ptb-rpt-co">${_esc(d.company)}</div>
+        <div class="ptb-rpt-sub"><span>Party Trial Balance</span><span class="ptb-pt-badge">${_esc(d.party_type)}</span></div>
+        <div class="ptb-rpt-period"><span>${_esc(d.from_date)}</span><span style="color:#d1d5db">→</span><span>${_esc(d.to_date)}</span><span style="color:#d1d5db">·</span><span>${d.row_count} part${d.row_count!==1?"ies":"y"}</span></div>
+      </div>
+      <input id="ptb-search" class="ptb-search" type="text" placeholder="Search party…" autocomplete="off">
+    </div>
+  </div>
+  <div class="ptb-tbl-wrap">
+    <table class="ptb-tbl">
+      <thead><tr>
+        <th class="ptb-c-party">Party</th>
+        <th class="ptb-c-amt r">Opening (Dr)</th><th class="ptb-c-amt r">Opening (Cr)</th>
+        <th class="ptb-c-amt r">Debit</th><th class="ptb-c-amt r">Credit</th>
+        <th class="ptb-c-amt r">Closing (Dr)</th><th class="ptb-c-amt r">Closing (Cr)</th>
+      </tr></thead>
+      <tbody id="ptb-tbody"></tbody>
+    </table>
+  </div>
+</div>`;
+		this._renderBody(d.rows);
+		_gel("ptb-search").addEventListener("input", function(){ self._applySearch(); });
+	}
+
+	/* Fill the table body for a set of rows; totals are computed live so
+	   the search filter narrows the totals too. */
+	_renderBody(rows){
+		var self=this;
+		this._viewRows = rows;
+		var html="";
+		var tot={od:0,oc:0,dr:0,cr:0,cd:0,cc:0};
+		rows.forEach(function(row,i){
 			var od=row.opening_type==="Dr"?row.opening:0, oc=row.opening_type==="Cr"?row.opening:0;
 			var cd=row.closing_type==="Dr"?row.closing:0, cc=row.closing_type==="Cr"?row.closing:0;
-			rows+=`<tr class="ptb-tr-e">
-				<td class="ptb-c-party"><a class="ptb-party-link" data-i="${i}" title="Open ledger">${_esc(row.party)}</a></td>
-				<td class="ptb-c-name">${_esc(row.party_name)}</td>
+			tot.od+=od; tot.oc+=oc; tot.dr+=(row.debit||0); tot.cr+=(row.credit||0); tot.cd+=cd; tot.cc+=cc;
+			var idH=(row.party!==row.party_name)?`<div class="ptb-party-id">${_esc(row.party)}</div>`:"";
+			html+=`<tr class="ptb-tr-e">
+				<td class="ptb-c-party"><a class="ptb-party-link" data-i="${i}" title="Open ledger">${_esc(row.party_name||row.party)}</a>${idH}</td>
 				<td class="ptb-c-amt">${_amt(od,"ptb-dr")}</td>
 				<td class="ptb-c-amt">${_amt(oc,"ptb-cr")}</td>
 				<td class="ptb-c-amt">${_amt(row.debit,"ptb-dr")}</td>
@@ -305,39 +342,33 @@ class DuxPartyTrialBalance {
 				<td class="ptb-c-amt">${_amt(cc,"ptb-cr")}</td>
 			</tr>`;
 		});
-		rows+=`<tr class="ptb-tr-tot">
-			<td colspan="2" class="ptb-tot-label">Total — ${d.row_count} part${d.row_count!==1?"ies":"y"}</td>
-			<td class="ptb-c-amt"><span class="ptb-dr">${_fmt(d.total_opening_debit)}</span></td>
-			<td class="ptb-c-amt"><span class="ptb-cr">${_fmt(d.total_opening_credit)}</span></td>
-			<td class="ptb-c-amt"><span class="ptb-dr">${_fmt(d.total_debit)}</span></td>
-			<td class="ptb-c-amt"><span class="ptb-cr">${_fmt(d.total_credit)}</span></td>
-			<td class="ptb-c-amt"><span class="ptb-dr">${_fmt(d.total_closing_debit)}</span></td>
-			<td class="ptb-c-amt"><span class="ptb-cr">${_fmt(d.total_closing_credit)}</span></td>
+		if(!rows.length){
+			html+=`<tr><td colspan="7" class="ptb-placeholder" style="padding:28px">No party matches your search.</td></tr>`;
+		}
+		html+=`<tr class="ptb-tr-tot">
+			<td class="ptb-tot-label">Total — ${rows.length} part${rows.length!==1?"ies":"y"}</td>
+			<td class="ptb-c-amt"><span class="ptb-dr">${_fmt(tot.od)}</span></td>
+			<td class="ptb-c-amt"><span class="ptb-cr">${_fmt(tot.oc)}</span></td>
+			<td class="ptb-c-amt"><span class="ptb-dr">${_fmt(tot.dr)}</span></td>
+			<td class="ptb-c-amt"><span class="ptb-cr">${_fmt(tot.cr)}</span></td>
+			<td class="ptb-c-amt"><span class="ptb-dr">${_fmt(tot.cd)}</span></td>
+			<td class="ptb-c-amt"><span class="ptb-cr">${_fmt(tot.cc)}</span></td>
 		</tr>`;
-
-		_gel("ptb-area").innerHTML=`
-<div class="ptb-report-card">
-  <div class="ptb-rpt-hdr">
-    <div class="ptb-rpt-co">${_esc(d.company)}</div>
-    <div class="ptb-rpt-sub"><span>Party Trial Balance</span><span class="ptb-pt-badge">${_esc(d.party_type)}</span></div>
-    <div class="ptb-rpt-period"><span>${_esc(d.from_date)}</span><span style="color:#d1d5db">→</span><span>${_esc(d.to_date)}</span><span style="color:#d1d5db">·</span><span>${d.row_count} part${d.row_count!==1?"ies":"y"}</span></div>
-  </div>
-  <div class="ptb-tbl-wrap">
-    <table class="ptb-tbl">
-      <thead><tr>
-        <th class="ptb-c-party">Party</th><th class="ptb-c-name">Name</th>
-        <th class="ptb-c-amt r">Opening (Dr)</th><th class="ptb-c-amt r">Opening (Cr)</th>
-        <th class="ptb-c-amt r">Debit</th><th class="ptb-c-amt r">Credit</th>
-        <th class="ptb-c-amt r">Closing (Dr)</th><th class="ptb-c-amt r">Closing (Cr)</th>
-      </tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-  </div>
-</div>`;
-
-		_gel("ptb-area").querySelectorAll(".ptb-party-link").forEach(function(el){
-			el.addEventListener("click", function(){ self._openPartyLedger(self._lastData.rows[parseInt(el.dataset.i,10)]); });
+		var tb=_gel("ptb-tbody");
+		tb.innerHTML=html;
+		tb.querySelectorAll(".ptb-party-link").forEach(function(el){
+			el.addEventListener("click", function(){ self._openPartyLedger(self._viewRows[parseInt(el.dataset.i,10)]); });
 		});
+	}
+
+	_applySearch(){
+		var q=(_gel("ptb-search").value||"").trim().toLowerCase();
+		var all=(this._lastData&&this._lastData.rows)||[];
+		if(!q){ this._renderBody(all); return; }
+		this._renderBody(all.filter(function(r){
+			return (r.party||"").toLowerCase().indexOf(q)!==-1
+			    || (r.party_name||"").toLowerCase().indexOf(q)!==-1;
+		}));
 	}
 
 	/* Deep-link: open the Party Ledger page for this exact party + company */
@@ -379,9 +410,9 @@ class DuxPartyTrialBalance {
 		d.rows.forEach(function(row,idx){
 			var od=row.opening_type==="Dr"?row.opening:0, oc=row.opening_type==="Cr"?row.opening:0;
 			var cd=row.closing_type==="Dr"?row.closing:0, cc=row.closing_type==="Cr"?row.closing:0;
+			var pidH=(row.party!==row.party_name)?`<div class="p-party-id">${_esc(row.party)}</div>`:"";
 			tRows+=`<tr class="${idx%2===0?"p-even":"p-odd"}">
-				<td class="p-party">${_esc(row.party)}</td>
-				<td class="p-name">${_esc(row.party_name)}</td>
+				<td class="p-party">${_esc(row.party_name||row.party)}${pidH}</td>
 				<td class="p-num">${_pamt(od,"p-dr")}</td>
 				<td class="p-num">${_pamt(oc,"p-cr")}</td>
 				<td class="p-num">${_pamt(row.debit,"p-dr")}</td>
@@ -391,7 +422,7 @@ class DuxPartyTrialBalance {
 			</tr>`;
 		});
 		tRows+=`<tr class="p-tot">
-			<td colspan="2" class="p-tot-lbl">Total — ${d.row_count} part${d.row_count!==1?"ies":"y"}</td>
+			<td class="p-tot-lbl">Total — ${d.row_count} part${d.row_count!==1?"ies":"y"}</td>
 			<td class="p-num p-dr p-fw">${_fmt(d.total_opening_debit)}</td>
 			<td class="p-num p-cr p-fw">${_fmt(d.total_opening_credit)}</td>
 			<td class="p-num p-dr p-fw">${_fmt(d.total_debit)}</td>
@@ -422,8 +453,8 @@ thead th.r{text-align:right}
 .p-odd td{background:#fafbfc;padding:5px 6px;border-bottom:1px solid #f1f5f9;vertical-align:top}
 .p-tot td{border-top:2.5px solid #0f172a;padding:7px 6px;font-weight:800;background:#f8fafc}
 .p-tot-lbl{text-align:right;font-size:8px;text-transform:uppercase;letter-spacing:.08em;color:#64748b}
-.p-party{width:80px;font-family:monospace;font-size:9.5px;color:#1d4ed8;font-weight:700;word-break:break-word}
-.p-name{font-size:9.5px;color:#0f172a;word-break:break-word}
+.p-party{width:140px;font-size:9.5px;color:#0f172a;font-weight:700;word-break:break-word}
+.p-party-id{font-size:8px;color:#1d4ed8;font-family:monospace;font-weight:400}
 .p-num{width:62px;text-align:right;font-family:monospace;font-size:9.5px;white-space:nowrap}
 .p-fw{font-weight:700}
 .p-dr{color:#dc2626}
@@ -436,7 +467,7 @@ thead th.r{text-align:right}
 <div class="p-info"><div><div class="p-info-name">${d.row_count} part${d.row_count!==1?"ies":"y"}</div></div><div class="p-period">${_esc(d.from_date)}  →  ${_esc(d.to_date)}</div></div>
 <table>
   <thead><tr>
-    <th class="p-party">Party</th><th class="p-name">Name</th>
+    <th class="p-party">Party</th>
     <th class="p-num r">Opening (Dr)</th><th class="p-num r">Opening (Cr)</th>
     <th class="p-num r">Debit</th><th class="p-num r">Credit</th>
     <th class="p-num r">Closing (Dr)</th><th class="p-num r">Closing (Cr)</th>
