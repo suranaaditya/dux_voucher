@@ -150,6 +150,30 @@ class DuxCashBook {
 .cb-tr-bd td{padding:5px 16px;border-bottom:1px solid #f9fafb;background:#fcfcfd;font-size:11.5px;vertical-align:top}
 .cb-bd-part{color:#475569;padding-left:42px!important}
 .cb-bd-arrow{color:#9ca3af;margin-right:5px}
+.cb-c-part,.cb-contra-name{word-break:break-word}
+@media(max-width:900px){
+  .cb-tbl{font-size:11.5px}
+  .cb-tbl thead th{padding:8px 9px}
+  .cb-tr-e td,.cb-tr-ob td,.cb-tr-cb td,.cb-tr-tot td,.cb-tr-bd td{padding:8px 9px}
+  .cb-c-date{width:58px;font-size:11px}
+  .cb-c-vt{width:96px}
+  .cb-c-vno{width:96px}
+  .cb-c-amt{width:84px}
+  .cb-c-bal{width:92px}
+  .cb-c-part{min-width:110px}
+  .cb-tr-r td{padding-left:16px}
+  .cb-bd-part{padding-left:28px!important}
+}
+@media(max-width:600px){
+  .cb-tbl{font-size:11px}
+  .cb-tbl thead th,.cb-tr-e td,.cb-tr-ob td,.cb-tr-cb td,.cb-tr-tot td,.cb-tr-bd td{padding:6px 6px}
+  .cb-c-vt{width:76px}
+  .cb-c-vno{width:84px}
+  .cb-c-amt{width:76px}
+  .cb-c-bal{width:84px}
+  .cb-c-part{min-width:80px}
+  .cb-pill{font-size:9px;padding:2px 5px}
+}
 		`;
 		document.head.appendChild(s);
 	}

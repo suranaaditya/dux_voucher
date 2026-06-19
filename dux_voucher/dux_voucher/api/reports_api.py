@@ -415,6 +415,8 @@ def get_day_book(company, from_date, to_date, voucher_type_filter=None):
 			voucher_url   = vch_url,
 			particulars   = particulars,
 			amount        = amt,
+			debit         = dr,
+			credit        = cr,
 			remarks       = (e.remarks or "").strip(),
 		))
 

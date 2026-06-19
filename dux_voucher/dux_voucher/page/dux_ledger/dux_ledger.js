@@ -158,6 +158,32 @@ class DuxLedger {
 .dl-tr-bd td{padding:5px 16px;border-bottom:1px solid #f9fafb;background:#fcfcfd;font-size:11.5px;vertical-align:top}
 .dl-bd-part{color:#475569;padding-left:42px!important}
 .dl-bd-arrow{color:#9ca3af;margin-right:5px}
+/* Particulars wraps so long names never force horizontal scroll */
+.dl-c-part,.dl-contra-name{word-break:break-word}
+/* Responsive — shrink to fit narrow screens instead of overflowing */
+@media(max-width:900px){
+  .dl-tbl{font-size:11.5px}
+  .dl-tbl thead th{padding:8px 9px}
+  .dl-tr-e td,.dl-tr-ob td,.dl-tr-cb td,.dl-tr-tot td,.dl-tr-bd td{padding:8px 9px}
+  .dl-c-date{width:58px;font-size:11px}
+  .dl-c-vt{width:96px}
+  .dl-c-vno{width:96px}
+  .dl-c-amt{width:84px}
+  .dl-c-bal{width:92px}
+  .dl-c-part{min-width:110px}
+  .dl-tr-r td{padding-left:16px}
+  .dl-bd-part{padding-left:28px!important}
+}
+@media(max-width:600px){
+  .dl-tbl{font-size:11px}
+  .dl-tbl thead th,.dl-tr-e td,.dl-tr-ob td,.dl-tr-cb td,.dl-tr-tot td,.dl-tr-bd td{padding:6px 6px}
+  .dl-c-vt{width:76px}
+  .dl-c-vno{width:84px}
+  .dl-c-amt{width:76px}
+  .dl-c-bal{width:84px}
+  .dl-c-part{min-width:80px}
+  .dl-pill{font-size:9px;padding:2px 5px}
+}
 		`;
 		document.head.appendChild(s);
 	}

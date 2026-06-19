@@ -107,16 +107,14 @@ class DuxDayBook {
 .db-tr-tot td{padding:10px 16px;border-top:2px solid #e5e7eb;font-size:12.5px;font-weight:700}
 .db-tot-label{text-align:right;font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:.08em;font-weight:700}
 
-/* Date group header */
-.db-tr-date td{padding:7px 16px 5px;background:#f0f4ff;border-top:1px solid #dbeafe;border-bottom:1px solid #dbeafe}
-.db-date-label{font-size:11px;font-weight:700;color:#1d4ed8;text-transform:uppercase;letter-spacing:.06em;font-family:'SFMono-Regular',Consolas,monospace}
-.db-date-count{font-size:10px;color:#93c5fd;margin-left:8px;font-family:inherit}
-
 /* Cells */
 .db-c-vt{width:130px;white-space:nowrap}
 .db-c-vno{width:140px;white-space:nowrap}
 .db-c-part{min-width:200px;font-size:13px;color:#111827;font-weight:500}
-.db-c-amt{width:130px;text-align:right;white-space:nowrap;font-family:'SFMono-Regular',Consolas,monospace;font-weight:500;color:#111827}
+.db-c-amt{width:108px;text-align:right;white-space:nowrap;font-family:'SFMono-Regular',Consolas,monospace;font-weight:500;color:#111827}
+.db-deb{color:#dc2626}
+.db-cred{color:#059669}
+.db-nilamt{color:#d1d5db}
 .db-c-date{width:80px;color:#9ca3af;white-space:nowrap;font-family:'SFMono-Regular',Consolas,monospace;font-size:12px}
 .db-vno{color:#2563eb;text-decoration:none;font-size:12px;font-family:'SFMono-Regular',Consolas,monospace}
 .db-vno:hover{text-decoration:underline}
@@ -129,6 +127,29 @@ class DuxDayBook {
 .db-pill-pi{background:#fff7ed;color:#c2410c}
 .db-pill-si{background:#f0fdf4;color:#166534}
 .db-pill-other{background:#f3f4f6;color:#4b5563;border:1px solid #e5e7eb}
+/* Particulars wraps so long names never force horizontal scroll */
+.db-c-part{word-break:break-word}
+/* Responsive — shrink to fit narrow screens instead of overflowing */
+@media(max-width:900px){
+  .db-tbl{font-size:11.5px}
+  .db-tbl thead th{padding:8px 9px}
+  .db-tr-e td,.db-tr-tot td{padding:8px 9px}
+  .db-c-date{width:60px;font-size:11px}
+  .db-c-vt{width:94px}
+  .db-c-vno{width:96px}
+  .db-c-amt{width:84px}
+  .db-c-part{min-width:120px}
+  .db-tr-r td{padding-left:16px}
+}
+@media(max-width:600px){
+  .db-tbl{font-size:11px}
+  .db-tbl thead th,.db-tr-e td,.db-tr-tot td{padding:6px 6px}
+  .db-c-vt{width:74px}
+  .db-c-vno{width:82px}
+  .db-c-amt{width:76px}
+  .db-c-part{min-width:90px}
+  .db-pill{font-size:9px;padding:2px 5px}
+}
 		`;
 		document.head.appendChild(s);
 	}
@@ -318,39 +339,27 @@ class DuxDayBook {
 		}
 
 		var rows="";
-		var lastDate="";
 
-		// Group rows by date for visual separation
 		d.rows.forEach(function(row){
-			// Date group header when date changes
-			if(row.posting_date !== lastDate){
-				// Count rows for this date
-				var dayCount = d.rows.filter(function(r){ return r.posting_date===row.posting_date; }).length;
-				rows+=`<tr class="db-tr-date">
-					<td colspan="5">
-						<span class="db-date-label">${dbEsc(row.posting_date)}</span>
-						<span class="db-date-count">${dayCount} voucher${dayCount!==1?"s":""}</span>
-					</td>
-				</tr>`;
-				lastDate=row.posting_date;
-			}
-
 			rows+=`<tr class="db-tr-e">
+				<td class="db-c-date">${dbEsc(row.posting_date)}</td>
 				<td class="db-c-vt">${dbPill(row.voucher_type)}</td>
 				<td class="db-c-vno"><a class="db-vno" href="${dbEsc(row.voucher_url)}" target="_blank">${dbEsc(row.voucher_no)}</a></td>
 				<td class="db-c-part">${dbEsc(row.particulars)}</td>
-				<td class="db-c-amt">${dbFmt(row.amount)}</td>
+				<td class="db-c-amt db-deb">${dbFmt(row.debit)}</td>
+				<td class="db-c-amt db-cred">${dbFmt(row.credit)}</td>
 			</tr>`;
 
 			if(row.remarks){
-				rows+=`<tr class="db-tr-r"><td colspan="4">${dbEsc(row.remarks)}</td></tr>`;
+				rows+=`<tr class="db-tr-r"><td colspan="6">${dbEsc(row.remarks)}</td></tr>`;
 			}
 		});
 
-		// Totals row
+		// Totals row — Debit and Credit tie out for a balanced day book
 		rows+=`<tr class="db-tr-tot">
-			<td colspan="3" class="db-tot-label">Total — ${d.row_count} voucher${d.row_count!==1?"s":""}</td>
-			<td class="db-c-amt">${dbFmt(d.total_debit)}</td>
+			<td colspan="4" class="db-tot-label">Total — ${d.row_count} voucher${d.row_count!==1?"s":""}</td>
+			<td class="db-c-amt db-deb">${dbFmt(d.total_debit)}</td>
+			<td class="db-c-amt db-cred">${dbFmt(d.total_credit)}</td>
 		</tr>`;
 
 		_gel("db-area").innerHTML=`
@@ -366,10 +375,12 @@ class DuxDayBook {
   <div class="db-tbl-wrap">
     <table class="db-tbl">
       <thead><tr>
+        <th class="db-c-date">Date</th>
         <th class="db-c-vt">Vch Type</th>
         <th class="db-c-vno">Vch No</th>
         <th class="db-c-part">Particulars</th>
-        <th class="db-c-amt r">Amount (₹)</th>
+        <th class="db-c-amt r">Debit</th>
+        <th class="db-c-amt r">Credit</th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>
@@ -404,32 +415,26 @@ class DuxDayBook {
 		var printedDate = new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"long",year:"numeric"});
 
 		var tRows = "";
-		var lastDate = "";
 
 		d.rows.forEach(function(row, idx){
-			// Date group header
-			if(row.posting_date !== lastDate){
-				tRows+=`<tr class="p-date-hdr">
-					<td colspan="4" class="p-date-lbl">${dbEsc(row.posting_date)}</td>
-				</tr>`;
-				lastDate=row.posting_date;
-			}
-
 			tRows+=`<tr class="${idx%2===0?"p-even":"p-odd"}">
+				<td class="p-dt">${dbEsc(row.posting_date)}</td>
 				<td class="p-vt">${dbEsc(row.voucher_type)}</td>
 				<td class="p-vno">${dbEsc(row.voucher_no)}</td>
 				<td class="p-part">${dbEsc(row.particulars)}</td>
-				<td class="p-amt">${dbFmt(row.amount)}</td>
+				<td class="p-amt p-deb">${dbFmt(row.debit)}</td>
+				<td class="p-amt p-cred">${dbFmt(row.credit)}</td>
 			</tr>`;
 
 			if(row.remarks){
-				tRows+=`<tr class="p-rmk"><td colspan="4">${dbEsc(row.remarks)}</td></tr>`;
+				tRows+=`<tr class="p-rmk"><td colspan="6">${dbEsc(row.remarks)}</td></tr>`;
 			}
 		});
 
 		tRows+=`<tr class="p-tot">
-			<td colspan="3" class="p-tot-lbl">Total — ${d.row_count} voucher${d.row_count!==1?"s":""}</td>
-			<td class="p-amt p-fw">${dbFmt(d.total_debit)}</td>
+			<td colspan="4" class="p-tot-lbl">Total — ${d.row_count} voucher${d.row_count!==1?"s":""}</td>
+			<td class="p-amt p-deb p-fw">${dbFmt(d.total_debit)}</td>
+			<td class="p-amt p-cred p-fw">${dbFmt(d.total_credit)}</td>
 		</tr>`;
 
 		win.document.write(`<!DOCTYPE html>
@@ -451,17 +456,18 @@ table{width:100%;border-collapse:collapse}
 thead tr{background:#1e293b}
 thead th{font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#f1f5f9;padding:7px 9px;white-space:nowrap}
 thead th.r{text-align:right}
-.p-date-hdr td{background:#dbeafe;padding:6px 9px;border-top:1px solid #93c5fd;border-bottom:1px solid #93c5fd}
-.p-date-lbl{font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:#1e3a5f;font-family:monospace}
 .p-even td{background:#fff;padding:6px 9px;border-bottom:1px solid #f1f5f9;vertical-align:top}
 .p-odd  td{background:#fafbfc;padding:6px 9px;border-bottom:1px solid #f1f5f9;vertical-align:top}
 .p-rmk td{padding:0 9px 6px 20px;border-bottom:1px solid #f1f5f9;font-size:9px;color:#94a3b8;font-style:italic}
 .p-tot td{border-top:2.5px solid #0f172a;padding:8px 9px;font-weight:800;background:#f8fafc}
 .p-tot-lbl{text-align:right;font-size:8.5px;text-transform:uppercase;letter-spacing:.1em;color:#64748b}
-.p-vt{width:108px;font-size:10px;color:#374151}
-.p-vno{width:120px;font-family:monospace;font-size:10px;color:#1d4ed8}
-.p-part{font-size:11px;color:#0f172a;font-weight:500}
-.p-amt{width:100px;text-align:right;font-family:monospace;font-size:11px;color:#0f172a}
+.p-dt{width:58px;font-size:10px;color:#475569;font-family:monospace;white-space:nowrap}
+.p-vt{width:90px;font-size:10px;color:#374151}
+.p-vno{width:102px;font-family:monospace;font-size:10px;color:#1d4ed8}
+.p-part{font-size:11px;color:#0f172a;font-weight:500;word-break:break-word}
+.p-amt{width:82px;text-align:right;font-family:monospace;font-size:11px;color:#0f172a}
+.p-deb{color:#dc2626}
+.p-cred{color:#16a34a}
 .p-fw{font-weight:700}
 .p-foot{margin-top:20px;padding-top:10px;border-top:1px solid #e2e8f0;text-align:right;font-size:9px;color:#94a3b8}
 @media print{thead{display:table-header-group}tr{page-break-inside:avoid}}
@@ -475,10 +481,12 @@ thead th.r{text-align:right}
 </div>
 <table>
   <thead><tr>
+    <th class="p-dt">Date</th>
     <th class="p-vt">Vch Type</th>
     <th class="p-vno">Vch No</th>
     <th class="p-part">Particulars</th>
-    <th class="p-amt r">Amount (₹)</th>
+    <th class="p-amt r">Debit</th>
+    <th class="p-amt r">Credit</th>
   </tr></thead>
   <tbody>${tRows}</tbody>
 </table>

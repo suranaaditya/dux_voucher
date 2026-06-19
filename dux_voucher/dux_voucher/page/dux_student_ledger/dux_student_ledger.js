@@ -157,6 +157,29 @@ class DuxStudentLedger {
 .sl-pill-opening{background:#eff6ff;color:#1d4ed8}
 .sl-pill-writeoff{background:#f5f3ff;color:#5b21b6}
 .sl-pill-other{background:#f3f4f6;color:#4b5563;border:1px solid #e5e7eb}
+.sl-c-part,.sl-contra-name{word-break:break-word}
+@media(max-width:900px){
+  .sl-tbl{font-size:11.5px}
+  .sl-tbl thead th{padding:8px 9px}
+  .sl-tr-e td,.sl-tr-ob td,.sl-tr-cb td,.sl-tr-tot td{padding:8px 9px}
+  .sl-c-date{width:58px;font-size:11px}
+  .sl-c-vt{width:96px}
+  .sl-c-vno{width:96px}
+  .sl-c-amt{width:84px}
+  .sl-c-bal{width:92px}
+  .sl-c-part{min-width:110px}
+  .sl-tr-r td{padding-left:16px}
+}
+@media(max-width:600px){
+  .sl-tbl{font-size:11px}
+  .sl-tbl thead th,.sl-tr-e td,.sl-tr-ob td,.sl-tr-cb td,.sl-tr-tot td{padding:6px 6px}
+  .sl-c-vt{width:76px}
+  .sl-c-vno{width:84px}
+  .sl-c-amt{width:76px}
+  .sl-c-bal{width:84px}
+  .sl-c-part{min-width:80px}
+  .sl-pill{font-size:9px;padding:2px 5px}
+}
 		`;
 		document.head.appendChild(s);
 	}

@@ -169,6 +169,30 @@ class DuxPartyLedger {
 .pl-tr-bd td{padding:5px 16px;border-bottom:1px solid #f9fafb;background:#fcfcfd;font-size:11.5px;vertical-align:top}
 .pl-bd-part{color:#475569;padding-left:42px!important}
 .pl-bd-arrow{color:#9ca3af;margin-right:5px}
+.pl-c-part,.pl-contra-name{word-break:break-word}
+@media(max-width:900px){
+  .pl-tbl{font-size:11.5px}
+  .pl-tbl thead th{padding:8px 9px}
+  .pl-tr-e td,.pl-tr-ob td,.pl-tr-cb td,.pl-tr-tot td,.pl-tr-bd td{padding:8px 9px}
+  .pl-c-date{width:58px;font-size:11px}
+  .pl-c-vt{width:96px}
+  .pl-c-vno{width:96px}
+  .pl-c-amt{width:84px}
+  .pl-c-bal{width:92px}
+  .pl-c-part{min-width:110px}
+  .pl-tr-r td{padding-left:16px}
+  .pl-bd-part{padding-left:28px!important}
+}
+@media(max-width:600px){
+  .pl-tbl{font-size:11px}
+  .pl-tbl thead th,.pl-tr-e td,.pl-tr-ob td,.pl-tr-cb td,.pl-tr-tot td,.pl-tr-bd td{padding:6px 6px}
+  .pl-c-vt{width:76px}
+  .pl-c-vno{width:84px}
+  .pl-c-amt{width:76px}
+  .pl-c-bal{width:84px}
+  .pl-c-part{min-width:80px}
+  .pl-pill{font-size:9px;padding:2px 5px}
+}
 		`;
 		document.head.appendChild(s);
 	}

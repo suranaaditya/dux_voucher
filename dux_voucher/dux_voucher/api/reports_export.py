@@ -251,11 +251,12 @@ def _build_day_book_workbook(d, vt_filter):
     ws.title = "Day Book"
 
     cols = [
-        ("Date",         14, "left",  None),
-        ("Vch Type",     18, "left",  None),
-        ("Vch No",       22, "left",  None),
-        ("Particulars",  50, "left",  None),
-        ("Amount (₹)",   18, "right", "amt"),
+        ("Date",         13, "left",  None),
+        ("Vch Type",     17, "left",  None),
+        ("Vch No",       21, "left",  None),
+        ("Particulars",  46, "left",  None),
+        ("Debit (₹)",    16, "right", "amt"),
+        ("Credit (₹)",   16, "right", "amt"),
     ]
     n_cols = len(cols)
 
@@ -276,11 +277,14 @@ def _build_day_book_workbook(d, vt_filter):
 
     for i, r in enumerate(d['rows']):
         zebra = (i % 2 == 1)
+        dr = flt(r.get('debit', r.get('amount', 0)))
+        cr = flt(r.get('credit', r.get('amount', 0)))
         ws.cell(row=row, column=1, value=r['posting_date'])
         ws.cell(row=row, column=2, value=r['voucher_type'])
         ws.cell(row=row, column=3, value=r['voucher_no'])
         ws.cell(row=row, column=4, value=r['particulars'])
-        ws.cell(row=row, column=5, value=flt(r['amount']))
+        ws.cell(row=row, column=5, value=(dr if dr else None))
+        ws.cell(row=row, column=6, value=(cr if cr else None))
 
         for col_idx in range(1, n_cols + 1):
             cell = ws.cell(row=row, column=col_idx)
@@ -293,6 +297,11 @@ def _build_day_book_workbook(d, vt_filter):
                 cell.fill = PatternFill("solid", fgColor=ZEBRA_BG)
 
         ws.cell(row=row, column=5).number_format = NUM_FMT
+        ws.cell(row=row, column=6).number_format = NUM_FMT
+        if dr:
+            ws.cell(row=row, column=5).font = Font(name="Calibri", size=10, color=DR_RED)
+        if cr:
+            ws.cell(row=row, column=6).font = Font(name="Calibri", size=10, color=CR_GREEN)
         row += 1
 
         if r.get('remarks'):
@@ -308,7 +317,7 @@ def _build_day_book_workbook(d, vt_filter):
                     ws.cell(row=row, column=c).fill = fill
             row += 1
 
-    # Totals — one amount column for Day Book
+    # Totals — Debit and Credit columns for Day Book (they tie out)
     fill = PatternFill("solid", fgColor=TOT_BG)
     border = Border(top=TOTAL_TOP, bottom=THIN)
     for c in range(1, n_cols + 1):
@@ -321,12 +330,16 @@ def _build_day_book_workbook(d, vt_filter):
     label_cell.font = Font(name="Calibri", size=10, bold=True, color=GRAY_TXT)
     label_cell.alignment = Alignment(horizontal="right", vertical="center")
     ws.merge_cells(start_row=row, start_column=1,
-                    end_row=row, end_column=n_cols - 1)
+                    end_row=row, end_column=n_cols - 2)
 
-    amt_cell = ws.cell(row=row, column=n_cols, value=flt(d['total_debit']))
-    amt_cell.font = Font(name="Calibri", size=11, bold=True, color=NAVY)
-    amt_cell.alignment = Alignment(horizontal="right", vertical="center")
-    amt_cell.number_format = NUM_FMT
+    dr_cell = ws.cell(row=row, column=n_cols - 1, value=flt(d['total_debit']))
+    dr_cell.font = Font(name="Calibri", size=11, bold=True, color=DR_RED)
+    dr_cell.alignment = Alignment(horizontal="right", vertical="center")
+    dr_cell.number_format = NUM_FMT
+    cr_cell = ws.cell(row=row, column=n_cols, value=flt(d['total_credit']))
+    cr_cell.font = Font(name="Calibri", size=11, bold=True, color=CR_GREEN)
+    cr_cell.alignment = Alignment(horizontal="right", vertical="center")
+    cr_cell.number_format = NUM_FMT
     ws.row_dimensions[row].height = 22
 
     row += 2
