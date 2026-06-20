@@ -131,7 +131,7 @@ class DuxPartyLedger {
 .pl-ob-label,.pl-cb-label{font-weight:700;color:#374151;text-transform:uppercase;font-size:10px;letter-spacing:.08em}
 .pl-tr-e td{padding:10px 16px;border-bottom:1px solid #f9fafb;vertical-align:top}
 .pl-tr-e:hover td{background:#fafbff}
-.pl-tr-r td{padding:1px 16px 9px 32px;border-bottom:1px solid #f9fafb;font-size:11px;color:#9ca3af;font-style:italic;line-height:1.5}
+.pl-tr-r td{padding:1px 16px 9px 32px;border-bottom:1px solid #f9fafb;font-size:11px;color:#9ca3af;font-style:italic;line-height:1.5;overflow-wrap:anywhere;word-break:break-word}
 .pl-tr-tot td{padding:10px 16px;border-top:2px solid #e5e7eb;font-size:12.5px;font-weight:700}
 .pl-tot-label{text-align:right;font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:.08em;font-weight:700}
 .pl-c-date{width:80px;color:#9ca3af;white-space:nowrap;font-family:'SFMono-Regular',Consolas,monospace;font-size:12px}
@@ -678,7 +678,7 @@ thead th.r{text-align:right}
 
 .p-even td{background:#fff;padding:6px 9px;border-bottom:1px solid #f1f5f9;vertical-align:top}
 .p-odd  td{background:#fafbfc;padding:6px 9px;border-bottom:1px solid #f1f5f9;vertical-align:top}
-.p-rmk td{padding:0 9px 6px 22px;border-bottom:1px solid #f1f5f9;font-size:9px;color:#94a3b8;font-style:italic;line-height:1.5}
+.p-rmk td{padding:0 9px 6px 22px;border-bottom:1px solid #f1f5f9;font-size:9px;color:#94a3b8;font-style:italic;line-height:1.5;overflow-wrap:anywhere;word-break:break-word}
 
 .p-tot td{border-top:2.5px solid #0f172a;padding:8px 9px;font-weight:800;background:#f8fafc}
 .p-tot-lbl{text-align:right;font-size:8.5px;text-transform:uppercase;letter-spacing:.1em;color:#64748b}
