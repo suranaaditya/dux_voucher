@@ -145,6 +145,19 @@ def get_ledger_statement(company, account, from_date, to_date,
 			various_keys.add((e.voucher_type, e.voucher_no))
 	breakdown_map = _fetch_against_breakdowns(company, various_keys)
 
+	# ── Sibling-party enrichment ─────────────────────────────────────
+	# Rows with no party of their own (TDS, expense, bank legs) surface
+	# the voucher's party in Particulars — "against whom", not just the
+	# counter account. Both lookups are batched.
+	no_party_keys = {(e.voucher_type, e.voucher_no) for e in entries if not e.party}
+	voucher_parties = _fetch_voucher_parties(company, no_party_keys)
+	name_pairs = {pp for sibs in voucher_parties.values() for pp in sibs}
+	for items in breakdown_map.values():
+		for b in items:
+			if b.party:
+				name_pairs.add((b.party_type, b.party))
+	party_names = _resolve_party_names(name_pairs)
+
 	running  = ob_net
 	total_dr = 0.0
 	total_cr = 0.0
@@ -158,6 +171,10 @@ def get_ledger_statement(company, account, from_date, to_date,
 		total_cr += cr
 
 		display_type, display_vch, vch_url = _resolve_voucher(e)
+		# Party the row answers to: its own party, else any party carried
+		# elsewhere on the same voucher (TDS row → the supplier, etc.).
+		sib_label = "" if e.party else _sibling_party_label(
+			voucher_parties.get((e.voucher_type, e.voucher_no)), party_names)
 		if use_party:
 			# Party ledger — RGI house convention (inverse of textbook):
 			# party debited (payment) -> "By", party credited (receipt) -> "To"
@@ -168,17 +185,19 @@ def get_ledger_statement(company, account, from_date, to_date,
 			# party ledger). Bank Dr (receipt) reads as "By <source>",
 			# Bank Cr (payment) reads as "To <destination>".
 			prefix = "By" if dr > 0 else "To"
-			contra = e.party or _clean_against(e.against or "")
+			contra = e.party or sib_label or _clean_against(e.against or "")
 		else:
 			# Plain non-bank account view — standard textbook convention.
 			prefix = "To" if dr > 0 else "By"
-			contra = e.party or _clean_against(e.against or "")
+			contra = e.party or sib_label or _clean_against(e.against or "")
 
-		# Drill-down rows for a "Various" particular — the opposite-side
-		# accounts that make up this row's amount (sums back to it for a
-		# simple voucher).
+		# Drill-down rows — the opposite-side accounts that make up this
+		# row's amount. Attached whenever the counter side spans 2+
+		# accounts (what used to render as "Various"), independent of the
+		# label now that sibling parties can take its place.
 		breakdown = []
-		if contra == "Various":
+		if (e.voucher_type, e.voucher_no) in various_keys and len(
+				[p for p in (e.against or "").split(",") if p.strip()]) >= 2:
 			want_credit = dr > 0   # viewed account debited → counter is credit side
 			for b in breakdown_map.get((e.voucher_type, e.voucher_no), []):
 				if b.account == e.account:
@@ -186,8 +205,12 @@ def get_ledger_statement(company, account, from_date, to_date,
 				amt = flt(b.credit) if want_credit else flt(b.debit)
 				if amt <= 0:
 					continue
+				label = b.account
+				if b.party:
+					label += "  ·  " + (party_names.get(
+						(b.party_type, b.party)) or b.party)
 				breakdown.append(dict(
-					label  = b.account,
+					label  = label,
 					party  = b.party or "",
 					amount = amt,
 					side   = "Cr" if want_credit else "Dr",
@@ -813,6 +836,70 @@ def _clean_against(against_str):
 	if not parts:    return ""
 	if len(parts) == 1: return parts[0]
 	return "Various"
+
+
+def _fetch_voucher_parties(company, voucher_keys):
+	"""Distinct parties carried anywhere on each voucher, biggest first.
+
+	The GL `against` text only reflects the OPPOSITE Dr/Cr side of a row,
+	so a party that sits on the SAME side as the viewed row (e.g. the
+	supplier credit next to a TDS credit) never reaches `against`. This
+	helper looks at ALL of a voucher's rows instead, so the ledger can
+	answer "against whom?" for rows that carry no party of their own.
+
+	Returns {(voucher_type, voucher_no): [(party_type, party), …]} with
+	parties ordered by their money weight on the voucher (largest first —
+	the headline name for an "& N more" label).
+	"""
+	if not voucher_keys:
+		return {}
+	vnos = tuple({vno for (_vt, vno) in voucher_keys})
+	rows = frappe.db.sql("""
+		SELECT voucher_type, voucher_no, party_type, party,
+		       SUM(debit_in_account_currency) + SUM(credit_in_account_currency) AS weight
+		FROM `tabGL Entry`
+		WHERE company=%(company)s AND is_cancelled=0
+		  AND voucher_no IN %(vnos)s
+		  AND party IS NOT NULL AND party <> ''
+		GROUP BY voucher_type, voucher_no, party_type, party
+		ORDER BY voucher_type, voucher_no, weight DESC
+	""", dict(company=company, vnos=vnos), as_dict=True)
+	out = {}
+	for r in rows:
+		out.setdefault((r.voucher_type, r.voucher_no), []).append(
+			(r.party_type, r.party))
+	return out
+
+
+def _resolve_party_names(pairs):
+	"""Batch-resolve {(party_type, party): display name}. Party types
+	outside _PARTY_NAME_FIELD (or names left blank) fall back to the id
+	at the call site."""
+	by_type = {}
+	for pt, p in pairs:
+		if pt in _PARTY_NAME_FIELD:
+			by_type.setdefault(pt, set()).add(p)
+	names = {}
+	for pt, ps in by_type.items():
+		nf = _PARTY_NAME_FIELD[pt]
+		for n, dn in frappe.db.sql(
+			f"SELECT name, `{nf}` FROM `tab{pt}` WHERE name IN %(p)s",
+			{"p": tuple(ps)}):
+			if dn:
+				names[(pt, n)] = dn
+	return names
+
+
+def _sibling_party_label(sibs, names):
+	"""Particulars label from a voucher's party list: the (display) name,
+	plus '& N more' when the voucher carries several parties."""
+	if not sibs:
+		return ""
+	pt, p = sibs[0]
+	first = names.get((pt, p)) or p
+	if len(sibs) == 1:
+		return first
+	return f"{first} & {len(sibs) - 1} more"
 
 
 def _fetch_against_breakdowns(company, voucher_keys):
