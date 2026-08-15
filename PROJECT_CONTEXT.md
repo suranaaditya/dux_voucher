@@ -10,12 +10,11 @@ Replaces complex Payment Entry / Journal Entry workflow with two simple vouchers
 - Owner: suranaaditya (Aditya Surana - Dux DigiTech)
 
 ## Servers
-- Development server: frappe@187.127.132.58
-- Dev site: erp.jewonline.in
-- Bench path: /home/frappe/frappe-bench
-- App path: /home/frappe/frappe-bench/apps/dux_voucher
 - ERPNext version: v16
 - Frappe version: v16
+- Host names, IPs, bench paths, site names and any credentials are
+  deliberately not recorded here — this repository is public. They live
+  in the team's private notes. Commands below use SITENAME placeholders.
 
 ## App Structure
 ```
@@ -118,7 +117,7 @@ All in `dux_voucher.dux_voucher.api.utils`:
 ## What is Pending / Next Steps
 - [ ] Print formats for Payment Voucher and Receipt Voucher
 - [ ] Install on Frappe Cloud production site
-- [ ] Test with real data at client site (jewonline.in)
+- [ ] Test with real data at the client site
 
 ## How to Install on a New Site
 ```bash
