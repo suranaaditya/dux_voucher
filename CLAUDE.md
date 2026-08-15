@@ -4,24 +4,30 @@
 
 A Tally-style simplified financial workflow layered on top of ERPNext v16.
 Replaces complex Payment Entry / Journal Entry interactions with one-screen
-vouchers, adds management-view reports (Day Book / Cash Book / Party Ledger),
-ships polished Excel exports of the standard reports, and enforces
-site-wide controls such as a configurable backdating policy. Built and
-maintained for the JEWIPL / RGI institutional setup.
+vouchers, adds management-view reports (Day Book / Cash Book / Ledger /
+Party Ledger / Party Trial Balance / Student Ledger), ships polished Excel
+exports of the standard reports, and enforces site-wide controls such as a
+configurable backdating policy. Built and maintained for the JEWIPL / RGI
+institutional setup.
 
 - **App name:** `dux_voucher`
 - **GitHub:** https://github.com/suranaaditya/dux_voucher
 - **Active branches**
-  - `version-1` — main / production base
+  - `version-1` — the original main line. **Stale — production does not track it.** Kept as history until the feature branches are merged back.
   - `feature/combined-entry-mode` — Party + Head Entry on PV/RV (rolled forward into ex-student)
   - `feature/ex-student-module` — Ex-Student opening balances, fee receipts, write-offs, plus Tally-style report Pages
   - `feature/formatted-tb-export` — Excel exports for the three Pages, formatted Trial Balance, and the site-wide Backdating Policy
-  - `feature/new-student-module` — **current branch** (admission-fee receipts for incoming students — masters + receipt + JE posting + print format + Admission Fee Register report + backdating wiring all shipped)
+  - `feature/new-student-module` — **current branch, and what dev + production both run.** Everything below has accumulated on this one tip: admission-fee receipts and refunds, the retained-fee income flow, and the whole Tally-style report layer. Do not expect the other feature branches to carry any of it.
   - `feat/ict-permissions-and-confirm` — Inter-Company Transfer permissions
-- **Dev server:** `frappe@187.127.132.58`
-- **Dev site:** `erp.jewonline.in` — Frappe `16.12.0`, ERPNext `16.10.0`
-- **Bench path:** `/home/frappe/frappe-bench`
-- **App path:** `/home/frappe/frappe-bench/apps/dux_voucher`
+- **Stack:** Frappe `16.12.0`, ERPNext `16.10.0`
+- **Environments:** dev and production both deploy this repo's
+  `feature/new-student-module` branch. There is **no separate release
+  branch** — both run the same tip, so anything pushed reaches both.
+  Dev additionally carries 30+ other in-house apps; production does not.
+- **Server details are deliberately not recorded here.** This repository
+  is public. Host names, IPs, bench paths, site names and any credentials
+  live in the team's private notes — never in a committed file. Commands
+  below use `<bench>` and `<site>` placeholders.
 
 ---
 
@@ -45,9 +51,11 @@ dux_voucher/                              repo root (pyproject, README, CLAUDE.m
     │   └── js/formatted_tb_button.bundle.js   "Download Formatted TB" injector
     ├── fixtures/custom_field.json
     ├── patches/
-    │   ├── v1_0/seed_backdating_rules.py      seeds 7 default rules
+    │   ├── v1_0/seed_backdating_rules.py      seeds one rule per SUPPORTED_DOCTYPES
     │   ├── v1_1/backfill_date_field.py        fills date_field for PO
-    │   └── v1_2/seed_student_fee_receipt_rule.py   adds the 8th rule on existing sites
+    │   ├── v1_2/seed_student_fee_receipt_rule.py   adds the 8th rule on existing sites
+    │   ├── v1_3/seed_ex_student_refund_rule.py     adds the 9th
+    │   └── v1_4/seed_student_fee_refund_rule.py    adds the 10th
     ├── formatted_reports/                     formatted Excel exports (single-prefix)
     │   ├── PLAN.md                            v5 design contract for TB
     │   ├── build_v5_reference.py              visual logic source-of-truth
@@ -61,15 +69,17 @@ dux_voucher/                              repo root (pyproject, README, CLAUDE.m
         │   ├── payment_voucher_api.py
         │   ├── ex_student_api.py
         │   ├── ic_transfer_api.py
-        │   ├── reports_api.py                 ledger / daybook / cashbook data
+        │   ├── reports_api.py                 ledger / daybook / cashbook / party TB /
+        │   │                                  student ledger data + T-account helper
         │   ├── reports_export.py              xlsx exports for those Pages
         │   ├── backdating.py                  posting-date enforcement
-        │   └── student_fee.py                 admission-fee account resolver
+        │   └── student_fee.py                 admission-fee + retained-income accounts,
+        │                                      book_income, paid/remaining helpers
         ├── doctype/
         │   ├── payment_voucher/  + child rows + backend ref
         │   ├── receipt_voucher/  + child rows + backend ref
         │   ├── ex_student/       + opening_row / opening_batch / receipt /
-        │   │                       writeoff / ledger_entry
+        │   │                       refund / writeoff / ledger_entry
         │   ├── inter_company_transfer/
         │   ├── ic_company_account_mapping/
         │   ├── inter_company_transfer_settings/
@@ -81,26 +91,35 @@ dux_voucher/                              repo root (pyproject, README, CLAUDE.m
         │   ├── student/                       per-company; STU-####;
         │   │                                  dedup on (name, father, course, company)
         │   ├── student_fee_receipt/           submittable; SFR-.YYYY.-
-        │   └── student_fee_receipt_head/      child rows on receipt
+        │   ├── student_fee_receipt_head/      child rows on receipt
+        │   ├── student_fee_refund/            submittable; SRF-.YYYY.- (+ income_* fields)
+        │   ├── student_fee_refund_head/       child rows on refund
+        │   └── student_fee_settings/          Single; retained-income account override
         ├── page/
         │   ├── dux_ledger/                    Ledger Statement
         │   ├── dux_daybook/                   Day Book
         │   ├── dux_cashbook/                  Cash & Bank Book
         │   ├── dux_party_ledger/              Party Ledger (System Manager)
+        │   ├── dux_party_trial_balance/       Party Trial Balance → click-through
+        │   │                                  to Party Ledger
         │   └── dux_student_ledger/            Student Ledger (ex + new student)
         ├── report/
         │   ├── ex_student_outstanding/
         │   ├── ict_pending_confirmation/
-        │   └── admission_fee_register/        flat list + KPI summary
+        │   ├── admission_fee_register/        flat list + KPI summary
+        │   └── student_fee_refund_income/     retained fee → income; KPI cards +
+        │                                      per-row "Book as income" action
         ├── print_format/                      polished print formats
         │   ├── dux_payment_voucher / dux_receipt_voucher
-        │   ├── ex_student_receipt / ex_student_writeoff
-        │   └── student_fee_receipt
+        │   ├── ex_student_receipt / ex_student_refund / ex_student_writeoff
+        │   └── student_fee_receipt / student_fee_refund
         ├── tests/
         │   ├── test_backdating.py             27 tests
         │   ├── test_student_masters.py        19 tests (Course/Fee Head/Student)
-        │   └── test_student_fee_receipt.py    13 tests (validate + FY helper)
-        └── utils.py                           cancel cascade for PE/JE
+        │   ├── test_student_fee_receipt.py    13 tests (validate + FY helper)
+        │   └── test_student_fee_refund_income.py   7 tests (income-account
+        │                                      resolver guards + balance helper)
+        └── utils.py                           cancel cascade for PE/JE + income JE
 ```
 
 ---
@@ -150,7 +169,7 @@ Two-step settlement between sister companies (cash/bank movement on
 company A is acknowledged via confirmation on company B). Permission-
 scoped via custom hooks (`api/ic_transfer_api.py`).
 
-### 4. Tally-style Pages — Day Book / Cash Book / Party Ledger
+### 4. Tally-style Pages — Day Book / Cash Book / Ledger / Party TB
 
 Custom Frappe Pages (not Reports) styled to match the on-screen
 expectations of an accountant familiar with Tally:
@@ -160,6 +179,17 @@ expectations of an accountant familiar with Tally:
 - **Dux Daybook** (`/app/dux-daybook`) — chronological voucher list,
   voucher-type filter
 - **Dux Cashbook** (`/app/dux-cashbook`) — bank/cash account ledger
+- **Dux Party Ledger** (`/app/dux-party-ledger`) — parties-only picker
+  (`search_ledger(parties_only=1)`), System Manager role-gated
+- **Dux Party Trial Balance** (`/app/dux-party-trial-balance`) — every
+  party of one type (Customer / Supplier / Employee) in a company with
+  Opening Dr/Cr, period Debit, period Credit and Closing Dr/Cr per party.
+  Column layout matches ERPNext's "Trial Balance for Party". Backend
+  `get_party_trial_balance` runs two batched GL queries grouped by party,
+  reusing the ledger's opening rule and cancelled-voucher exclusion.
+  Single Party column with a party search box; a `show_zero` toggle; and
+  **clicking a party opens that exact party** in the Party Ledger page
+  (same company + party) via `frappe.route_options` → `applyRouteOptions`.
 - **Dux Student Ledger** (`/app/dux-student-ledger`) — unified Dr/Cr
   statement for a single **Ex Student** or **New Student**, picked via a
   company-scoped toggle + student picker. NOT GL-Entry based (neither
@@ -175,6 +205,62 @@ Each page has filters, an in-window print (portrait/landscape), and a
 green **Excel** button → calls `api/reports_export.py`. The Excel
 output uses openpyxl with banded rows, frozen header, INR number
 format, and Dr/Cr suffix on balance cells.
+
+#### 4a. Ledger presentation rules (apply to all four ledger surfaces)
+
+These are display-time rules. None of them write GL, and all are
+retroactive for existing entries.
+
+- **Strict T-account layout** — the opening balance renders in its
+  NATURAL column (Dr balance → Debit, Cr balance → Credit) and the
+  closing balance is carried down as a **balancing contra on the
+  OPPOSITE column**, so the bottom row ties exactly: Total Debit ==
+  Total Credit. Driven by the single helper
+  `reports_api._taccount_summary(ob_net, period_dr, period_cr)` so
+  screen, print and Excel cannot drift. Before this, opening showed
+  only in the Balance column and the footer summed period movement
+  alone, which never reconciled to the closing.
+- **"Various" drill-down** — a row whose counter side spans 2+ accounts
+  renders as "Various". `get_ledger_statement` attaches a per-row
+  `breakdown` list (counter account + amount on the opposite side),
+  fetched in one batched GL query keyed by `voucher_no`, only for those
+  rows. Pages get a "Show details" toolbar toggle plus a per-row
+  chevron; print renders whatever is currently expanded; Excel writes
+  indented sub-rows.
+- **Party surfaced in Particulars** — GL `against` only reflects the
+  OPPOSITE Dr/Cr side, so a party on the SAME side as the viewed row
+  (the supplier credit next to a TDS credit) never reaches it, and the
+  TDS ledger showed the expense head instead of the deductee. Rows with
+  no party of their own now surface the **voucher's** party, falling
+  back to "First & N more" for multi-party vouchers and to the old
+  against/account text when there is none. Ledger Statement and Cash &
+  Bank Book inherit it; Party Ledger, Day Book and Party TB are
+  unchanged.
+- **RGI house convention (inverted To/By)** — applies to the party
+  ledger and to Bank/Cash accounts (Cash & Bank Book): Dr → "By",
+  Cr → "To". Plain non-bank account views keep the textbook rule.
+- **Cancelled vouchers hidden** — ERPNext keeps the original GL rows
+  *and* posts sign-flipped reversals, **both with `is_cancelled=0`**.
+  Filter on the parent's `docstatus=2` instead, joining GL Entry → PE/JE.
+- **Responsive** — all five report pages shrink to fit narrow screens
+  via two `@media` breakpoints, and long unbroken UPI/reference strings
+  in remark rows wrap (`overflow-wrap:anywhere`) instead of setting the
+  table's minimum width and pushing Debit/Credit off-screen.
+
+#### 4b. Day Book specifics
+
+- **Date on every row** (Date column; the per-day divider was removed).
+- **Debit and Credit columns**, not a single Amount column — and the
+  amount sits on **one side only**, by voucher nature: Receipts / Sales
+  on Credit, Payments / Journals / Contra on Debit, via
+  `_DAYBOOK_CREDIT_TYPES`. The empty side reads "—". Column totals are
+  per-side sums and **do not tie** — a day book's don't.
+- **Particulars** — `"Various"` is replaced with per-voucher-type
+  labels: Purchase Receipt → `supplier_name`; Stock Entry →
+  `custom_department` (falls back to `stock_entry_type`, guarded by
+  `frappe.db.has_column`); PV / RV Head-wise → first Account Row +
+  `" & more"` if >1; **any** Journal Entry without parties → first JE
+  Account + `" & more"`.
 
 ### 5. Formatted Trial Balance
 
@@ -216,10 +302,21 @@ wired in `hooks.py`. Sub-millisecond no-op when the master switch is
 off, so the cost on every controlled-doctype save is negligible
 unless the policy is actively enforced.
 
+**Adding an 11th needs THREE edits, not one:**
+
+1. `SUPPORTED_DOCTYPES` in `doctype/dux_backdating_settings/dux_backdating_settings.py`
+2. the `target_doctype` **Select options string** in
+   `doctype/dux_backdating_rule/dux_backdating_rule.json` — *and bump its
+   `modified` timestamp* so migrate re-syncs it
+3. a new `patches/v1_N/seed_…_rule.py` + a line in `patches.txt`
+
+Missing step 2 makes `bench migrate` fail with
+`Row #N: DocType cannot be "X". It should be one of …`.
+
 ### 7. New Student Admission Receipts
 
-Admission-fee counter for incoming students. Five doctypes plus a
-report and a print format:
+Admission-fee counter for incoming students. Doctypes plus reports and
+print formats:
 
 - **Course** — *global* (not company-scoped); autoname is the course
   name itself (`field:course_name`) so Link pickers display "MBA"
@@ -252,6 +349,7 @@ report and a print format:
   has no fee receipt on file; never hard-blocks. Orange-accented print
   format ("Admission Fee Refund Voucher"). Wired into the Backdating
   Policy as the 10th controlled doctype via `v1_3`/`v1_4` patches.
+  Also carries the four read-only `income_*` tracking fields — see §8.
 - **Student Fee Refund Head** — child row mirror of Student Fee
   Receipt Head: `(head, amount)`.
 
@@ -277,6 +375,53 @@ Wired into the **Backdating Policy** as the eighth controlled
 doctype; `v1_2/seed_student_fee_receipt_rule` patch adds the rule
 row on already-deployed sites.
 
+### 8. Retained Admission Fee → Income
+
+When an admission fee is only *partly* refunded, the amount the
+institution keeps stays parked in the `Admission Fee (Provisional)`
+liability for that student. This books it out to income:
+
+```
+Dr  Admission/Registration Fee (Provisional) - {abbr}
+Cr  Income From Admi Cancellation - {abbr}      (Income → Indirect Income)
+```
+
+- **`Student Fee Settings`** (Single, System Manager / Accounts Manager
+  write, Accounts User read) — one optional field,
+  `retained_fee_income_account`. Leave it blank and the account resolves
+  **by per-company convention** to `Income From Admi Cancellation -
+  {abbr}`, mirroring how the Admission Fee account is named. Set it only
+  to override with a differently-named account.
+- **`student_fee.get_retained_income_account(company)`** — override wins,
+  else the convention name. Either path runs
+  `_validate_income_account`: must exist, must be a ledger (non-group),
+  and must belong to that company (ERPNext rejects a cross-company
+  account in the JE).
+- **`student_fee.book_income(refund, posting_date=None)`** (whitelisted)
+  — posts the 2-line JE for the student's FULL current remaining,
+  anchored to a submitted Student Fee Refund, then stamps that refund's
+  `income_*` fields. Idempotent: one booking per refund.
+- **"Remaining" is student-level**, computed across ALL of the student's
+  submitted docs, not just the filtered window:
+  `remaining = total paid − total refunded − income already booked`.
+  So it stays correct regardless of the date filter and drops to zero
+  once booked.
+- **Cancel semantics** (`utils.py`): cancelling the **income JE** clears
+  the booking *without* cancelling the refund; cancelling the **refund**
+  reverses the income JE. That branch sits before the
+  `custom_source_voucher` logic and cannot match a normal backend JE —
+  the income JE is deliberately NOT linked back via
+  `custom_source_voucher`.
+
+**Report — `Student Fee Refund Income`** (Script Report): every submitted
+refund in the window with Paid / Refunded / Remaining / income status,
+KPI cards (Refunds · Total Refunded · Pending Income · Income Booked)
+and a per-row **"Book as income"** button so the whole flow runs from one
+screen. Pending Income is de-duplicated per student, so a student with
+two refund rows is not counted twice. Balances come from
+`_bulk_balances` — one grouped query per leg, not a query per row.
+Filters: Company, From/To Date, Course, Status (All / Pending / Booked).
+
 ---
 
 ## Key Business Logic
@@ -295,15 +440,17 @@ row on already-deployed sites.
   or Cheque Number (Cheque)
 - Backdating policy `validate` hook is the only cross-cutting guard;
   individual doctype controllers don't second-guess the date
+- **Ledgers must tie**: every ledger surface routes its opening/closing
+  through `_taccount_summary`, so Total Debit == Total Credit. The Day
+  Book is the deliberate exception — one-sided per voucher, totals do
+  not tie
+- **Retained-fee income is one booking per refund**, sized to the
+  student-level remaining, and is reversible from either end
 
 ---
 
 ## Pending Work
 
-- [ ] Production deploy of `feature/new-student-module` — pull,
-      `bench migrate` (runs `v1_2` + `v1_3` + `v1_4` patches to add the
-      8th, 9th and 10th backdating rules), HUP gunicorn. No `bench
-      restart`.
 - [ ] Smoke tests for Formatted TB and Backdating (planned in
       `formatted_reports/PLAN.md` §5.3 — needs the marker assertion
       against the built bundle)
@@ -312,8 +459,30 @@ row on already-deployed sites.
 - [ ] Tag `formatted-tb-v1.0.0` for a clean rollback point on the
       formatted-TB feature
 
+> **Note:** this repository is public. Keep credentials, tokens and
+> internal hostnames out of committed files — including this one.
+
 ## Recently Completed
 
+- [x] **Party surfaced in ledger Particulars** — rows with no party of
+      their own show the voucher's party, so a TDS ledger names the
+      deductee instead of the expense head. Display-time only,
+      retroactive
+- [x] **Day Book one-sided Dr/Cr** — Tally shows each voucher's value in
+      a single column by nature; per-row dates; responsive breakpoints
+      and wrapping remark strings across all five report pages
+- [x] **Party Trial Balance page** — per-party Opening / Debit / Credit /
+      Closing matching ERPNext's column layout, party search, single
+      Party column, and click-through into that party's Party Ledger
+- [x] **Strict T-account layout** — opening on its natural side, closing
+      carried down as a balancing contra, footer ties Debit == Credit,
+      via one shared `_taccount_summary` helper
+- [x] **"Various" drill-down** — per-row counter-account breakdown on
+      screen, in print and in Excel, from one batched GL query
+- [x] **Retained admission fee → income** — Student Fee Settings single
+      doctype, `book_income` + account resolver, `income_*` fields on
+      Student Fee Refund, two-way cancel handling, and the Student Fee
+      Refund Income report with a per-row booking action
 - [x] **Student Fee Refund** — submittable doctype mirroring Student
       Fee Receipt with reversed JE legs (Dr Admission/Registration Fee
       (Provisional), Cr Bank/Cash) and the same `heads` child table
@@ -335,6 +504,8 @@ row on already-deployed sites.
       `_get_ex_student_accounts`, `_validate_bank_cash_account`,
       `_submit_doc`, `_safe_cancel`, and the existing generic
       `on_journal_entry_cancel` cascade hook
+- [x] **Student Ledger page** — unified ex + new student statement,
+      reusing the ledger renderer and workbook builder verbatim
 - [x] **New Student Admission Receipts** — Course + Course Fee Head +
       Student + Student Fee Receipt + child table; receipt posts a
       single 2-line JE; polished print format; Admission Fee Register
@@ -359,23 +530,73 @@ row on already-deployed sites.
 ## Deployment
 
 ```bash
-# On dev server — pick up changes from a branch
-cd /home/frappe/frappe-bench/apps/dux_voucher
+# On the target server — pick up changes from a branch
+cd <bench>/apps/dux_voucher
 git pull origin <branch>
 
-cd /home/frappe/frappe-bench
-bench --site erp.jewonline.in migrate     # only when doctypes / patches change
-bench build --app dux_voucher              # only when JS / CSS bundles change
+cd <bench>
+bench --site <site> migrate      # only when doctypes / patches change
+bench --site <site> clear-cache
+bench build --app dux_voucher    # only when JS / CSS bundles change
 
-# IMPORTANT: bench restart is a NO-OP on this host. Always reload via SIGHUP:
+# IMPORTANT: bench restart is a NO-OP on the dev host — that account
+# cannot sudo supervisorctl. Always reload via SIGHUP:
 pkill -HUP -f "gunicorn.*frappe"
 ```
 
 Browser hard-refresh (Ctrl+Shift+R) when a JS bundle hash changes.
 
+Frappe **Pages** (`page/*.js`) load from disk per request — no build and
+no migrate needed, a hard refresh is enough.
+
 **Production flow:** edits land on dev first → `git push origin
-<branch>` → on production server `git pull` + the migrate/build/HUP
-trio above. No `bench restart` anywhere.
+<branch>` → on production `git pull` + the migrate/build/HUP trio above.
+No `bench restart` anywhere.
+
+### Dev-server gotcha — reports disappearing
+
+The dev bench carries 30+ apps and something in its deploy cycle
+periodically deletes standard `Report` records; with `developer_mode=1`
+that also removes the report folder from disk. Symptom: `git status` in
+the app shows report files as deleted, and the report 404s in Desk.
+Recovery is non-destructive:
+
+```bash
+cd <bench>/apps/dux_voucher
+git checkout -- dux_voucher/dux_voucher/report/
+bench --site <site> migrate      # re-imports the standard Report records
+bench --site <site> clear-cache
+```
+
+Production has never been affected.
+
+---
+
+## Gotchas learned the hard way
+
+- **`frappe.db.get_value` rejects SQL aggregates as column strings** —
+  `["SUM(x) AS y"]` throws "SQL functions are not allowed as strings in
+  SELECT". Use `frappe.db.sql` for aggregates.
+- **JS `validate(frm)` runs BEFORE the server computes read-only fields**
+  — a controller-computed field like `total_amount` is still `0` in the
+  client `validate`. Sum the live grid instead:
+  `(frm.doc.heads || []).reduce((s, r) => s + flt(r.amount), 0)`.
+- **Amending a cancelled submittable → "Cannot link cancelled document"**
+  — `Document.insert` runs `_validate_links()` *before* `before_insert`,
+  so cleanup there is too late. Override `insert()` and clear
+  `backend_je` / `is_posted` when `amended_from` is set. Already applied
+  to PV, RV, Student Fee Receipt, Student Fee Refund, Ex Student Refund.
+- **A corrupted DocType JSON can hide for weeks** —
+  `student_fee_receipt.json` was once overwritten with Print Format
+  content. The site kept working (the DocType was already in the DB) but
+  `bench migrate` silently skipped it, so JSON edits stopped applying.
+  Sanity-check that a doctype JSON says `"doctype": "DocType"` before
+  assuming a migrate no-op is fine.
+- **Never put two git worktrees on the same branch.** A branch ref is
+  shared across worktrees, so when one session commits, the ref advances
+  underneath the other while its files stay old — and git reads that gap
+  as "delete everything new". Work in the main checkout, or let the tool
+  create a worktree on its own scratch branch.
 
 ---
 
@@ -388,15 +609,21 @@ Notable cross-cutting files when you need to find something fast:
 | `doc_events`, `app_include_js`, fixtures, permissions | `dux_voucher/hooks.py` |
 | Cancel-cascade between PE/JE and parent vouchers | `dux_voucher/dux_voucher/utils.py` |
 | Posting-date enforcement | `dux_voucher/dux_voucher/api/backdating.py` |
-| Admission-fee account resolver | `dux_voucher/dux_voucher/api/student_fee.py` |
+| Admission-fee + retained-income account resolvers, `book_income` | `dux_voucher/dux_voucher/api/student_fee.py` |
 | Page reports + xlsx exports | `dux_voucher/dux_voucher/api/reports_api.py`, `reports_export.py` |
+| T-account opening/closing maths (all ledger surfaces) | `reports_api.py` → `_taccount_summary` |
+| Day Book particulars resolution | `reports_api.py` → `_build_day_book_particulars_map` |
+| Party Trial Balance page | `dux_voucher/dux_voucher/page/dux_party_trial_balance/` |
+| Party Trial Balance backend | `reports_api.py` → `get_party_trial_balance` |
 | Student Ledger page (ex + new student) | `dux_voucher/dux_voucher/page/dux_student_ledger/` |
 | Student Ledger backend (`get_student_ledger`, `search_students`) | `dux_voucher/dux_voucher/api/reports_api.py` |
 | Formatted TB workbook builder | `dux_voucher/formatted_reports/trial_balance/builder.py` |
-| Site-wide settings doctype | `dux_voucher/dux_voucher/doctype/dux_backdating_settings/` |
+| Site-wide settings doctypes | `doctype/dux_backdating_settings/`, `doctype/student_fee_settings/` |
 | Student Fee Receipt controller + JE posting | `dux_voucher/dux_voucher/doctype/student_fee_receipt/student_fee_receipt.py` |
 | Student Fee Receipt form behaviour (picker filters, FY default) | `dux_voucher/dux_voucher/doctype/student_fee_receipt/student_fee_receipt.js` |
+| Student Fee Refund controller + income fields | `dux_voucher/dux_voucher/doctype/student_fee_refund/student_fee_refund.py` |
 | Admission Fee Register report | `dux_voucher/dux_voucher/report/admission_fee_register/` |
+| Student Fee Refund Income report | `dux_voucher/dux_voucher/report/student_fee_refund_income/` |
 | Voucher controllers | `dux_voucher/dux_voucher/doctype/{payment,receipt}_voucher/` |
 | Ex-student lifecycle | `dux_voucher/dux_voucher/doctype/ex_student*/` |
 
