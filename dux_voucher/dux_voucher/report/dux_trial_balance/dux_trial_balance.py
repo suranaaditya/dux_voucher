@@ -76,6 +76,7 @@ def execute(filters=None):
     _validate(filters)
 
     companies = resolve_companies(filters)
+    filters._resolved_companies = companies
     if not companies:
         return _columns_for(filters, companies), [], _no_company_message(), None, None
 
@@ -573,10 +574,28 @@ def _account_master(companies):
 
 
 def _merge_key(acc, multi):
+    """Key that folds the same logical account across companies.
+
+    Single company: the account name is already unique, use it as-is.
+
+    Multi-company: the RGI chart of accounts was cloned per company and
+    then drifted, so the same root appears as "Application of Funds
+    (Assets)" in one company and "Application Of Funds(Assets)" in
+    another. Matching on the exact string produced two of every root in a
+    ten-company trust, which is technically true and completely unusable.
+
+    Case and whitespace are therefore normalised away. Punctuation is NOT
+    — "Advance to Staff" and "Advance to Staff (Old)" must stay distinct.
+    Account number, where present, takes precedence because it is the
+    stable identity.
+    """
     if not multi:
         return acc.name
+
     num = (acc.account_number or "").strip()
-    return f"{num} - {acc.account_name}" if num else acc.account_name
+    if num:
+        return f"#{num}"
+    return "".join((acc.account_name or "").lower().split())
 
 
 def _build_by_account(filters, companies):
@@ -588,6 +607,7 @@ def _build_by_account(filters, companies):
     values = _slice(companies, ["account"], filters)
 
     # Fold per-company accounts onto their merge key.
+    by_name = {a.name: a for a in accounts}
     nodes = {}
     for acc in accounts:
         k = _merge_key(acc, multi)
@@ -607,7 +627,7 @@ def _build_by_account(filters, companies):
             }
         node["members"].append(acc.name)
         if acc.parent_account:
-            parent = next((a for a in accounts if a.name == acc.parent_account), None)
+            parent = by_name.get(acc.parent_account)
             if parent:
                 node["parent_key"] = _merge_key(parent, multi)
 
@@ -616,10 +636,16 @@ def _build_by_account(filters, companies):
             for f in VALUE_FIELDS:
                 node[f] += flt(v[f])
 
-    # Roll leaf values up into ancestors. Deepest first, so a value lands
-    # in every ancestor exactly once.
-    ordered = sorted(nodes.values(), key=lambda n: n["lft"], reverse=True)
-    for node in ordered:
+    # Roll leaf values up into ancestors, deepest first so a value lands in
+    # every ancestor exactly once.
+    #
+    # Ordering by DEPTH, not by lft. lft is a per-company pre-order index,
+    # so across merged companies the ranges overlap and a parent in one
+    # company can sort after a child in another — which rolls values into
+    # a parent that has already been summed, or misses it entirely. Depth
+    # is the property that actually matters and is company-independent.
+    depth = _depth_map(nodes)
+    for node in sorted(nodes.values(), key=lambda n: depth[n["key"]], reverse=True):
         pk = node["parent_key"]
         if pk and pk in nodes and pk != node["key"]:
             for f in VALUE_FIELDS:
@@ -627,7 +653,7 @@ def _build_by_account(filters, companies):
 
     show_net = filters.get("show_net_values")
     rows = []
-    for node in sorted(nodes.values(), key=lambda n: n["lft"]):
+    for node in _tree_order(nodes, depth):
         if show_net:
             _net_off(node, _natural_side(node["root_type"]))
         row = {
@@ -687,6 +713,16 @@ def _unclosed_pl_row(companies, filters, currency):
     if not reset:
         return None
 
+    # Take it from whichever tier served the rest of the report. Querying
+    # live here while the balances came from the aggregate was measurably
+    # worse than not having an aggregate at all — the fast path returned in
+    # milliseconds and then this held the request open for ~40s.
+    if filters.get("_source") == "aggregate":
+        from dux_voucher.dux_voucher.api import tb_aggregate
+        net = flt(tb_aggregate.unclosed_pl(
+            companies, filters.from_date, filters.to_date, reset))
+        return _carry_row(net, currency)
+
     row = frappe.db.sql("""
         SELECT COALESCE(SUM(gle.debit), 0)  AS debit,
                COALESCE(SUM(gle.credit), 0) AS credit
@@ -704,7 +740,10 @@ def _unclosed_pl_row(companies, filters, currency):
 
     if not row:
         return None
-    net = flt(row[0].debit) - flt(row[0].credit)
+    return _carry_row(flt(row[0].debit) - flt(row[0].credit), currency)
+
+
+def _carry_row(net, currency):
     if abs(net) < 0.005:
         return None
 
@@ -726,6 +765,69 @@ def _unclosed_pl_row(companies, filters, currency):
         "closing_debit": net if net > 0 else 0.0,
         "closing_credit": -net if net < 0 else 0.0,
     })
+    return out
+
+
+def _depth_map(nodes):
+    """Depth of every node from its parent chain, cycle-guarded."""
+    cache = {}
+
+    def depth(key, guard=0):
+        if key in cache:
+            return cache[key]
+        node = nodes.get(key)
+        pk = node.get("parent_key") if node else None
+        if not node or not pk or pk not in nodes or pk == key or guard > 30:
+            cache[key] = 0
+            return 0
+        d = depth(pk, guard + 1) + 1
+        cache[key] = d
+        return d
+
+    for k in nodes:
+        depth(k)
+    return cache
+
+
+def _tree_order(nodes, depth):
+    """Parent-before-child ordering that survives a multi-company merge.
+
+    Sorting by lft alone interleaves companies, because each company's
+    nested set numbers from its own root. This walks the merged parent
+    map depth-first, ordering siblings by their lowest member lft so the
+    natural chart-of-accounts sequence is preserved inside each level.
+    """
+    children = {}
+    roots = []
+    for key, node in nodes.items():
+        pk = node.get("parent_key")
+        if pk and pk in nodes and pk != key:
+            children.setdefault(pk, []).append(key)
+        else:
+            roots.append(key)
+
+    for lst in children.values():
+        lst.sort(key=lambda k: (nodes[k]["lft"], nodes[k]["account_name"]))
+    roots.sort(key=lambda k: (nodes[k]["lft"], nodes[k]["account_name"]))
+
+    out = []
+    seen = set()
+
+    def walk(key, guard=0):
+        if key in seen or guard > 30:
+            return
+        seen.add(key)
+        out.append(nodes[key])
+        for c in children.get(key, []):
+            walk(c, guard + 1)
+
+    for r in roots:
+        walk(r)
+    # Anything unreachable (a broken parent link) still gets emitted, so a
+    # data problem never silently swallows a balance.
+    for key, node in nodes.items():
+        if key not in seen:
+            out.append(node)
     return out
 
 

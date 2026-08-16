@@ -235,9 +235,45 @@ def can_serve(companies, from_date, to_date):
     cov = coverage()
     if not cov.get("rows_"):
         return False
-    # The aggregate must reach back far enough to compute opening, and
-    # forward far enough to cover the period.
-    return cov["max_p"] >= month_key(to_date)
+
+    # Deliberately NOT requiring the aggregate to reach month_key(to_date).
+    #
+    # The first version did, and it made the fast path unreachable in the
+    # normal case: the ledger's last posting is 2026-08, so a perfectly
+    # ordinary "FY 2026-27" request (to 2027-03) failed the check and fell
+    # back to a 38-second live query every time. The aggregate is built
+    # from ALL of a company's GL, so months past its max simply contain no
+    # data -- live would return the same nothing, more slowly.
+    #
+    # What genuinely matters is staleness, and that is handled honestly:
+    # built_at is printed on the report, the nightly job keeps it current,
+    # and "Force live query" is one click away for anyone who needs
+    # postings made since the last build.
+    return True
+
+
+def unclosed_pl(companies, from_date, to_date, pl_reset_date):
+    """Prior-year P&L that the fiscal-year reset removed, from the aggregate.
+
+    The live equivalent joins GL to Account across a company's whole
+    history. Left on the live path it silently undid the aggregate: the
+    trial balance itself came back in milliseconds and then this one query
+    held the request open for the better part of a minute. The aggregate
+    already carries root_type per bucket, so the same figure is a sum.
+    """
+    if not companies or not pl_reset_date:
+        return 0.0
+    row = frappe.db.sql(f"""
+        SELECT COALESCE(SUM(agg.debit), 0) - COALESCE(SUM(agg.credit), 0)
+             + COALESCE(SUM(agg.opening_debit), 0) - COALESCE(SUM(agg.opening_credit), 0)
+               AS net
+        FROM `tab{AGG_DOCTYPE}` agg
+        WHERE agg.company IN %(companies)s
+          AND agg.root_type IN ('Income', 'Expense')
+          AND agg.period < %(pl_p)s
+    """, {"companies": tuple(companies),
+          "pl_p": month_key(pl_reset_date)}, as_dict=True)
+    return float(row[0].net) if row else 0.0
 
 
 def fetch(companies, group_cols, from_date, to_date, pl_reset_date=None):
