@@ -42,6 +42,8 @@ class DuxTrialBalance {
 		this.collapsed = new Set();
 		this.data = null;
 		this.search = "";
+		this.parties = {}; // account key -> party rows, fetched on demand
+		this.partyOpen = new Set();
 
 		this._styles();
 		this._layout();
@@ -196,6 +198,13 @@ tr.computed td{color:var(--tb-warn);font-style:italic;}
   text-transform:uppercase;padding:1.5px 5px;border-radius:4px;margin-left:6px;
   background:var(--tb-warn-soft);color:var(--tb-warn);white-space:nowrap;}
 .tb-unatt{color:var(--tb-ink-3);font-style:italic;}
+.tb-ctrl{font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  padding:1.5px 6px;border-radius:4px;margin-left:7px;background:var(--tb-accent-soft);
+  color:var(--tb-accent);white-space:nowrap;}
+tr.party > td{background:var(--tb-sunken);}
+tr.party:hover > td{background:var(--tb-line-2);}
+.tb-ptype{font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--tb-ink-3);margin-left:8px;}
 .tb-empty{padding:64px 20px;text-align:center;color:var(--tb-ink-3);font-size:14px;}
 .tb-empty strong{display:block;color:var(--tb-ink-2);font-size:15px;margin-bottom:6px;}
 @media(max-width:900px){
@@ -331,7 +340,25 @@ tr.computed td{color:var(--tb-warn);font-style:italic;}
 		});
 
 		$w.on("click", ".tb-caret:not(.leaf)", (e) => {
-			const key = $(e.currentTarget).closest("tr").data("key");
+			const $tr = $(e.currentTarget).closest("tr");
+			const key = $tr.data("key");
+			const idx = $tr.data("idx");
+			const row = (this.data && this.data.rows) || [];
+			const r = row[idx];
+
+			// A control account has no children in the chart of accounts,
+			// so its caret opens the PARTIES behind it instead — in place,
+			// rather than sending the user off to another view.
+			if (r && r.is_control) {
+				if (this.partyOpen.has(key)) {
+					this.partyOpen.delete(key);
+					this._renderTable();
+				} else {
+					this._loadParties(key, r);
+				}
+				return;
+			}
+
 			if (this.collapsed.has(key)) this.collapsed.delete(key);
 			else this.collapsed.add(key);
 			this._renderTable();
@@ -587,6 +614,53 @@ tr.computed td{color:var(--tb-warn);font-style:italic;}
 		return out;
 	}
 
+	_loadParties(key, row) {
+		if (this.parties[key]) {
+			this.partyOpen.add(key);
+			this._renderTable();
+			return;
+		}
+		frappe.call({
+			method: "dux_voucher.dux_voucher.api.trial_balance.get_account_parties",
+			args: {
+				filters: JSON.stringify(this.filters || {}),
+				accounts: JSON.stringify(row.members || [row.account]),
+			},
+			callback: (r) => {
+				this.parties[key] = r.message || [];
+				this.partyOpen.add(key);
+				this._renderTable();
+				if (!this.parties[key].length) {
+					frappe.show_alert({
+						message: __("No parties on this account for the period."),
+						indicator: "blue",
+					});
+				}
+			},
+		});
+	}
+
+	_partyRowHtml(p, indent) {
+		let name = frappe.utils.escape_html(p.label || "");
+		if (p.is_unattributed) name = `<span class="tb-unatt">${name}</span>`;
+		if (p.mismatch) name += `<span class="tb-flag">${__("wrong party type")}</span>`;
+		const type = p.party_type
+			? `<span class="tb-ptype">${frappe.utils.escape_html(p.party_type)}</span>`
+			: "";
+		return `<tr class="party" data-party="1" data-acct="${frappe.utils.escape_html(
+			p._acct || ""
+		)}" data-pt="${frappe.utils.escape_html(
+			p.party_type || ""
+		)}" data-p="${frappe.utils.escape_html(p.party || "")}">
+      <td><div class="tb-name" style="padding-left:${indent + 18}px">
+        <span class="tb-caret leaf">▼</span>
+        <span class="tb-lbl">${name}</span>${type}
+      </div></td>
+      ${this._cell(p.opening_debit)}${this._cell(p.opening_credit)}
+      ${this._cell(p.debit)}${this._cell(p.credit)}
+      ${this._cell(p.closing_debit, "tb-dr")}${this._cell(p.closing_credit, "tb-cr")}</tr>`;
+	}
+
 	_renderTable() {
 		const d = this.data || {};
 		const rows = d.rows || [];
@@ -619,8 +693,12 @@ tr.computed td{color:var(--tb-warn);font-style:italic;}
           ${this._cell(r.closing_debit, "tb-dr")}${this._cell(r.closing_credit, "tb-cr")}</tr>`;
 				}
 
-				const hasKids = kids.has(r.account);
-				const collapsed = this.collapsed.has(r.account);
+				// A control account gets a caret even though the chart of
+				// accounts gives it no children — it opens into its parties.
+				const hasKids = kids.has(r.account) || r.is_control;
+				const collapsed = r.is_control
+					? !this.partyOpen.has(r.account)
+					: this.collapsed.has(r.account);
 				const indent = (r.indent || 0) * 18;
 				let name = frappe.utils.escape_html(
 					r.account_name || r.party_name || r.company || r.party || ""
@@ -636,7 +714,7 @@ tr.computed td{color:var(--tb-warn);font-style:italic;}
 					.filter(Boolean)
 					.join(" ");
 
-				return `<tr class="${cls}" data-key="${frappe.utils.escape_html(
+				let html = `<tr class="${cls}" data-key="${frappe.utils.escape_html(
 					r.account || ""
 				)}" data-idx="${idx}">
         <td><div class="tb-name" style="padding-left:${indent}px">
@@ -644,10 +722,30 @@ tr.computed td{color:var(--tb-warn);font-style:italic;}
 					collapsed ? "collapsed" : ""
 				}">▼</span>
           <span class="tb-lbl">${name}</span>
+          ${
+						r.is_control
+							? `<span class="tb-ctrl" title="${__(
+									"Opens into the parties behind this account"
+							  )}">${__("parties")}</span>`
+							: ""
+					}
         </div></td>
         ${this._cell(r.opening_debit)}${this._cell(r.opening_credit)}
         ${this._cell(r.debit)}${this._cell(r.credit)}
         ${this._cell(r.closing_debit, "tb-dr")}${this._cell(r.closing_credit, "tb-cr")}</tr>`;
+
+				if (r.is_control && this.partyOpen.has(r.account)) {
+					const kidsRows = this.parties[r.account] || [];
+					html += kidsRows.map((p) => this._partyRowHtml(p, indent)).join("");
+					if (!kidsRows.length) {
+						html += `<tr class="party"><td colspan="7" style="padding-left:${
+							indent + 36
+						}px;color:var(--tb-ink-3);font-style:italic">${__(
+							"No parties on this account for the period."
+						)}</td></tr>`;
+					}
+				}
+				return html;
 			})
 			.join("");
 

@@ -14,6 +14,7 @@ import json
 
 import frappe
 from frappe import _
+from frappe.utils import flt
 
 from dux_voucher.dux_voucher.report.dux_trial_balance.dux_trial_balance import (
     execute as _execute,
@@ -66,6 +67,93 @@ def _guard(filters):
     if denied:
         frappe.throw(_("You do not have access to: {0}").format(
             ", ".join(sorted(set(denied))[:5])))
+
+
+@frappe.whitelist()
+def get_account_parties(filters=None, accounts=None):
+    """The parties behind one control account, for inline expansion.
+
+    Opening a control account in place beats sending someone to a
+    different view to answer "who is this ₹1.2 crore of Debtors?". The
+    Account -> Party view still exists for scanning every control account
+    at once; this is for following a single one.
+
+    ``accounts`` is the list of REAL account names the row represents —
+    across a trust the same logical account exists once per company, so
+    the page passes back what the row merged rather than guessing.
+    """
+    from dux_voucher.dux_voucher.report.dux_trial_balance.dux_trial_balance import (
+        _slice, _validate, _resolve_party_names, _net_off, _has_value,
+        _party_type_mismatch, _default_party_accounts, UNATTRIBUTED)
+
+    if isinstance(filters, str):
+        filters = json.loads(filters or "{}")
+    if isinstance(accounts, str):
+        accounts = json.loads(accounts or "[]")
+    accounts = [a for a in (accounts or []) if a]
+    if not accounts:
+        return []
+
+    f = frappe._dict(filters or {})
+    _validate(f)
+    _guard(f)
+    companies = expand_all(f.get("company"))
+    if not companies:
+        return []
+
+    values = _slice(companies, ["account", "party_type", "party"], f)
+    wanted = set(accounts)
+
+    names = _resolve_party_names(
+        {(pt, p) for (a, pt, p) in values.keys() if p and a in wanted})
+    default_map = _default_party_accounts(companies)
+
+    # A receivable nets to debit, a payable to credit.
+    acct_type = frappe.db.get_value("Account", accounts[0], "account_type")
+    natural = "debit" if acct_type == "Receivable" else "credit"
+
+    merged = {}
+    for (account, party_type, party), v in values.items():
+        if account not in wanted:
+            continue
+        key = (party_type or "", party or "")
+        slot = merged.setdefault(key, {k: 0.0 for k in v})
+        for fld in v:
+            slot[fld] += flt(v[fld])
+        slot["_mismatch"] = slot.get("_mismatch") or _party_type_mismatch(
+            account, party_type, default_map)
+
+    out = []
+    for (party_type, party), v in merged.items():
+        row = {k: val for k, val in v.items() if not k.startswith("_")}
+        if f.get("show_net_values"):
+            _net_off(row, natural)
+        row.update({
+            "party_type": party_type or None,
+            "party": party or None,
+            "label": (UNATTRIBUTED if not party
+                      else (names.get((party_type, party)) or party)),
+            "is_unattributed": 0 if party else 1,
+            "mismatch": 1 if v.get("_mismatch") else 0,
+        })
+        if _has_value(row) or f.get("show_zero_values"):
+            out.append(row)
+
+    out.sort(key=lambda r: (r["is_unattributed"],
+                            -abs(flt(r["closing_debit"]) - flt(r["closing_credit"]))))
+    return out
+
+
+def expand_all(selected):
+    if isinstance(selected, str):
+        selected = [selected] if selected else []
+    out, seen = [], set()
+    for name in selected or []:
+        for co in expand_company(name):
+            if co not in seen:
+                seen.add(co)
+                out.append(co)
+    return out
 
 
 @frappe.whitelist()

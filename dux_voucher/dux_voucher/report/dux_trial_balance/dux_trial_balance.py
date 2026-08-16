@@ -368,18 +368,35 @@ def _gl_aggregate(companies, group_cols, filters, opening):
                      rows flagged is_opening='Yes'
     opening=False -> the period itself, is_opening='No'
 
-    Returns a list of dicts carrying the group columns plus debit/credit.
+    Runs ONE QUERY PER COMPANY and concatenates. Callers accumulate with
+    ``+=`` on the group key, so splitting the work is arithmetically
+    identical — and it is the difference between working and not.
+
+    A single ``company IN (...)`` group-by across a trust is pathological
+    here: six companies over a fiscal year exceeded 100 seconds and blew
+    past gunicorn's 120s worker timeout, which surfaced to the user as a
+    bare "Internal Server Error" with nothing in the Error Log, because
+    the worker was killed rather than raising. Per company the WHERE hits
+    the `company` index and each slice sorts in memory. Same lesson the
+    aggregate rebuild learned, applied to the live path.
     """
     if not companies:
         return []
 
+    out = []
+    for company in companies:
+        out.extend(_gl_aggregate_one(company, group_cols, filters, opening))
+    return out
+
+
+def _gl_aggregate_one(company, group_cols, filters, opening):
     params = {
-        "companies": tuple(companies),
+        "company": company,
         "from_date": filters.from_date,
         "to_date": filters.to_date,
     }
 
-    where = ["gle.company IN %(companies)s", "gle.is_cancelled = 0"]
+    where = ["gle.company = %(company)s", "gle.is_cancelled = 0"]
     joins = ""
 
     if opening:
@@ -680,6 +697,15 @@ def _build_by_account(filters, companies):
         for f in VALUE_FIELDS:
             row[f] = flt(node[f])
         row["has_value"] = _has_value(row)
+
+        # A control account can be opened in place to reveal the parties
+        # behind it, so it carries the real account names it merges. Only
+        # control accounts — attaching the member list to all 800 rows of a
+        # 34-company trust would bloat the payload for no purpose.
+        if node["account_type"] in CONTROL_ACCOUNT_TYPES and not node["is_group"]:
+            row["is_control"] = 1
+            row["members"] = node["members"]
+
         rows.append(row)
 
     rows = _apply_indent(rows)
@@ -734,24 +760,28 @@ def _unclosed_pl_row(companies, filters, currency):
             companies, filters.from_date, filters.to_date, reset))
         return _carry_row(net, currency)
 
-    row = frappe.db.sql("""
-        SELECT COALESCE(SUM(gle.debit), 0)  AS debit,
-               COALESCE(SUM(gle.credit), 0) AS credit
-        FROM `tabGL Entry` gle
-        JOIN `tabAccount` acc ON acc.name = gle.account
-        WHERE gle.company IN %(companies)s
-          AND gle.is_cancelled = 0
-          AND acc.root_type IN ('Income', 'Expense')
-          AND ( gle.posting_date < %(from_date)s
-                OR (gle.is_opening = 'Yes'
-                    AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s) )
-          AND gle.posting_date < %(pl_reset)s
-    """, {"companies": tuple(companies), "from_date": filters.from_date,
-          "to_date": filters.to_date, "pl_reset": reset}, as_dict=True)
+    # Per company, for the same reason as _gl_aggregate: one IN-list
+    # group-by across a trust is what blew the worker timeout.
+    net = 0.0
+    for company in companies:
+        row = frappe.db.sql("""
+            SELECT COALESCE(SUM(gle.debit), 0)  AS debit,
+                   COALESCE(SUM(gle.credit), 0) AS credit
+            FROM `tabGL Entry` gle
+            JOIN `tabAccount` acc ON acc.name = gle.account
+            WHERE gle.company = %(company)s
+              AND gle.is_cancelled = 0
+              AND acc.root_type IN ('Income', 'Expense')
+              AND ( gle.posting_date < %(from_date)s
+                    OR (gle.is_opening = 'Yes'
+                        AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s) )
+              AND gle.posting_date < %(pl_reset)s
+        """, {"company": company, "from_date": filters.from_date,
+              "to_date": filters.to_date, "pl_reset": reset}, as_dict=True)
+        if row:
+            net += flt(row[0].debit) - flt(row[0].credit)
 
-    if not row:
-        return None
-    return _carry_row(flt(row[0].debit) - flt(row[0].credit), currency)
+    return _carry_row(net, currency)
 
 
 def _carry_row(net, currency):
