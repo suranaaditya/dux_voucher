@@ -72,7 +72,18 @@ UNATTRIBUTED = "(Unattributed)"
 # ══════════════════════════════════════════════════════════════════════
 
 def execute(filters=None):
-    filters = frappe._dict(filters or {})
+    # Mutate the caller's dict rather than a copy.
+    #
+    # execute() stamps provenance onto filters as it runs — which tier
+    # served the request, when the aggregate was built, which companies a
+    # trust expanded to. Wrapping unconditionally in a fresh _dict threw
+    # all of that away at the boundary, so the page's own status pill read
+    # "Live GL · 0 companies" while the query had in fact used the
+    # aggregate across 34 companies. The report was telling the truth
+    # internally and lying on screen, which is the one failure mode a
+    # reconciliation tool cannot afford.
+    if not isinstance(filters, frappe._dict):
+        filters = frappe._dict(filters or {})
     _validate(filters)
 
     companies = resolve_companies(filters)
