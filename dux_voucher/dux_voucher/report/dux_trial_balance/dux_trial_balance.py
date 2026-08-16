@@ -50,12 +50,18 @@ PARTY_NAME_FIELD = {
     "Employee": "employee_name",
 }
 
-# account_type -> the party types that legitimately belong on it. Anything
-# else is surfaced as a mismatch rather than silently accepted; see
-# _party_type_mismatch.
-EXPECTED_PARTY_TYPES = {
-    "Receivable": {"Customer"},
-    "Payable": {"Supplier", "Employee"},
+# Account types that have a sub-ledger worth reconciling against.
+CONTROL_ACCOUNT_TYPES = ("Receivable", "Payable")
+
+# Party type expected on a company's DEFAULT receivable / payable account.
+# Deliberately narrow: it is applied only to those two accounts, never to
+# account_type generally. A purpose-built account such as "Employee
+# Advance" is a Receivable that legitimately carries Employee parties, and
+# flagging it would be a false positive that trains people to ignore the
+# flag entirely.
+DEFAULT_ACCOUNT_EXPECTED = {
+    "default_receivable_account": "Customer",
+    "default_payable_account": "Supplier",
 }
 
 UNATTRIBUTED = "(Unattributed)"
@@ -345,21 +351,37 @@ def _total_row(rows, label, only_top_level=False):
     return total
 
 
-def _party_type_mismatch(account_type, party_type):
-    """True when a party sits on a control account its type does not
-    belong to — an Employee on Receivable, a Supplier on Debtors.
+def _default_party_accounts(companies):
+    """{account name -> expected party type} for each company's default
+    receivable and payable accounts."""
+    out = {}
+    for co in companies:
+        for field, expected in DEFAULT_ACCOUNT_EXPECTED.items():
+            acc = frappe.get_cached_value("Company", co, field)
+            if acc:
+                out[acc] = expected
+    return out
 
-    This is reported, never corrected. On the dev ledger it catches a real
-    case: an Employee party carrying Dr 10,000 on Debtors, invisible to
-    ERPNext's party report because that report runs one party type at a
-    time and nobody thought to run it for Employee.
+
+def _party_type_mismatch(account, party_type, default_map):
+    """True when a party sits on the company's default customer or supplier
+    control account while being the wrong type for it.
+
+    Reported, never corrected — a reporting change does not rewrite the
+    ledger. On the dev data this catches an Employee carrying Dr 10,000 on
+    Debtors, which ERPNext's party report cannot show because it runs one
+    party type per execution and nobody thinks to run it for Employee.
+
+    Scoped to the two default accounts on purpose. An "Employee Advance"
+    account is also a Receivable and legitimately carries Employee parties;
+    flagging that would be noise.
     """
-    if not account_type or not party_type:
+    if not account or not party_type:
         return False
-    expected = EXPECTED_PARTY_TYPES.get(account_type)
+    expected = default_map.get(account)
     if not expected:
         return False
-    return party_type not in expected
+    return party_type != expected
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -651,6 +673,7 @@ def _build_account_party(filters, companies):
     acc_meta = {a.name: a for a in _account_master(companies)}
     currency = _company_currency(companies[0])
     show_net = filters.get("show_net_values")
+    default_map = _default_party_accounts(companies)
 
     names = _resolve_party_names(
         {(pt, p) for (_a, pt, p) in values.keys() if p})
@@ -666,7 +689,7 @@ def _build_account_party(filters, companies):
         # Only control accounts are interesting here; a plain expense
         # account has no sub-ledger to reconcile against.
         if filters.get("control_accounts_only") and meta and \
-                meta.account_type not in EXPECTED_PARTY_TYPES:
+                meta.account_type not in CONTROL_ACCOUNT_TYPES:
             continue
 
         children = per_account[account]
@@ -711,7 +734,7 @@ def _build_account_party(filters, companies):
                 "currency": currency,
                 "is_unattributed": 1 if unattributed else 0,
                 "mismatch": 1 if _party_type_mismatch(
-                    meta.account_type if meta else None, party_type) else 0,
+                    account, party_type, default_map) else 0,
             })
             child["has_value"] = _has_value(child)
             if child["has_value"] or filters.get("show_zero_values"):
