@@ -54,6 +54,16 @@ has_permission = {
     "Inter-Company Transfer": "dux_voucher.dux_voucher.api.ic_transfer_api.ict_has_permission"
 }
 
+# Monthly aggregate behind the Trial Balance fast path. A wide
+# multi-company trial balance cannot be computed synchronously — 69
+# companies grouped by account takes ~38s against 5M GL rows — so the
+# aggregate is rebuilt nightly and the report states which tier answered.
+scheduler_events = {
+    "daily": [
+        "dux_voucher.dux_voucher.api.tb_aggregate.rebuild_nightly",
+    ],
+}
+
 # Inject the "Download Formatted TB" button into the standard ERPNext
 # Trial Balance query report. The bundle file lives in public/js/ and
 # Frappe's asset bundler concatenates+minifies it on `bench build`.

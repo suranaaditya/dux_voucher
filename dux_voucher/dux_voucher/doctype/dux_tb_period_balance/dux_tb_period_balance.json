@@ -1,0 +1,121 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-08-16 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "company",
+  "period",
+  "account",
+  "party_type",
+  "party",
+  "root_type",
+  "account_type",
+  "debit",
+  "credit",
+  "opening_debit",
+  "opening_credit"
+ ],
+ "fields": [
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Month bucket, YYYY-MM. Balances are stored monthly so any month-aligned date range can be summed, and opening is the sum of every earlier bucket.",
+   "fieldname": "period",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Period",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "account",
+   "fieldtype": "Link",
+   "label": "Account",
+   "options": "Account",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "party_type",
+   "fieldtype": "Data",
+   "label": "Party Type"
+  },
+  {
+   "fieldname": "party",
+   "fieldtype": "Data",
+   "label": "Party"
+  },
+  {
+   "description": "Denormalised from Account so the fast path never has to join.",
+   "fieldname": "root_type",
+   "fieldtype": "Data",
+   "label": "Root Type"
+  },
+  {
+   "fieldname": "account_type",
+   "fieldtype": "Data",
+   "label": "Account Type"
+  },
+  {
+   "description": "Movement in this month, is_opening = 'No'.",
+   "fieldname": "debit",
+   "fieldtype": "Currency",
+   "label": "Debit"
+  },
+  {
+   "fieldname": "credit",
+   "fieldtype": "Currency",
+   "label": "Credit"
+  },
+  {
+   "description": "Rows flagged is_opening = 'Yes' in this month, kept apart because they fold into opening regardless of where the period starts.",
+   "fieldname": "opening_debit",
+   "fieldtype": "Currency",
+   "label": "Opening Debit"
+  },
+  {
+   "fieldname": "opening_credit",
+   "fieldtype": "Currency",
+   "label": "Opening Credit"
+  }
+ ],
+ "in_create": 1,
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-16 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Dux Voucher",
+ "name": "Dux TB Period Balance",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "read": 1,
+   "role": "System Manager"
+  },
+  {
+   "read": 1,
+   "role": "Accounts Manager"
+  },
+  {
+   "read": 1,
+   "role": "Accounts User"
+  }
+ ],
+ "quick_entry": 0,
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}

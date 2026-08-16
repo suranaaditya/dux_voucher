@@ -117,6 +117,34 @@ frappe.query_reports["Dux Trial Balance"] = {
 			default: 0,
 			depends_on: "eval:doc.view=='Account -> Party'",
 		},
+		{
+			fieldname: "compare",
+			label: __("Compare"),
+			fieldtype: "Select",
+			options: ["", "Company", "Period"].join("\n"),
+			default: "",
+		},
+		{
+			fieldname: "compare_from",
+			label: __("Compare From"),
+			fieldtype: "Date",
+			depends_on: "eval:doc.compare=='Period'",
+		},
+		{
+			fieldname: "compare_to",
+			label: __("Compare To"),
+			fieldtype: "Date",
+			depends_on: "eval:doc.compare=='Period'",
+		},
+		{
+			// Escape hatch: force the live query even when the aggregate
+			// could answer. Useful when someone needs today's postings
+			// included and the nightly build has not run yet.
+			fieldname: "force_live",
+			label: __("Force live query"),
+			fieldtype: "Check",
+			default: 0,
+		},
 	],
 
 	tree: true,
@@ -163,13 +191,79 @@ frappe.query_reports["Dux Trial Balance"] = {
 			out = `<span style="font-weight:600">${out}</span>`;
 		}
 
+		// Drill-through. Leaf accounts and parties open the matching Dux
+		// ledger, carrying the SAME period the balance was computed over —
+		// landing on a different range than the figure you clicked is the
+		// classic way a drill-down loses people.
+		if (label_col && !data.is_group_account && !data.is_computed) {
+			const payload = encodeURIComponent(
+				JSON.stringify({
+					account: data.parent_account && data.party ? data.parent_account : data.account,
+					party: data.party || "",
+					party_type: data.party_type || "",
+					company: data.company || "",
+				})
+			);
+			out = `<a class="dux-tb-drill" data-dux="${payload}" style="cursor:pointer">${out}</a>`;
+		}
+
 		return out;
 	},
 
 	onload: function (report) {
-		report.page.add_inner_button(__("Open Ledger"), function () {
-			frappe.msgprint(
-				__("Select a row first, then use the account or party link to open its ledger.")
+		// Delegated, so it survives every re-render of the datatable.
+		$(report.page.wrapper).on("click", "a.dux-tb-drill", function (e) {
+			e.preventDefault();
+			e.stopPropagation();
+			let d;
+			try {
+				d = JSON.parse(decodeURIComponent($(this).attr("data-dux")));
+			} catch (err) {
+				return;
+			}
+			const f = frappe.query_report.get_filter_values();
+			const companies = f.company || [];
+			const company = d.company || (Array.isArray(companies) ? companies[0] : companies);
+
+			frappe.route_options = {
+				company: company,
+				from_date: f.from_date,
+				to_date: f.to_date,
+			};
+
+			if (d.party) {
+				frappe.route_options.party = d.party;
+				frappe.route_options.party_type = d.party_type;
+				frappe.route_options.account = d.account;
+				frappe.set_route("dux-party-ledger");
+			} else {
+				frappe.route_options.account = d.account;
+				frappe.set_route("dux-ledger");
+			}
+		});
+
+		report.page.add_inner_button(__("Rebuild aggregate"), function () {
+			frappe.confirm(
+				__("Rebuild the monthly aggregate now? This reads the full ledger for every company under a trust."),
+				function () {
+					frappe.call({
+						method: "dux_voucher.dux_voucher.api.tb_aggregate.rebuild",
+						freeze: true,
+						freeze_message: __("Rebuilding aggregate..."),
+						callback: function (r) {
+							if (r.message) {
+								frappe.msgprint(
+									__("Rebuilt {0} rows across {1} companies in {2}s.", [
+										r.message.rows,
+										r.message.companies,
+										r.message.seconds,
+									])
+								);
+								frappe.query_report.refresh();
+							}
+						},
+					});
+				}
 			);
 		});
 	},

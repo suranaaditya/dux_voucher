@@ -79,6 +79,9 @@ def execute(filters=None):
     if not companies:
         return _columns_for(filters, companies), [], _no_company_message(), None, None
 
+    if filters.get("compare"):
+        return _build_comparison(filters, companies)
+
     view = filters.get("view") or VIEW_ACCOUNT
     builder = {
         VIEW_ACCOUNT: _build_by_account,
@@ -91,6 +94,138 @@ def execute(filters=None):
     columns = _columns_for(filters, companies)
     message = _build_message(filters, companies, data)
     return columns, data, message, None, _summary(data, filters)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# COMPARISON  (company vs company, period vs period)
+# ══════════════════════════════════════════════════════════════════════
+
+def _build_comparison(filters, companies):
+    """Run the same engine over several series and lay them side by side.
+
+    Two shapes:
+      Company — one column per selected company, over one period. Answers
+                "how do the colleges in this trust compare".
+      Period  — the same companies over two ranges, with variance. Answers
+                "this year against last", or "August against July".
+
+    Showing all six value columns per series would be unreadable at four
+    companies, so each series contributes a single signed closing balance
+    (debit-positive) and, where exactly two series exist, a variance.
+    """
+    mode = filters.get("compare")
+    view = filters.get("view") or VIEW_ACCOUNT
+
+    if view not in (VIEW_ACCOUNT, VIEW_PARTY):
+        frappe.throw(_("Comparison is available on the By Account and "
+                       "By Party views."))
+
+    if mode == "Company":
+        if len(companies) < 2:
+            frappe.throw(_("Select at least two companies to compare."))
+        series = [(co, [co], filters.from_date, filters.to_date)
+                  for co in companies]
+    elif mode == "Period":
+        if not filters.get("compare_from") or not filters.get("compare_to"):
+            frappe.throw(_("Comparison From and To dates are required for a "
+                           "period comparison."))
+        series = [
+            (_("{0} to {1}").format(filters.from_date, filters.to_date),
+             companies, filters.from_date, filters.to_date),
+            (_("{0} to {1}").format(filters.compare_from, filters.compare_to),
+             companies, getdate(filters.compare_from), getdate(filters.compare_to)),
+        ]
+    else:
+        frappe.throw(_("Unknown comparison mode: {0}").format(mode))
+
+    builder = _build_by_account if view == VIEW_ACCOUNT else _build_by_party
+    merged = {}
+    order = []
+    sources = set()
+
+    for idx, (label, cos, frm, to) in enumerate(series):
+        sub = frappe._dict(dict(filters))
+        sub.company = cos
+        sub.from_date, sub.to_date = frm, to
+        sub._pl_reset_date = _pl_reset_date(sub)
+        rows = builder(sub, cos)
+        sources.add(sub.get("_source") or "live")
+
+        for r in rows:
+            if r.get("is_total"):
+                continue
+            key = _compare_key(r, view)
+            slot = merged.get(key)
+            if not slot:
+                slot = merged[key] = {
+                    "label": r.get("account_name") or r.get("party_name"),
+                    "account": r.get("account") or key,
+                    "parent_account": r.get("parent_account"),
+                    "indent": r.get("indent", 0),
+                    "is_group_account": r.get("is_group_account", 0),
+                    "party_type": r.get("party_type"),
+                    "party": r.get("party"),
+                    "currency": r.get("currency"),
+                }
+                order.append(key)
+            slot[f"s{idx}"] = flt(r.get("closing_debit")) - flt(r.get("closing_credit"))
+
+    rows = []
+    for key in order:
+        slot = merged[key]
+        for idx in range(len(series)):
+            slot.setdefault(f"s{idx}", 0.0)
+        if len(series) == 2:
+            slot["variance"] = flt(slot["s0"]) - flt(slot["s1"])
+        if any(abs(flt(slot.get(f"s{i}"))) >= 0.005 for i in range(len(series))) \
+                or filters.get("show_zero_values"):
+            rows.append(slot)
+
+    # Each series contributes a SIGNED net (debit-positive), so summing the
+    # root nodes yields nil on a ledger that ties. Labelling that "Total"
+    # invites the reader to compare 28,894 against rows of 624 million and
+    # conclude the report is broken, so the label says what the figure is.
+    total = {"label": _("Net of all roots — nil when the ledger ties"),
+             "account": "__net__", "is_total": 1, "indent": 0}
+    for idx in range(len(series)):
+        total[f"s{idx}"] = sum(
+            flt(r.get(f"s{idx}")) for r in rows
+            if not (filters.get("show_group_accounts") and r.get("parent_account")))
+    if len(series) == 2:
+        total["variance"] = flt(total["s0"]) - flt(total["s1"])
+    rows.append(total)
+
+    columns = _comparison_columns(series, view)
+    src = "aggregate" if sources == {"aggregate"} else (
+        "mixed" if len(sources) > 1 else "live")
+    message = _("<b>{0}</b> series &nbsp;·&nbsp; {1} &nbsp;·&nbsp; {2}").format(
+        len(series), _("comparing by {0}").format(mode.lower()),
+        _("monthly aggregate") if src == "aggregate" else
+        (_("mixed sources") if src == "mixed" else _("live GL")))
+    return columns, rows, message, None, None
+
+
+def _compare_key(row, view):
+    if view == VIEW_PARTY:
+        return f"{row.get('party_type')}::{row.get('party')}"
+    return row.get("account")
+
+
+def _comparison_columns(series, view):
+    label = _("Party") if view == VIEW_PARTY else _("Account")
+    cols = [{"fieldname": "label", "label": label, "fieldtype": "Data",
+             "width": 300}]
+    for idx, (name, _cos, _f, _t) in enumerate(series):
+        cols.append({"fieldname": f"s{idx}", "label": name,
+                     "fieldtype": "Currency", "options": "currency",
+                     "width": 150})
+    if len(series) == 2:
+        cols.append({"fieldname": "variance", "label": _("Variance"),
+                     "fieldtype": "Currency", "options": "currency",
+                     "width": 150})
+    cols.append({"fieldname": "currency", "label": _("Currency"),
+                 "fieldtype": "Link", "options": "Currency", "hidden": 1})
+    return cols
 
 
 def _validate(filters):
@@ -280,7 +415,38 @@ def _gl_aggregate(companies, group_cols, filters, opening):
 
 
 def _slice(companies, group_cols, filters):
-    """Opening + period in one structure keyed by the grouping tuple."""
+    """Opening + period keyed by the grouping tuple, from whichever tier
+    can answer the request.
+
+    Tier is chosen by scope and stated on the report. A single company
+    queries live in about a second and is always current; a wide
+    multi-company request reads the monthly aggregate because live would
+    take 38 seconds. The report never switches silently — two sources with
+    different freshness, swapped without saying so, is how a reconciliation
+    tool loses the trust that makes it useful.
+    """
+    from dux_voucher.dux_voucher.api import tb_aggregate
+
+    live_threshold = int(filters.get("live_company_threshold") or 3)
+    wants_fast = len(companies) > live_threshold
+
+    if wants_fast and not filters.get("force_live"):
+        if tb_aggregate.can_serve(companies, filters.from_date, filters.to_date):
+            filters._source = "aggregate"
+            filters._source_built_at = tb_aggregate.built_at()
+            return tb_aggregate.fetch(companies, group_cols,
+                                      filters.from_date, filters.to_date,
+                                      filters.get("_pl_reset_date"))
+        filters._source_note = _(
+            "the monthly aggregate cannot answer this request — either it "
+            "does not cover every selected company, or the dates are not "
+            "whole months")
+
+    filters._source = "live"
+    return _slice_live(companies, group_cols, filters)
+
+
+def _slice_live(companies, group_cols, filters):
     key = lambda r: tuple(r.get(c) for c in group_cols)  # noqa: E731
 
     out = {}
@@ -823,7 +989,16 @@ def _build_message(filters, companies, data):
     total = next((r for r in data if r.get("is_total")), None)
     bits = [_("<b>{0}</b> compan{1}").format(
         len(companies), "y" if len(companies) == 1 else "ies")]
-    bits.append(_("live GL"))
+
+    if filters.get("_source") == "aggregate":
+        stamp = filters.get("_source_built_at")
+        bits.append(_("monthly aggregate{0}").format(
+            _(" · built {0}").format(str(stamp)[:16]) if stamp else ""))
+    else:
+        bits.append(_("live GL"))
+    if filters.get("_source_note"):
+        bits.append(_("<span style='color:#A65A00'>{0}</span>").format(
+            filters.get("_source_note")))
 
     if total:
         diff = flt(total["closing_debit"]) - flt(total["closing_credit"])

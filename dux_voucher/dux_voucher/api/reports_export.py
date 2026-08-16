@@ -41,9 +41,18 @@ THIN       = Side(style="thin",   color="E2E8F0")
 HAIR       = Side(style="hair",   color="F1F5F9")
 TOTAL_TOP  = Side(style="medium", color=NAVY)
 
-NUM_FMT     = '#,##0.00'
-NUM_FMT_DR  = '#,##0.00" Dr"'
-NUM_FMT_CR  = '#,##0.00" Cr"'
+# Indian digit grouping — lakh/crore, not thousands. Every screen and print
+# path in this app already renders through Intl.NumberFormat("en-IN"), so a
+# Western '#,##0.00' here meant the SAME figure printed 1,234,567.00 in the
+# spreadsheet and 12,34,567.00 on screen.
+#
+# The repeated 2-digit groups are what produce 1,23,45,678.00. The explicit
+# negative section matters: a conditional format (the [>=n] style used in
+# the formatted-TB builder) sends every negative to its unconditional else
+# branch, which carries no sign token — so losses render as positives.
+NUM_FMT     = '##,##,##0.00;-##,##,##0.00'
+NUM_FMT_DR  = '##,##,##0.00" Dr";-##,##,##0.00" Dr"'
+NUM_FMT_CR  = '##,##,##0.00" Cr";-##,##,##0.00" Cr"'
 
 
 # ══════════════════════════════════════════════════════════════════════
