@@ -20,6 +20,16 @@ frappe.pages["dux-ledger"].on_page_load = function (wrapper) {
 };
 
 frappe.pages["dux-ledger"].on_page_show = function (wrapper) {
+	// Opened in a new tab from the Trial Balance? route_options cannot
+	// survive a fresh document, so the context arrives in the query string.
+	if (window._dux_ledger_instance && !frappe.route_options) {
+		const q = new URLSearchParams(window.location.search);
+		if (q.get("company")) {
+			const o = {};
+			q.forEach((v, k) => (o[k] = v));
+			frappe.route_options = o;
+		}
+	}
 	if (window._dux_ledger_instance && frappe.route_options) {
 		window._dux_ledger_instance.applyRouteOptions(frappe.route_options);
 		frappe.route_options = null;

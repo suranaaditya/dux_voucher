@@ -824,6 +824,17 @@ tr.party:hover > td{background:var(--tb-line-2);}
 		if (keepTop) $r.find(".tb-tablewrap").scrollTop(keepTop);
 	}
 
+	_openLedger(route, opts) {
+		// A new tab, so the trial balance you were reading stays put. Route
+		// options live in memory and do not survive a fresh document, so the
+		// context travels in the query string; both ledger pages read it.
+		const qs = Object.keys(opts)
+			.filter((k) => opts[k])
+			.map((k) => encodeURIComponent(k) + "=" + encodeURIComponent(opts[k]))
+			.join("&");
+		window.open(`/desk/${route}?${qs}`, "_blank");
+	}
+
 	_drillParty($tr) {
 		const acct = $tr.data("acct");
 		const party = $tr.data("p");
@@ -833,27 +844,25 @@ tr.party:hover > td{background:var(--tb-line-2);}
 			// The Unattributed row has no party to open; the account ledger
 			// is the honest destination, since that is where it lives.
 			if (!acct) return;
-			frappe.route_options = {
+			this._openLedger("dux-ledger", {
 				company: (this.data.companies || [])[0],
 				account: acct,
 				from_date: f.from_date,
 				to_date: f.to_date,
-			};
-			frappe.set_route("dux-ledger");
+			});
 			return;
 		}
 		// The account tells us its company, which matters once a trust is
 		// selected and the row merged several companies together.
 		frappe.db.get_value("Account", acct, "company").then((r) => {
-			frappe.route_options = {
+			this._openLedger("dux-party-ledger", {
 				company: (r && r.message && r.message.company) || (this.data.companies || [])[0],
 				party: party,
 				party_type: party_type,
 				account: acct,
 				from_date: f.from_date,
 				to_date: f.to_date,
-			};
-			frappe.set_route("dux-party-ledger");
+			});
 		});
 	}
 
@@ -866,14 +875,16 @@ tr.party:hover > td{background:var(--tb-line-2);}
 			from_date: f.from_date,
 			to_date: f.to_date,
 		};
+		const base = frappe.route_options;
 		if (r.party) {
-			frappe.route_options.party = r.party;
-			frappe.route_options.party_type = r.party_type;
-			frappe.route_options.account = r.parent_account || r.account;
-			frappe.set_route("dux-party-ledger");
+			this._openLedger("dux-party-ledger", {
+				...base,
+				party: r.party,
+				party_type: r.party_type,
+				account: r.parent_account || r.account,
+			});
 		} else if (!r.is_group_account) {
-			frappe.route_options.account = r.account;
-			frappe.set_route("dux-ledger");
+			this._openLedger("dux-ledger", { ...base, account: r.account });
 		}
 	}
 
@@ -882,11 +893,17 @@ tr.party:hover > td{background:var(--tb-line-2);}
 			frappe.show_alert({ message: __("Run the report first."), indicator: "orange" });
 			return;
 		}
-		frappe.set_route("query-report", "Dux Trial Balance");
-		frappe.show_alert({
-			message: __("Opening the classic report — use Menu → Export there."),
-			indicator: "blue",
-		});
+		// Same execute() the screen ran, formatted server-side, streamed
+		// back as a file — not a detour through the classic report.
+		const url =
+			"/api/method/dux_voucher.dux_voucher.api.reports_export.export_trial_balance_xlsx" +
+			"?filters=" +
+			encodeURIComponent(JSON.stringify(this.filters || {}));
+		frappe.show_alert({ message: __("Building the workbook…"), indicator: "blue" });
+		// Same mechanism as the other Excel buttons in this app: a
+		// Content-Disposition download, so the browser saves the file
+		// without navigating away and without leaving a blank tab behind.
+		window.location.href = url;
 	}
 
 	_rebuild() {

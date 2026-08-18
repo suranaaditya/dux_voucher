@@ -612,3 +612,162 @@ def _stream(wb, filename):
     frappe.local.response.filename = filename
     frappe.local.response.filecontent = buf.getvalue()
     frappe.local.response.type = "binary"
+
+
+# ══════════════════════════════════════════════════════════════════════
+# DUX TRIAL BALANCE
+# ══════════════════════════════════════════════════════════════════════
+
+TB_GRP_L0 = "E2E8F0"   # top groups  — Assets, Liabilities, Income, Expenses
+TB_GRP_L1 = "F1F5F9"   # sub-groups  — Current Assets, and so on
+TB_COMPUTED = "FDF3E5"  # the carry-forward row, which is not a real account
+
+
+@frappe.whitelist()
+def export_trial_balance_xlsx(filters=None):
+    """Stream the Dux Trial Balance as a formatted workbook.
+
+    Runs the SAME execute() the page and the script report run, so the
+    file can never disagree with what was on screen.
+
+    The hierarchy is carried by real Excel indent (``alignment.indent``)
+    rather than leading spaces, so the account column stays sortable and
+    filterable in Excel and the tree survives a re-sort.
+    """
+    import json as _json
+    from dux_voucher.dux_voucher.report.dux_trial_balance.dux_trial_balance import (
+        execute as tb_execute)
+
+    if isinstance(filters, str):
+        filters = _json.loads(filters or "{}")
+    f = frappe._dict(filters or {})
+
+    columns, rows, message, _chart, _summary = tb_execute(f)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = _("Trial Balance")
+
+    companies = f.get("company") or []
+    if isinstance(companies, str):
+        companies = [companies]
+    view = f.get("view") or "By Account"
+    label_first = columns[0]["label"] if columns else _("Account")
+
+    # ── title block ──────────────────────────────────────────────────
+    ws["A1"] = (companies[0] if len(companies) == 1
+                else _("{0} companies").format(len(companies)))
+    ws["A1"].font = Font(bold=True, size=14, color=NAVY)
+    ws["A2"] = "{0}  ·  {1} → {2}".format(
+        view, frappe.utils.formatdate(f.get("from_date"), "dd MMM yyyy"),
+        frappe.utils.formatdate(f.get("to_date"), "dd MMM yyyy"))
+    ws["A2"].font = Font(size=10, color=GRAY_TXT)
+
+    total = next((r for r in rows if r.get("is_total")), None)
+    if total:
+        diff = flt(total.get("closing_debit")) - flt(total.get("closing_credit"))
+        tied = abs(diff) < 0.005
+        ws["A3"] = (_("Balanced — debit equals credit") if tied
+                    else _("Out of balance by {0}").format(
+                        frappe.format_value(diff, {"fieldtype": "Currency"})))
+        ws["A3"].font = Font(size=10, bold=True,
+                             color=CR_GREEN if tied else DR_RED)
+
+    HEAD_ROW = 5
+    headers = [label_first, _("Opening (Dr)"), _("Opening (Cr)"), _("Debit"),
+               _("Credit"), _("Closing (Dr)"), _("Closing (Cr)")]
+    for i, h in enumerate(headers, start=1):
+        c = ws.cell(row=HEAD_ROW, column=i, value=h)
+        c.font = Font(bold=True, size=10, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor=HEADER_BG)
+        c.alignment = Alignment(horizontal="right" if i > 1 else "left",
+                                vertical="center")
+        c.border = Border(bottom=THIN)
+    ws.row_dimensions[HEAD_ROW].height = 22
+
+    # ── body ─────────────────────────────────────────────────────────
+    r = HEAD_ROW + 1
+    for row in rows:
+        if row.get("is_total"):
+            continue
+
+        label = (row.get("account_name") or row.get("party_name")
+                 or row.get("company") or row.get("party") or "")
+        indent = min(int(row.get("indent") or 0), 14)
+        is_grp = bool(row.get("is_group_account"))
+        lvl = int(row.get("indent") or 0)
+
+        c = ws.cell(row=r, column=1, value=label)
+        c.alignment = Alignment(indent=indent, vertical="center")
+        if row.get("is_computed"):
+            c.font = Font(size=10, italic=True, color=GRAY_TXT)
+        elif is_grp:
+            c.font = Font(bold=True, size=10 if lvl else 11, color=NAVY)
+        else:
+            c.font = Font(size=10)
+
+        fill = None
+        if row.get("is_computed"):
+            fill = PatternFill("solid", fgColor=TB_COMPUTED)
+        elif is_grp and lvl == 0:
+            fill = PatternFill("solid", fgColor=TB_GRP_L0)
+        elif is_grp and lvl == 1:
+            fill = PatternFill("solid", fgColor=TB_GRP_L1)
+
+        vals = [row.get("opening_debit"), row.get("opening_credit"),
+                row.get("debit"), row.get("credit"),
+                row.get("closing_debit"), row.get("closing_credit")]
+        for i, v in enumerate(vals, start=2):
+            cc = ws.cell(row=r, column=i, value=flt(v) or None)
+            cc.number_format = (NUM_FMT_DR if i == 6
+                                else NUM_FMT_CR if i == 7 else NUM_FMT)
+            cc.alignment = Alignment(horizontal="right")
+            cc.font = Font(size=10, bold=is_grp,
+                           color=DR_RED if i == 6 else CR_GREEN if i == 7 else "000000")
+            cc.border = Border(bottom=HAIR)
+            if fill:
+                cc.fill = fill
+        c.border = Border(bottom=HAIR)
+        if fill:
+            c.fill = fill
+        r += 1
+
+    # ── total ────────────────────────────────────────────────────────
+    if total:
+        c = ws.cell(row=r, column=1, value=_("Total"))
+        c.font = Font(bold=True, size=11, color=NAVY)
+        c.fill = PatternFill("solid", fgColor=TOT_BG)
+        c.border = Border(top=TOTAL_TOP)
+        vals = [total.get("opening_debit"), total.get("opening_credit"),
+                total.get("debit"), total.get("credit"),
+                total.get("closing_debit"), total.get("closing_credit")]
+        for i, v in enumerate(vals, start=2):
+            cc = ws.cell(row=r, column=i, value=flt(v) or None)
+            cc.number_format = (NUM_FMT_DR if i == 6
+                                else NUM_FMT_CR if i == 7 else NUM_FMT)
+            cc.font = Font(bold=True, size=11,
+                           color=DR_RED if i == 6 else CR_GREEN if i == 7 else NAVY)
+            cc.alignment = Alignment(horizontal="right")
+            cc.fill = PatternFill("solid", fgColor=TOT_BG)
+            cc.border = Border(top=TOTAL_TOP)
+
+    # ── sheet furniture ──────────────────────────────────────────────
+    ws.column_dimensions["A"].width = 52
+    for col in "BCDEFG":
+        ws.column_dimensions[col].width = 17
+    ws.freeze_panes = ws.cell(row=HEAD_ROW + 1, column=2)
+    ws.sheet_view.showGridLines = False
+    ws.auto_filter.ref = f"A{HEAD_ROW}:G{max(r, HEAD_ROW + 1)}"
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.fitToWidth = 1
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.print_title_rows = f"{HEAD_ROW}:{HEAD_ROW}"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    stamp = frappe.utils.formatdate(f.get("to_date"), "yyyy-MM-dd")
+    name = (companies[0].split(" ")[0] if len(companies) == 1
+            else f"{len(companies)}-companies")
+    frappe.local.response.filename = f"Trial Balance - {name} - {stamp}.xlsx"
+    frappe.local.response.filecontent = buf.getvalue()
+    frappe.local.response.type = "binary"
