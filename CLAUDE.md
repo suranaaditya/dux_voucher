@@ -75,7 +75,7 @@ dux_voucher/                              repo root (pyproject, README, CLAUDE.m
         │   ├── reports_export.py              xlsx exports for those Pages
         │   ├── backdating.py                  posting-date enforcement
         │   ├── student_fee.py                 admission-fee + retained-income accounts,
-        │                                      book_income, paid/remaining helpers
+        │   │                                  book_income, paid/remaining helpers
         │   ├── trial_balance.py               whitelisted API behind the TB page;
         │   │                                  every endpoint calls require_access()
         │   └── tb_aggregate.py                monthly pre-aggregation + nightly job
