@@ -407,7 +407,13 @@ tr.party:hover > td{background:var(--tb-line-2);}
 			this._renderTable();
 		});
 
-		$w.on("click", ".tb-lbl", (e) => this._drill($(e.currentTarget).closest("tr").data("idx")));
+		$w.on("click", ".tb-lbl", (e) => {
+			const $tr = $(e.currentTarget).closest("tr");
+			// Inline party rows are not in data.rows, so they have no index —
+			// they route from their own attributes.
+			if ($tr.data("party")) return this._drillParty($tr);
+			this._drill($tr.data("idx"));
+		});
 
 		let st = null;
 		$w.on("input", "#tb-search", (e) => {
@@ -682,7 +688,7 @@ tr.party:hover > td{background:var(--tb-line-2);}
 		});
 	}
 
-	_partyRowHtml(p, indent) {
+	_partyRowHtml(p, indent, acct) {
 		let name = frappe.utils.escape_html(p.label || "");
 		if (p.is_unattributed) name = `<span class="tb-unatt">${name}</span>`;
 		if (p.mismatch) name += `<span class="tb-flag">${__("wrong party type")}</span>`;
@@ -690,7 +696,7 @@ tr.party:hover > td{background:var(--tb-line-2);}
 			? `<span class="tb-ptype">${frappe.utils.escape_html(p.party_type)}</span>`
 			: "";
 		return `<tr class="party" data-party="1" data-acct="${frappe.utils.escape_html(
-			p._acct || ""
+			acct || ""
 		)}" data-pt="${frappe.utils.escape_html(
 			p.party_type || ""
 		)}" data-p="${frappe.utils.escape_html(p.party || "")}">
@@ -781,7 +787,10 @@ tr.party:hover > td{background:var(--tb-line-2);}
 
 				if (r.is_control && this.partyOpen.has(r.account)) {
 					const kidsRows = this.parties[r.account] || [];
-					html += kidsRows.map((p) => this._partyRowHtml(p, indent)).join("");
+					// Across a trust the row is a merge key, not an account —
+					// hand the drill a real account name to open.
+					const realAcct = (r.members && r.members[0]) || r.account;
+					html += kidsRows.map((p) => this._partyRowHtml(p, indent, realAcct)).join("");
 					if (!kidsRows.length) {
 						html += `<tr class="party"><td colspan="7" style="padding-left:${
 							indent + 36
@@ -813,6 +822,39 @@ tr.party:hover > td{background:var(--tb-line-2);}
       </tr></thead><tbody>${body}</tbody>${foot}</table></div>`);
 
 		if (keepTop) $r.find(".tb-tablewrap").scrollTop(keepTop);
+	}
+
+	_drillParty($tr) {
+		const acct = $tr.data("acct");
+		const party = $tr.data("p");
+		const party_type = $tr.data("pt");
+		const f = this.filters || {};
+		if (!party) {
+			// The Unattributed row has no party to open; the account ledger
+			// is the honest destination, since that is where it lives.
+			if (!acct) return;
+			frappe.route_options = {
+				company: (this.data.companies || [])[0],
+				account: acct,
+				from_date: f.from_date,
+				to_date: f.to_date,
+			};
+			frappe.set_route("dux-ledger");
+			return;
+		}
+		// The account tells us its company, which matters once a trust is
+		// selected and the row merged several companies together.
+		frappe.db.get_value("Account", acct, "company").then((r) => {
+			frappe.route_options = {
+				company: (r && r.message && r.message.company) || (this.data.companies || [])[0],
+				party: party,
+				party_type: party_type,
+				account: acct,
+				from_date: f.from_date,
+				to_date: f.to_date,
+			};
+			frappe.set_route("dux-party-ledger");
+		});
 	}
 
 	_drill(idx) {
