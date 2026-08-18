@@ -44,6 +44,10 @@ class DuxTrialBalance {
 		this.search = "";
 		this.parties = {}; // account key -> party rows, fetched on demand
 		this.partyOpen = new Set();
+		// Tally shows Opening and Closing as one signed column each. The
+		// split Dr/Cr form is available for anyone who wants the strict
+		// six-column presentation.
+		this.splitCols = false;
 
 		this._styles();
 		this._layout();
@@ -105,18 +109,22 @@ class DuxTrialBalance {
   box-shadow:0 1px 2px rgba(15,31,43,.08);}
 
 /* company picker */
-.tb-co{position:relative;min-width:280px;}
+/* Do not let the company field grow with its contents — a long name
+   used to push From/To/Run onto a second line and the whole bar went
+   lopsided. The chip truncates instead; the layout stays put. */
+.tb-co{position:relative;flex:0 1 300px;min-width:240px;}
+.tb-dates{display:flex;gap:14px;align-items:flex-end;}
 .tb-chips{display:flex;flex-wrap:wrap;gap:5px;align-items:center;
   min-height:36px;border:1px solid var(--tb-line);border-radius:8px;
   padding:4px 8px;background:var(--tb-bg);cursor:text;}
 .tb-chip{display:inline-flex;align-items:center;gap:6px;background:var(--tb-accent-soft);
   color:var(--tb-accent);border-radius:6px;padding:3px 8px;font-size:12px;
-  font-weight:600;max-width:230px;}
+  font-weight:600;max-width:150px;}
 .tb-chip .x{cursor:pointer;opacity:.6;font-size:14px;line-height:1;}
 .tb-chip .x:hover{opacity:1;}
 .tb-chip .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .tb-chip.grp{background:var(--tb-warn-soft);color:var(--tb-warn);}
-.tb-chips input{border:0;outline:0;background:transparent;flex:1;min-width:110px;
+.tb-chips input{border:0;outline:0;background:transparent;flex:1;min-width:60px;
   height:26px;font-size:13px;color:var(--tb-ink);font-family:inherit;}
 .tb-drop{position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:50;
   background:var(--tb-bg);border:1px solid var(--tb-line);border-radius:10px;
@@ -160,6 +168,12 @@ table.tb{width:100%;border-collapse:separate;border-spacing:0;font-size:12.5px;
   line-height:1.35;table-layout:fixed;}
 table.tb th:first-child,table.tb td:first-child{width:34%;}
 table.tb th:not(:first-child),table.tb td:not(:first-child){width:11%;}
+/* Four columns leave far more room for names — which is most of what a
+   trial balance is read down. */
+table.tb.cols4 th:first-child,table.tb.cols4 td:first-child{width:46%;}
+table.tb.cols4 th:not(:first-child),table.tb.cols4 td:not(:first-child){width:13.5%;}
+.tb-sfx{font-size:9px;font-weight:700;margin-left:4px;opacity:.75;
+  letter-spacing:.03em;}
 table.tb thead th{position:sticky;top:0;z-index:2;background:var(--tb-bg);
   text-align:right;font-size:10.5px;font-weight:700;letter-spacing:.07em;
   text-transform:uppercase;color:var(--tb-ink-3);padding:7px 12px;
@@ -197,11 +211,14 @@ tr.computed td{color:var(--tb-warn);font-style:italic;}
 
 /* Context bar — replaces four KPI cards. Closing Dr/Cr were already the
    Total row and row-count was trivia; only the tie status earned space. */
-.tb-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+.tb-bar{display:flex;align-items:center;gap:12px;flex-wrap:nowrap;
   padding:9px 14px;border:1px solid var(--tb-line);border-radius:10px;
   background:var(--tb-bg);margin-bottom:10px;}
+/* The context text yields before the controls do — it truncates with the
+   full list on hover, rather than shoving Filters onto a second line. */
 .tb-bar .ctx{font-size:12.5px;color:var(--tb-ink-2);font-weight:550;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46vw;}
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  flex:0 1 auto;min-width:60px;max-width:32vw;cursor:help;}
 .tb-bar .sp{flex:1 1 auto;}
 .tb-tie{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;
   font-weight:650;padding:3px 10px;border-radius:20px;white-space:nowrap;}
@@ -279,19 +296,19 @@ tr.party:hover > td{background:var(--tb-line-2);}
       <select class="tb-select" id="tb-fy" style="min-width:150px"></select>
     </div>
 
-    <div class="tb-f">
-      <label>${__("From")}</label>
-      <input type="date" class="tb-input tb-date" id="tb-from">
-    </div>
-
-    <div class="tb-f">
-      <label>${__("To")}</label>
-      <input type="date" class="tb-input tb-date" id="tb-to">
-    </div>
-
-    <div class="tb-f">
-      <label>&nbsp;</label>
-      <button class="tb-btn tb-btn-primary" id="tb-run">${__("Run")}</button>
+    <div class="tb-dates">
+      <div class="tb-f">
+        <label>${__("From")}</label>
+        <input type="date" class="tb-input tb-date" id="tb-from">
+      </div>
+      <div class="tb-f">
+        <label>${__("To")}</label>
+        <input type="date" class="tb-input tb-date" id="tb-to">
+      </div>
+      <div class="tb-f">
+        <label>&nbsp;</label>
+        <button class="tb-btn tb-btn-primary" id="tb-run">${__("Run")}</button>
+      </div>
     </div>
   </div>
 
@@ -310,6 +327,8 @@ tr.party:hover > td{background:var(--tb-line-2);}
         <label><input type="checkbox" id="tb-zero"> ${__("Zero rows")}</label>
         <label><input type="checkbox" id="tb-pl"> ${__("Carry prior-year P&L")}</label>
         <label><input type="checkbox" id="tb-live"> ${__("Force live query")}</label>
+        <label style="border-top:1px solid var(--tb-line);margin-top:4px;padding-top:8px">
+          <input type="checkbox" id="tb-split"> ${__("Split Dr / Cr columns")}</label>
       </div>
     </span>
     <button class="tb-mini" id="tb-edit">${__("Filters")}</button>
@@ -346,7 +365,14 @@ tr.party:hover > td{background:var(--tb-line-2);}
 		$w.on("click", "#tb-pop", (e) => e.stopPropagation());
 		// Changing an option re-runs: each one changes what the server
 		// computes, so leaving stale numbers on screen would be a lie.
-		$w.on("change", "#tb-pop input[type=checkbox]", () => this.run());
+		$w.on("change", "#tb-pop input[type=checkbox]:not(#tb-split)", () => this.run());
+
+		// Purely presentational — the server already sent both sides, so
+		// this re-renders rather than re-running.
+		$w.on("change", "#tb-split", (e) => {
+			this.splitCols = $(e.currentTarget).is(":checked");
+			this._renderTable();
+		});
 
 		// Bring the filter panel back.
 		$w.on("click", "#tb-edit", () => {
@@ -596,6 +622,30 @@ tr.party:hover > td{background:var(--tb-line-2);}
 		}).format(v);
 	}
 
+	_signed(dr, cr) {
+		const net = (dr || 0) - (cr || 0);
+		if (Math.abs(net) < 0.005) return `<td class="tb-nil">—</td>`;
+		const isDr = net > 0;
+		return `<td class="${isDr ? "tb-dr" : "tb-cr"}">${this._fmt(
+			Math.abs(net)
+		)}<span class="tb-sfx">${isDr ? "Dr" : "Cr"}</span></td>`;
+	}
+
+	_money(r) {
+		// Four columns the Tally way, or the strict six-column split.
+		return this.splitCols
+			? this._cell(r.opening_debit) +
+					this._cell(r.opening_credit) +
+					this._cell(r.debit) +
+					this._cell(r.credit) +
+					this._cell(r.closing_debit, "tb-dr") +
+					this._cell(r.closing_credit, "tb-cr")
+			: this._signed(r.opening_debit, r.opening_credit) +
+					this._cell(r.debit) +
+					this._cell(r.credit) +
+					this._signed(r.closing_debit, r.closing_credit);
+	}
+
 	_cell(v, cls) {
 		const f = this._fmt(v);
 		if (f === null) return `<td class="tb-nil">—</td>`;
@@ -608,17 +658,33 @@ tr.party:hover > td{background:var(--tb-line-2);}
 		const $w = $(this.wrapper);
 		const total = rows.find((r) => r.is_total);
 
+		// Name the companies. The filter panel folds away after a run, so a
+		// bare count leaves you unable to tell what you are looking at —
+		// and two trial balances that differ only by which company was
+		// selected are indistinguishable.
 		const co = this.companies.map((c) => c.value);
-		const coTxt =
-			co.length === 1
-				? co[0]
-				: `${co.length} ${__("selected")} · ${(d.companies || []).length} ${__("companies")}`;
+		const expanded = (d.companies || []).length;
+		let coTxt;
+		if (co.length === 1) {
+			// A trust expands to many, so say so rather than showing one name.
+			coTxt =
+				expanded > 1
+					? `${co[0]} · ${expanded} ${__("companies")}`
+					: co[0];
+		} else if (co.length <= 3) {
+			coTxt = co.join("  ·  ");
+		} else {
+			coTxt = `${co[0]} + ${co.length - 1} ${__("more")}`;
+		}
 		const fmtD = (v) => (v ? frappe.datetime.str_to_user(v) : "");
-		$w.find("#tb-ctx").text(
-			`${coTxt}  ·  ${this.view}  ·  ${fmtD(this.filters.from_date)} → ${fmtD(
-				this.filters.to_date
-			)}`
-		);
+		$w.find("#tb-ctx")
+			.text(
+				`${coTxt}  ·  ${this.view}  ·  ${fmtD(this.filters.from_date)} → ${fmtD(
+					this.filters.to_date
+				)}`
+			)
+			// The full list is always one hover away, however many there are.
+			.attr("title", (d.companies || co).join(", "));
 
 		const pills = [];
 		pills.push(
@@ -716,9 +782,7 @@ tr.party:hover > td{background:var(--tb-line-2);}
         <span class="tb-caret leaf">▼</span>
         <span class="tb-lbl">${name}</span>${type}
       </div></td>
-      ${this._cell(p.opening_debit)}${this._cell(p.opening_credit)}
-      ${this._cell(p.debit)}${this._cell(p.credit)}
-      ${this._cell(p.closing_debit, "tb-dr")}${this._cell(p.closing_credit, "tb-cr")}</tr>`;
+      ${this._money(p)}</tr>`;
 	}
 
 	_renderTable() {
@@ -793,9 +857,7 @@ tr.party:hover > td{background:var(--tb-line-2);}
 							: ""
 					}
         </div></td>
-        ${this._cell(r.opening_debit)}${this._cell(r.opening_credit)}
-        ${this._cell(r.debit)}${this._cell(r.credit)}
-        ${this._cell(r.closing_debit, "tb-dr")}${this._cell(r.closing_credit, "tb-cr")}</tr>`;
+        ${this._money(r)}</tr>`;
 
 				if (r.is_control && this.partyOpen.has(r.account)) {
 					const kidsRows = this.parties[r.account] || [];
@@ -804,7 +866,9 @@ tr.party:hover > td{background:var(--tb-line-2);}
 					const realAcct = (r.members && r.members[0]) || r.account;
 					html += kidsRows.map((p) => this._partyRowHtml(p, indent, realAcct)).join("");
 					if (!kidsRows.length) {
-						html += `<tr class="party"><td colspan="7" style="padding-left:${
+						html += `<tr class="party"><td colspan="${
+							this.splitCols ? 7 : 5
+						}" style="padding-left:${
 							indent + 36
 						}px;color:var(--tb-ink-3);font-style:italic">${__(
 							"No parties on this account for the period."
@@ -816,21 +880,37 @@ tr.party:hover > td{background:var(--tb-line-2);}
 			.join("");
 
 		const tot = rows.find((r) => r.is_total);
+		// In the four-column view Opening and Closing are netted, so the
+		// Total's netted figure is the Dr/Cr difference -- which is the tie
+		// check, not a sum. Say so, or 2,375.32 sitting under a column of
+		// crores reads as a broken total. Debit and Credit stay true sums,
+		// so the tie is still visible in the row itself.
+		const totLabel = this.splitCols ? __("Total") : __("Total (net)");
+		const totHint = this.splitCols
+			? ""
+			: ` title="${__(
+					"Opening and Closing are netted, so their totals show the Dr − Cr difference. Debit and Credit are true column sums."
+			  )}"`;
 		const foot = tot
 			? `<tfoot><tr>
-          <td>${__("Total")}</td>
-          ${this._cell(tot.opening_debit)}${this._cell(tot.opening_credit)}
-          ${this._cell(tot.debit)}${this._cell(tot.credit)}
-          ${this._cell(tot.closing_debit, "tb-dr")}${this._cell(tot.closing_credit, "tb-cr")}
+          <td${totHint}>${totLabel}</td>
+          ${this._money(tot)}
         </tr></tfoot>`
 			: "";
 
-		$r.html(`<div class="tb-tablewrap"><table class="tb">
+		$r.html(`<div class="tb-tablewrap"><table class="tb ${
+			this.splitCols ? "" : "cols4"
+		}">
       <thead><tr>
         <th>${first}</th>
-        <th>${__("Opening (Dr)")}</th><th>${__("Opening (Cr)")}</th>
-        <th>${__("Debit")}</th><th>${__("Credit")}</th>
-        <th>${__("Closing (Dr)")}</th><th>${__("Closing (Cr)")}</th>
+        ${
+					this.splitCols
+						? `<th>${__("Opening (Dr)")}</th><th>${__("Opening (Cr)")}</th>
+             <th>${__("Debit")}</th><th>${__("Credit")}</th>
+             <th>${__("Closing (Dr)")}</th><th>${__("Closing (Cr)")}</th>`
+						: `<th>${__("Opening")}</th><th>${__("Debit")}</th>
+             <th>${__("Credit")}</th><th>${__("Closing")}</th>`
+				}
       </tr></thead><tbody>${body}</tbody>${foot}</table></div>`);
 
 		if (keepTop) $r.find(".tb-tablewrap").scrollTop(keepTop);
