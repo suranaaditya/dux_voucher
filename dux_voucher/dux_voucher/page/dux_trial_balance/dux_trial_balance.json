@@ -12,13 +12,10 @@
  "page_name": "dux-trial-balance",
  "roles": [
   {
-   "role": "Accounts User"
+   "role": "Dux Trial Balance"
   },
   {
-   "role": "Accounts Manager"
-  },
-  {
-   "role": "Auditor"
+   "role": "Dux Trial Balance Manager"
   },
   {
    "role": "System Manager"

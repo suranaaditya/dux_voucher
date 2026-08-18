@@ -20,13 +20,10 @@
  "report_type": "Script Report",
  "roles": [
   {
-   "role": "Accounts User"
+   "role": "Dux Trial Balance"
   },
   {
-   "role": "Accounts Manager"
-  },
-  {
-   "role": "Auditor"
+   "role": "Dux Trial Balance Manager"
   },
   {
    "role": "System Manager"

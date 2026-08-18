@@ -9,3 +9,4 @@ dux_voucher.dux_voucher.patches.v1_1.backfill_date_field
 dux_voucher.dux_voucher.patches.v1_2.seed_student_fee_receipt_rule
 dux_voucher.dux_voucher.patches.v1_3.seed_ex_student_refund_rule
 dux_voucher.dux_voucher.patches.v1_4.seed_student_fee_refund_rule
+dux_voucher.dux_voucher.patches.v1_5.seed_trial_balance_roles

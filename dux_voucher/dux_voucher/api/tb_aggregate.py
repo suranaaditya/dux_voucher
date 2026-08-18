@@ -65,6 +65,8 @@ def rebuild(companies=None, from_period=None, to_period=None, commit=True):
                 second, so aggregating it would be wasted work.
     from_period / to_period  'YYYY-MM'. None means the full GL span.
     """
+    from dux_voucher.dux_voucher.api.trial_balance import require_manager
+    require_manager()
     if isinstance(companies, str):
         companies = frappe.parse_json(companies)
     companies = companies or _trust_companies()

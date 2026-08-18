@@ -26,6 +26,7 @@ from dux_voucher.dux_voucher.report.dux_trial_balance.dux_trial_balance import (
 @frappe.whitelist()
 def get_trial_balance(filters=None):
     """Run the engine and return everything the Page needs to draw itself."""
+    require_access()
     if isinstance(filters, str):
         filters = json.loads(filters or "{}")
     filters = frappe._dict(filters or {})
@@ -44,6 +45,35 @@ def get_trial_balance(filters=None):
         "companies": filters.get("_resolved_companies") or [],
         "view": filters.get("view"),
     }
+
+
+TB_ROLE = "Dux Trial Balance"
+TB_MANAGER_ROLE = "Dux Trial Balance Manager"
+
+
+def require_access():
+    """Every whitelisted endpoint here checks this.
+
+    Gating the Report and Page records hides the report from the menu; it
+    does not stop anyone POSTing to the endpoint directly. The role has to
+    be enforced where the data is served, or it is decoration.
+    """
+    if set(frappe.get_roles()) & {TB_ROLE, TB_MANAGER_ROLE, "System Manager"}:
+        return
+    frappe.throw(
+        _("You do not have access to the Trial Balance. Ask an administrator "
+          "for the '{0}' role.").format(TB_ROLE),
+        frappe.PermissionError)
+
+
+def require_manager():
+    """Rebuilding is not reading — it re-aggregates every trust company over
+    the full GL span and takes minutes."""
+    if set(frappe.get_roles()) & {TB_MANAGER_ROLE, "System Manager"}:
+        return
+    frappe.throw(
+        _("Rebuilding the aggregate needs the '{0}' role.").format(TB_MANAGER_ROLE),
+        frappe.PermissionError)
 
 
 def _guard(filters):
@@ -82,6 +112,7 @@ def get_account_parties(filters=None, accounts=None):
     across a trust the same logical account exists once per company, so
     the page passes back what the row merged rather than guessing.
     """
+    require_access()
     from dux_voucher.dux_voucher.report.dux_trial_balance.dux_trial_balance import (
         _slice, _validate, _resolve_party_names, _net_off, _has_value,
         _party_type_mismatch, _default_party_accounts, UNATTRIBUTED)
@@ -164,6 +195,7 @@ def search_companies(txt="", limit=25):
     is the headline gesture — burying it under thirty colleges would hide
     the feature.
     """
+    require_access()
     from dux_voucher.dux_voucher.api.reports_api import get_permitted_companies
 
     permitted = set(get_permitted_companies() or [])
@@ -194,6 +226,7 @@ def search_companies(txt="", limit=25):
 
 @frappe.whitelist()
 def get_view_options():
+    require_access()
     return list(VIEWS)
 
 
@@ -202,6 +235,7 @@ def get_fiscal_years():
     """Named explicitly rather than derived from a date — this site has
     overlapping fiscal years (2026-2027 covering Apr-Mar and 2026-2028
     covering Jan-Dec), so 'the' fiscal year for a date is ambiguous."""
+    require_access()
     return frappe.get_all(
         "Fiscal Year", filters={"disabled": 0},
         fields=["name", "year_start_date", "year_end_date"],
@@ -210,5 +244,6 @@ def get_fiscal_years():
 
 @frappe.whitelist()
 def aggregate_status():
+    require_access()
     from dux_voucher.dux_voucher.api import tb_aggregate
     return tb_aggregate.coverage()
