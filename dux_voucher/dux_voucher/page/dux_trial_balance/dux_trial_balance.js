@@ -153,18 +153,29 @@ class DuxTrialBalance {
   background:var(--tb-accent);}
 
 /* ---- table ---- */
-table.tb{width:100%;border-collapse:separate;border-spacing:0;font-size:13px;}
+/* Fixed layout so the account column keeps a real share of the width.
+   With auto layout the six nowrap numeric columns claim whatever they
+   want and the names collapse to "Accou…". */
+table.tb{width:100%;border-collapse:separate;border-spacing:0;font-size:12.5px;
+  line-height:1.35;table-layout:fixed;}
+table.tb th:first-child,table.tb td:first-child{width:34%;}
+table.tb th:not(:first-child),table.tb td:not(:first-child){width:11%;}
 table.tb thead th{position:sticky;top:0;z-index:2;background:var(--tb-bg);
   text-align:right;font-size:10.5px;font-weight:700;letter-spacing:.07em;
-  text-transform:uppercase;color:var(--tb-ink-3);padding:12px 14px;
+  text-transform:uppercase;color:var(--tb-ink-3);padding:7px 12px;
   border-bottom:1px solid var(--tb-line);white-space:nowrap;}
 table.tb thead th:first-child{text-align:left;}
-table.tb td{padding:9px 14px;border-bottom:1px solid var(--tb-line-2);
+table.tb td{padding:4px 12px;border-bottom:1px solid var(--tb-line-2);
   text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;}
-table.tb td:first-child{text-align:left;white-space:normal;}
+/* Account names stay on one line — a wrapped name would make rows
+   ragged, and ragged rows are far harder to scan down a column of
+   figures than a truncated name is to read. */
+table.tb td:first-child{text-align:left;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;}
 table.tb tbody tr:hover td{background:var(--tb-sunken);}
-.tb-name{display:flex;align-items:center;gap:7px;}
-.tb-caret{width:16px;height:16px;flex:none;display:inline-flex;align-items:center;
+.tb-name{display:flex;align-items:center;gap:6px;min-width:0;}
+.tb-name > .tb-lbl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.tb-caret{width:14px;height:14px;flex:none;display:inline-flex;align-items:center;
   justify-content:center;cursor:pointer;color:var(--tb-ink-3);
   transition:transform .15s;font-size:10px;}
 .tb-caret.collapsed{transform:rotate(-90deg);}
@@ -178,9 +189,10 @@ tr.total > td{border-top:2px solid var(--tb-line);border-bottom:0;
 tr.computed td{color:var(--tb-warn);font-style:italic;}
 .tb-dr{color:var(--tb-dr);} .tb-cr{color:var(--tb-cr);}
 .tb-nil{color:var(--tb-ink-3);opacity:.5;}
-.tb-flag{display:inline-block;font-size:9.5px;font-weight:700;letter-spacing:.05em;
-  text-transform:uppercase;padding:1.5px 5px;border-radius:4px;margin-left:6px;
-  background:var(--tb-warn-soft);color:var(--tb-warn);white-space:nowrap;}
+.tb-flag{display:inline-block;font-size:9px;font-weight:700;letter-spacing:.05em;
+  text-transform:uppercase;padding:0 5px;border-radius:4px;margin-left:6px;
+  line-height:15px;background:var(--tb-warn-soft);color:var(--tb-warn);
+  white-space:nowrap;flex:none;}
 .tb-unatt{color:var(--tb-ink-3);font-style:italic;}
 
 /* Context bar — replaces four KPI cards. Closing Dr/Cr were already the
@@ -209,18 +221,18 @@ tr.computed td{color:var(--tb-warn);font-style:italic;}
 
 /* The table is the report — let it own the viewport, and keep the header
    and the Total row pinned so context never scrolls away. */
-.tb-tablewrap{overflow:auto;max-height:calc(100vh - 148px);}
+.tb-tablewrap{overflow:auto;max-height:calc(100vh - 140px);}
 .tb thead th{position:sticky;top:0;z-index:3;background:var(--tb-sunken);}
 .tb tfoot td{position:sticky;bottom:0;z-index:3;background:var(--tb-bg);
   border-top:2px solid var(--tb-line-2);font-weight:700;}
 .tb tfoot td:first-child{font-weight:700;}
-.tb-ctrl{font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
-  padding:1.5px 6px;border-radius:4px;margin-left:7px;background:var(--tb-accent-soft);
-  color:var(--tb-accent);white-space:nowrap;}
+.tb-ctrl{font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  padding:0 6px;border-radius:4px;margin-left:6px;line-height:15px;
+  background:var(--tb-accent-soft);color:var(--tb-accent);white-space:nowrap;flex:none;}
 tr.party > td{background:var(--tb-sunken);}
 tr.party:hover > td{background:var(--tb-line-2);}
-.tb-ptype{font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;
-  color:var(--tb-ink-3);margin-left:8px;}
+.tb-ptype{font-size:9.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--tb-ink-3);margin-left:7px;line-height:15px;flex:none;}
 .tb-empty{padding:64px 20px;text-align:center;color:var(--tb-ink-3);font-size:14px;}
 .tb-empty strong{display:block;color:var(--tb-ink-2);font-size:15px;margin-bottom:6px;}
 @media(max-width:900px){
