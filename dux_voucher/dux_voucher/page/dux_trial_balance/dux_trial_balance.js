@@ -174,6 +174,8 @@ table.tb.cols4 th:first-child,table.tb.cols4 td:first-child{width:46%;}
 table.tb.cols4 th:not(:first-child),table.tb.cols4 td:not(:first-child){width:13.5%;}
 .tb-sfx{font-size:9px;font-weight:700;margin-left:4px;opacity:.75;
   letter-spacing:.03em;}
+.tb-searching{padding:6px 14px;font-size:12px;color:var(--tb-ink-3);
+  background:var(--tb-sunken);border-bottom:1px solid var(--tb-line);}
 table.tb thead th{position:sticky;top:0;z-index:2;background:var(--tb-bg);
   text-align:right;font-size:10.5px;font-weight:700;letter-spacing:.07em;
   text-transform:uppercase;color:var(--tb-ink-3);padding:7px 12px;
@@ -459,8 +461,12 @@ tr.party:hover > td{background:var(--tb-line-2);}
 			const v = e.target.value;
 			st = setTimeout(() => {
 				this.search = (v || "").toLowerCase();
-				this._renderTable();
-			}, 150);
+				// Parties are fetched on expand, so a search has nothing to
+				// match until they exist. Pull them once, then filter.
+				if (this.search && !this._loadingParties) this._ensurePartiesForSearch();
+				else this._renderTable();
+				if (this.data) this._renderStatusBar();
+			}, 200);
 		});
 
 		this.page.set_secondary_action(__("Excel"), () => this._excel());
@@ -692,6 +698,14 @@ tr.party:hover > td{background:var(--tb-line-2);}
 				d.source === "aggregate" ? __("Monthly aggregate") : __("Live GL")
 			}${d.source_built_at ? " · " + String(d.source_built_at).slice(0, 16) : ""}</span>`
 		);
+		// A filter narrows the rows but not the Total — the trial balance
+		// total belongs to the period, not to what you searched. Say so, or
+		// 4,56,095 beside two rows adding to 40,000 reads as a contradiction.
+		if (this.search)
+			pills.push(
+				`<span class="tb-pill warn">${__("filtered — Total is for the full period")}</span>`
+			);
+
 		const mism = rows.filter((r) => r.mismatch).length;
 		if (mism) pills.push(`<span class="tb-pill warn">${mism} ${__("mismatch")}</span>`);
 		const unatt = rows.filter((r) => r.is_unattributed).length;
@@ -733,11 +747,73 @@ tr.party:hover > td{background:var(--tb-line-2);}
 				const hay = `${r.account_name || ""} ${r.party || ""} ${r.party_name || ""} ${
 					r.company || ""
 				}`.toLowerCase();
-				if (!hay.includes(this.search)) continue;
+				// A control account stays visible when the match is one of the
+				// parties inside it — otherwise searching a supplier name
+				// would hide the very row that contains the answer.
+				if (!hay.includes(this.search) && !this._partyHit(r)) continue;
 			}
 			out.push(r);
 		}
 		return out;
+	}
+
+	_partyMatch(p) {
+		if (!this.search) return true;
+		return `${p.label || ""} ${p.party || ""} ${p.party_type || ""}`
+			.toLowerCase()
+			.includes(this.search);
+	}
+
+	_partyHit(r) {
+		if (!r.is_control) return false;
+		return (this.parties[r.account] || []).some((p) => this._partyMatch(p));
+	}
+
+	/* Search can only match parties it has actually fetched, and parties are
+	   fetched on expand. So the first time someone searches, pull them for
+	   every control account at once — there are only a handful per company,
+	   and without this "search" would quietly mean "search what you happened
+	   to open". */
+	_ensurePartiesForSearch() {
+		const rows = (this.data && this.data.rows) || [];
+		const pending = rows.filter(
+			(r) => r.is_control && !this.parties[r.account]
+		);
+		if (!pending.length) {
+			this._renderTable();
+			return;
+		}
+		this._loadingParties = true;
+		this._renderTable();
+		Promise.all(
+			pending.map(
+				(r) =>
+					new Promise((resolve) => {
+						frappe.call({
+							method: "dux_voucher.dux_voucher.api.trial_balance.get_account_parties",
+							args: {
+								filters: JSON.stringify(this.filters || {}),
+								accounts: JSON.stringify(r.members || [r.account]),
+							},
+							callback: (res) => {
+								this.parties[r.account] = res.message || [];
+								resolve();
+							},
+							error: () => {
+								this.parties[r.account] = [];
+								resolve();
+							},
+						});
+					})
+			)
+		).then(() => {
+			this._loadingParties = false;
+			// Reveal what was found rather than making them expand by hand.
+			(this.data.rows || []).forEach((r) => {
+				if (r.is_control && this._partyHit(r)) this.partyOpen.add(r.account);
+			});
+			this._renderTable();
+		});
 	}
 
 	_loadParties(key, row) {
@@ -860,7 +936,14 @@ tr.party:hover > td{background:var(--tb-line-2);}
         ${this._money(r)}</tr>`;
 
 				if (r.is_control && this.partyOpen.has(r.account)) {
-					const kidsRows = this.parties[r.account] || [];
+					// When the account name itself matches, show all its parties;
+					// otherwise show only the ones that matched.
+					const accHit =
+						!this.search ||
+						`${r.account_name || ""}`.toLowerCase().includes(this.search);
+					const kidsRows = (this.parties[r.account] || []).filter(
+						(pp) => accHit || this._partyMatch(pp)
+					);
 					// Across a trust the row is a merge key, not an account —
 					// hand the drill a real account name to open.
 					const realAcct = (r.members && r.members[0]) || r.account;
@@ -879,6 +962,11 @@ tr.party:hover > td{background:var(--tb-line-2);}
 			})
 			.join("");
 
+		if (this._loadingParties) {
+			$r.find(".tb-tablewrap").before(
+				`<div class="tb-searching">${__("Loading parties to search…")}</div>`
+			);
+		}
 		const tot = rows.find((r) => r.is_total);
 		// In the four-column view Opening and Closing are netted, so the
 		// Total's netted figure is the Dr/Cr difference -- which is the tie
