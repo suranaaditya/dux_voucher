@@ -15,6 +15,14 @@ dependencies = [
 requires = ["flit_core >=3.4,<4"]
 build-backend = "flit_core.buildapi"
 
+# Frappe Cloud's "Change Branch" flow validates this key before it will
+# switch an installed app to another branch. It has never been present in
+# this repo -- the app predates the check -- so branch changes fail with
+# "Could not find compatible Frappe version in pyproject.toml".
+# The site runs Frappe 16.12.
+[tool.bench.frappe-dependencies]
+frappe = ">=16.0.0-dev,<17.0.0"
+
 # These dependencies are only installed when developer mode is enabled
 [tool.bench.dev-dependencies]
 # package_name = "~=1.1.0"
