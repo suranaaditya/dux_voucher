@@ -634,10 +634,12 @@ tr.party:hover > td{background:var(--tb-line-2);}
 		const hidden = new Set();
 		const out = [];
 		for (const r of rows) {
-			if (r.is_total) {
-				out.push(r);
-				continue;
-			}
+			// The Total is rendered in a sticky <tfoot>, so it must NOT also
+			// appear in the body. While the table was short enough to fit the
+			// viewport the pinned footer sat directly under the body's copy
+			// and the two read as one row; expanding a control account grew
+			// the table past the fold and the duplicate became visible.
+			if (r.is_total) continue;
 			const pa = r.parent_account;
 			if (pa && (hidden.has(pa) || this.collapsed.has(pa))) {
 				hidden.add(r.account);
@@ -705,6 +707,9 @@ tr.party:hover > td{background:var(--tb-line-2);}
 		const d = this.data || {};
 		const rows = d.rows || [];
 		const $r = $(this.wrapper).find("#tb-result");
+		// Expanding a row re-renders the whole table, which destroys the
+		// scroller and sends you back to the top. Carry the offset across.
+		const keepTop = $r.find(".tb-tablewrap").scrollTop() || 0;
 		if (!rows.length) {
 			$r.html(
 				`<div class="tb-empty"><strong>${__("No rows")}</strong>${__(
@@ -806,6 +811,8 @@ tr.party:hover > td{background:var(--tb-line-2);}
         <th>${__("Debit")}</th><th>${__("Credit")}</th>
         <th>${__("Closing (Dr)")}</th><th>${__("Closing (Cr)")}</th>
       </tr></thead><tbody>${body}</tbody>${foot}</table></div>`);
+
+		if (keepTop) $r.find(".tb-tablewrap").scrollTop(keepTop);
 	}
 
 	_drill(idx) {
