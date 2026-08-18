@@ -76,7 +76,7 @@ class DuxTrialBalance {
   --tb-good-soft:#12291f; --tb-bad-soft:#2e1a18;
   --tb-shadow:0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.25);
 }
-.tb-wrap{padding:4px 0 80px;color:var(--tb-ink);
+.tb-wrap{padding:4px 0 12px;color:var(--tb-ink);
   font-feature-settings:"tnum" 1,"cv05" 1;}
 .tb-card{background:var(--tb-bg);border:1px solid var(--tb-line);
   border-radius:12px;box-shadow:var(--tb-shadow);}
@@ -142,21 +142,6 @@ class DuxTrialBalance {
 .tb-btn-primary{background:var(--tb-accent);border-color:var(--tb-accent);color:#fff;}
 .tb-btn-primary:hover{filter:brightness(1.08);background:var(--tb-accent);}
 
-/* ---- KPI strip ---- */
-.tb-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
-  gap:12px;margin-bottom:16px;}
-.tb-kpi{padding:14px 16px;border-radius:12px;border:1px solid var(--tb-line);
-  background:var(--tb-bg);box-shadow:var(--tb-shadow);}
-.tb-kpi .k{font-size:10.5px;font-weight:700;letter-spacing:.08em;
-  text-transform:uppercase;color:var(--tb-ink-3);margin-bottom:6px;}
-.tb-kpi .v{font-size:21px;font-weight:650;letter-spacing:-.02em;
-  font-variant-numeric:tabular-nums;}
-.tb-kpi .s{font-size:11.5px;color:var(--tb-ink-3);margin-top:3px;}
-.tb-kpi.tied{background:var(--tb-good-soft);border-color:transparent;}
-.tb-kpi.tied .v{color:var(--tb-cr);}
-.tb-kpi.off{background:var(--tb-bad-soft);border-color:transparent;}
-.tb-kpi.off .v{color:var(--tb-dr);}
-
 /* ---- provenance ---- */
 .tb-prov{display:flex;flex-wrap:wrap;gap:8px;align-items:center;
   margin-bottom:14px;font-size:12px;color:var(--tb-ink-2);}
@@ -168,7 +153,6 @@ class DuxTrialBalance {
   background:var(--tb-accent);}
 
 /* ---- table ---- */
-.tb-tablewrap{overflow:auto;max-height:calc(100vh - 380px);border-radius:12px;}
 table.tb{width:100%;border-collapse:separate;border-spacing:0;font-size:13px;}
 table.tb thead th{position:sticky;top:0;z-index:2;background:var(--tb-bg);
   text-align:right;font-size:10.5px;font-weight:700;letter-spacing:.07em;
@@ -198,6 +182,38 @@ tr.computed td{color:var(--tb-warn);font-style:italic;}
   text-transform:uppercase;padding:1.5px 5px;border-radius:4px;margin-left:6px;
   background:var(--tb-warn-soft);color:var(--tb-warn);white-space:nowrap;}
 .tb-unatt{color:var(--tb-ink-3);font-style:italic;}
+
+/* Context bar — replaces four KPI cards. Closing Dr/Cr were already the
+   Total row and row-count was trivia; only the tie status earned space. */
+.tb-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  padding:9px 14px;border:1px solid var(--tb-line);border-radius:10px;
+  background:var(--tb-bg);margin-bottom:10px;}
+.tb-bar .ctx{font-size:12.5px;color:var(--tb-ink-2);font-weight:550;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46vw;}
+.tb-bar .sp{flex:1 1 auto;}
+.tb-tie{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;
+  font-weight:650;padding:3px 10px;border-radius:20px;white-space:nowrap;}
+.tb-tie.ok{background:var(--tb-good-soft);color:var(--tb-cr);}
+.tb-tie.off{background:var(--tb-bad-soft);color:var(--tb-dr);}
+.tb-mini{height:30px;border:1px solid var(--tb-line);border-radius:8px;
+  background:var(--tb-bg);color:var(--tb-ink-2);font-size:12.5px;font-weight:600;
+  padding:0 11px;cursor:pointer;white-space:nowrap;}
+.tb-mini:hover{background:var(--tb-sunken);}
+.tb-popwrap{position:relative;}
+.tb-pop{position:absolute;right:0;top:36px;z-index:40;min-width:250px;
+  background:var(--tb-bg);border:1px solid var(--tb-line);border-radius:10px;
+  box-shadow:0 12px 32px rgba(16,33,46,.14);padding:12px 14px;display:none;}
+.tb-pop.open{display:block;}
+.tb-pop label{display:flex;align-items:center;gap:9px;font-size:13px;
+  color:var(--tb-ink-2);padding:6px 0;cursor:pointer;}
+
+/* The table is the report — let it own the viewport, and keep the header
+   and the Total row pinned so context never scrolls away. */
+.tb-tablewrap{overflow:auto;max-height:calc(100vh - 148px);}
+.tb thead th{position:sticky;top:0;z-index:3;background:var(--tb-sunken);}
+.tb tfoot td{position:sticky;bottom:0;z-index:3;background:var(--tb-bg);
+  border-top:2px solid var(--tb-line-2);font-weight:700;}
+.tb tfoot td:first-child{font-weight:700;}
 .tb-ctrl{font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
   padding:1.5px 6px;border-radius:4px;margin-left:7px;background:var(--tb-accent-soft);
   color:var(--tb-accent);white-space:nowrap;}
@@ -267,17 +283,25 @@ tr.party:hover > td{background:var(--tb-line-2);}
     </div>
   </div>
 
-  <div class="tb-toggles">
-    <label class="tb-tg"><input type="checkbox" id="tb-net" checked> ${__("Net opening / closing")}</label>
-    <label class="tb-tg"><input type="checkbox" id="tb-grp" checked> ${__("Group accounts")}</label>
-    <label class="tb-tg"><input type="checkbox" id="tb-zero"> ${__("Zero rows")}</label>
-    <label class="tb-tg"><input type="checkbox" id="tb-pl"> ${__("Carry prior-year P&L")}</label>
-    <label class="tb-tg"><input type="checkbox" id="tb-live"> ${__("Force live query")}</label>
-    <input class="tb-input" id="tb-search" placeholder="${__("Filter rows…")}" style="height:32px;width:180px;margin-left:auto">
+  <div class="tb-bar" id="tb-bar" style="display:none">
+    <span class="ctx" id="tb-ctx"></span>
+    <span id="tb-pills"></span>
+    <span class="sp"></span>
+    <span id="tb-tie"></span>
+    <input class="tb-input" id="tb-search" placeholder="${__("Filter rows…")}"
+           style="height:30px;width:160px">
+    <span class="tb-popwrap">
+      <button class="tb-mini" id="tb-opts">${__("Options")}</button>
+      <div class="tb-pop" id="tb-pop">
+        <label><input type="checkbox" id="tb-net" checked> ${__("Net opening / closing")}</label>
+        <label><input type="checkbox" id="tb-grp" checked> ${__("Group accounts")}</label>
+        <label><input type="checkbox" id="tb-zero"> ${__("Zero rows")}</label>
+        <label><input type="checkbox" id="tb-pl"> ${__("Carry prior-year P&L")}</label>
+        <label><input type="checkbox" id="tb-live"> ${__("Force live query")}</label>
+      </div>
+    </span>
+    <button class="tb-mini" id="tb-edit">${__("Filters")}</button>
   </div>
-
-  <div id="tb-kpis" class="tb-kpis" style="display:none"></div>
-  <div id="tb-prov" class="tb-prov" style="display:none"></div>
 
   <div class="tb-card" id="tb-result">
     <div class="tb-empty">
@@ -300,6 +324,23 @@ tr.party:hover > td{background:var(--tb-line-2);}
 		});
 
 		$w.on("click", "#tb-run", () => this.run());
+
+		// Options popover — these are set-once choices, so they live behind a
+		// button rather than occupying a permanent row above the numbers.
+		$w.on("click", "#tb-opts", (e) => {
+			e.stopPropagation();
+			$w.find("#tb-pop").toggleClass("open");
+		});
+		$w.on("click", "#tb-pop", (e) => e.stopPropagation());
+		// Changing an option re-runs: each one changes what the server
+		// computes, so leaving stale numbers on screen would be a lie.
+		$w.on("change", "#tb-pop input[type=checkbox]", () => this.run());
+
+		// Bring the filter panel back.
+		$w.on("click", "#tb-edit", () => {
+			$w.find(".tb-filters").toggle();
+			$w.find("#tb-pop").removeClass("open");
+		});
 		$w.on("click", "#tb-chips", () => $w.find("#tb-co-inp").focus());
 
 		let t = null;
@@ -310,6 +351,8 @@ tr.party:hover > td{background:var(--tb-line-2);}
 		});
 		$w.on("focus", "#tb-co-inp", () => this._searchCompanies($w.find("#tb-co-inp").val()));
 		$(document).on("click.duxtb", (e) => {
+			if (!$(e.target).closest("#tb-opts,#tb-pop").length)
+				$w.find("#tb-pop").removeClass("open");
 			if (!$(e.target).closest(".tb-co").length) $w.find("#tb-drop").removeClass("open");
 		});
 
@@ -508,8 +551,13 @@ tr.party:hover > td{background:var(--tb-line-2);}
 			callback: (r) => {
 				this.data = r.message;
 				this.collapsed = new Set();
-				this._renderKpis();
-				this._renderProvenance();
+				this.parties = {};
+				this.partyOpen = new Set();
+				// Filters are a set-up step, not a thing you stare at. Fold
+				// them away once there is a report to look at.
+				$w.find(".tb-filters").hide();
+				$w.find("#tb-bar").css("display", "flex");
+				this._renderStatusBar();
 				this._renderTable();
 			},
 			error: () => {
@@ -536,57 +584,49 @@ tr.party:hover > td{background:var(--tb-line-2);}
 		return `<td class="${cls || ""}">${f}</td>`;
 	}
 
-	_renderKpis() {
-		const rows = (this.data && this.data.rows) || [];
-		const total = rows.find((r) => r.is_total);
-		const $k = $(this.wrapper).find("#tb-kpis");
-		if (!total) {
-			$k.hide();
-			return;
-		}
-		const dr = total.closing_debit || 0;
-		const cr = total.closing_credit || 0;
-		const diff = dr - cr;
-		const tied = Math.abs(diff) < 0.005;
-
-		$k.show().html(`
-      <div class="tb-kpi"><div class="k">${__("Closing (Dr)")}</div>
-        <div class="v">${this._fmt(dr) || "—"}</div></div>
-      <div class="tb-kpi"><div class="k">${__("Closing (Cr)")}</div>
-        <div class="v">${this._fmt(cr) || "—"}</div></div>
-      <div class="tb-kpi ${tied ? "tied" : "off"}">
-        <div class="k">${tied ? __("Balanced") : __("Out of balance")}</div>
-        <div class="v">${tied ? "✓" : this._fmt(diff)}</div>
-        <div class="s">${tied ? __("Debit equals credit") : __("Closing Dr − Cr")}</div></div>
-      <div class="tb-kpi"><div class="k">${__("Rows")}</div>
-        <div class="v">${rows.length - 1}</div>
-        <div class="s">${(this.data.companies || []).length} ${__("companies")}</div></div>
-    `);
-	}
-
-	_renderProvenance() {
+	_renderStatusBar() {
 		const d = this.data || {};
 		const rows = d.rows || [];
-		const $p = $(this.wrapper).find("#tb-prov");
-		const bits = [];
+		const $w = $(this.wrapper);
+		const total = rows.find((r) => r.is_total);
 
-		bits.push(
+		const co = this.companies.map((c) => c.value);
+		const coTxt =
+			co.length === 1
+				? co[0]
+				: `${co.length} ${__("selected")} · ${(d.companies || []).length} ${__("companies")}`;
+		const fmtD = (v) => (v ? frappe.datetime.str_to_user(v) : "");
+		$w.find("#tb-ctx").text(
+			`${coTxt}  ·  ${this.view}  ·  ${fmtD(this.filters.from_date)} → ${fmtD(
+				this.filters.to_date
+			)}`
+		);
+
+		const pills = [];
+		pills.push(
 			`<span class="tb-pill dot">${
 				d.source === "aggregate" ? __("Monthly aggregate") : __("Live GL")
 			}${d.source_built_at ? " · " + String(d.source_built_at).slice(0, 16) : ""}</span>`
 		);
-
 		const mism = rows.filter((r) => r.mismatch).length;
-		if (mism)
-			bits.push(
-				`<span class="tb-pill warn">${mism} ${__("party-type mismatch")}</span>`
-			);
+		if (mism) pills.push(`<span class="tb-pill warn">${mism} ${__("mismatch")}</span>`);
 		const unatt = rows.filter((r) => r.is_unattributed).length;
-		if (unatt) bits.push(`<span class="tb-pill warn">${unatt} ${__("unattributed")}</span>`);
+		if (unatt) pills.push(`<span class="tb-pill warn">${unatt} ${__("unattributed")}</span>`);
 		if (rows.find((r) => r.is_computed))
-			bits.push(`<span class="tb-pill warn">${__("includes computed carry-forward")}</span>`);
+			pills.push(`<span class="tb-pill warn">${__("computed carry-forward")}</span>`);
+		$w.find("#tb-pills").html(pills.join(""));
 
-		$p.show().html(bits.join(""));
+		if (total) {
+			const diff = (total.closing_debit || 0) - (total.closing_credit || 0);
+			const tied = Math.abs(diff) < 0.005;
+			$w.find("#tb-tie").html(
+				`<span class="tb-tie ${tied ? "ok" : "off"}">${
+					tied ? "✓ " + __("Balanced") : "⚠ " + __("Out by") + " " + this._fmt(diff)
+				}</span>`
+			);
+		} else {
+			$w.find("#tb-tie").empty();
+		}
 	}
 
 	_visible(rows) {
@@ -749,13 +789,23 @@ tr.party:hover > td{background:var(--tb-line-2);}
 			})
 			.join("");
 
+		const tot = rows.find((r) => r.is_total);
+		const foot = tot
+			? `<tfoot><tr>
+          <td>${__("Total")}</td>
+          ${this._cell(tot.opening_debit)}${this._cell(tot.opening_credit)}
+          ${this._cell(tot.debit)}${this._cell(tot.credit)}
+          ${this._cell(tot.closing_debit, "tb-dr")}${this._cell(tot.closing_credit, "tb-cr")}
+        </tr></tfoot>`
+			: "";
+
 		$r.html(`<div class="tb-tablewrap"><table class="tb">
       <thead><tr>
         <th>${first}</th>
         <th>${__("Opening (Dr)")}</th><th>${__("Opening (Cr)")}</th>
         <th>${__("Debit")}</th><th>${__("Credit")}</th>
         <th>${__("Closing (Dr)")}</th><th>${__("Closing (Cr)")}</th>
-      </tr></thead><tbody>${body}</tbody></table></div>`);
+      </tr></thead><tbody>${body}</tbody>${foot}</table></div>`);
 	}
 
 	_drill(idx) {
