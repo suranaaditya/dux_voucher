@@ -55,7 +55,8 @@ dux_voucher/                              repo root (pyproject, README, CLAUDE.m
     │   ├── v1_1/backfill_date_field.py        fills date_field for PO
     │   ├── v1_2/seed_student_fee_receipt_rule.py   adds the 8th rule on existing sites
     │   ├── v1_3/seed_ex_student_refund_rule.py     adds the 9th
-    │   └── v1_4/seed_student_fee_refund_rule.py    adds the 10th
+    │   ├── v1_4/seed_student_fee_refund_rule.py    adds the 10th
+    │   └── v1_5/seed_trial_balance_roles.py        the two TB roles
     ├── formatted_reports/                     formatted Excel exports (single-prefix)
     │   ├── PLAN.md                            v5 design contract for TB
     │   ├── build_v5_reference.py              visual logic source-of-truth
@@ -73,8 +74,11 @@ dux_voucher/                              repo root (pyproject, README, CLAUDE.m
         │   │                                  student ledger data + T-account helper
         │   ├── reports_export.py              xlsx exports for those Pages
         │   ├── backdating.py                  posting-date enforcement
-        │   └── student_fee.py                 admission-fee + retained-income accounts,
+        │   ├── student_fee.py                 admission-fee + retained-income accounts,
         │                                      book_income, paid/remaining helpers
+        │   ├── trial_balance.py               whitelisted API behind the TB page;
+        │   │                                  every endpoint calls require_access()
+        │   └── tb_aggregate.py                monthly pre-aggregation + nightly job
         ├── doctype/
         │   ├── payment_voucher/  + child rows + backend ref
         │   ├── receipt_voucher/  + child rows + backend ref
@@ -94,7 +98,9 @@ dux_voucher/                              repo root (pyproject, README, CLAUDE.m
         │   ├── student_fee_receipt_head/      child rows on receipt
         │   ├── student_fee_refund/            submittable; SRF-.YYYY.- (+ income_* fields)
         │   ├── student_fee_refund_head/       child rows on refund
-        │   └── student_fee_settings/          Single; retained-income account override
+        │   ├── student_fee_settings/          Single; retained-income account override
+        │   └── dux_tb_period_balance/         pre-aggregated TB, one row per
+        │                                      (period, company, account, party)
         ├── page/
         │   ├── dux_ledger/                    Ledger Statement
         │   ├── dux_daybook/                   Day Book
@@ -102,13 +108,15 @@ dux_voucher/                              repo root (pyproject, README, CLAUDE.m
         │   ├── dux_party_ledger/              Party Ledger (System Manager)
         │   ├── dux_party_trial_balance/       Party Trial Balance → click-through
         │   │                                  to Party Ledger
-        │   └── dux_student_ledger/            Student Ledger (ex + new student)
+        │   ├── dux_student_ledger/            Student Ledger (ex + new student)
+        │   └── dux_trial_balance/             Trial Balance — the primary UI
         ├── report/
         │   ├── ex_student_outstanding/
         │   ├── ict_pending_confirmation/
         │   ├── admission_fee_register/        flat list + KPI summary
-        │   └── student_fee_refund_income/     retained fee → income; KPI cards +
+        │   ├── student_fee_refund_income/     retained fee → income; KPI cards +
         │                                      per-row "Book as income" action
+        │   └── dux_trial_balance/             the TB engine; the page calls it
         ├── print_format/                      polished print formats
         │   ├── dux_payment_voucher / dux_receipt_voucher
         │   ├── ex_student_receipt / ex_student_refund / ex_student_writeoff
@@ -423,6 +431,67 @@ two refund rows is not counted twice. Balances come from
 Filters: Company, From/To Date, Course, Status (All / Pending / Booked).
 
 ---
+### 9. Dux Trial Balance
+
+Replaces ERPNext's **Trial Balance** and **Trial Balance for Party** —
+two disconnected reports that cannot see each other. This is one engine
+(`report/dux_trial_balance/`) parameterised by a grouping, with a custom
+Page (`/app/dux-trial-balance`) as the primary surface. The Page calls the
+SAME `execute()`; it never recomputes, so the two cannot disagree.
+
+Four views, one GL slice at different resolutions:
+
+| View | Rows are |
+|---|---|
+| By Account | CoA tree, child values rolled into groups |
+| By Party | every party, **all party types at once** |
+| Account → Party | control accounts expanded into their parties, plus an explicit **Unattributed** row |
+| By Company | one row per company, for trusts and comparison |
+
+**Things that will bite you if you do not know them:**
+
+- **No fiscal-year clamp.** ERPNext's `validate_filters` silently rewrites
+  an out-of-year range, so a period spanning two fiscal years is not
+  expressible there. Here Fiscal Year only fills the dates. This site has
+  *overlapping* fiscal years (`2026-2027` Apr–Mar and `2026-2028`
+  Jan–Dec), so never derive "the" fiscal year from a date.
+- **P&L opening resets at the fiscal-year boundary**, and the amount
+  removed is surfaced as a computed *Accumulated Loss/Profit b/f* row.
+  Without it this ledger reads ~68 crore out of balance — which is
+  exactly what ERPNext's own TB shows, unexplained. No Period Closing
+  Voucher has ever been run here, so the reset happens at query time.
+- **Cancelled entries: `is_cancelled = 0` alone is sufficient.** Measured
+  across 5,088,888 GL rows — zero live rows have a cancelled parent
+  JE/PE. The reversal carries the ORIGINAL posting date, so cancelling a
+  back-dated voucher today never leaks into today.
+- **One wide `company IN (...)` GROUP BY is pathological here.** 69
+  companies took 38–77s and blew gunicorn's 120s worker timeout, which
+  surfaced as a bare "Internal Server Error" with nothing in the Error
+  Log. Query **per company** and accumulate — the arithmetic is
+  identical. This lesson has paid out three times now.
+- **Party attribution is largely absent.** ~₹88.8M sits on
+  Receivable/Payable accounts with no party at all, 93–100% of rows on
+  some companies. The Unattributed row is permanent furniture, not an
+  error state.
+
+**Trusts** use ERPNext's **native** company nested set (`parent_company` /
+`is_group` / `lft` / `rgt`); selecting a group company expands to its
+subtree via `get_subsidiary_companies`. Do not build a parallel
+hierarchy — production already maintains this one.
+
+**Two tiers.** A few companies → live GL. A trust or many companies →
+`Dux TB Period Balance`, rebuilt nightly, because live is not possible at
+that width. The report **always states which source it used and when the
+aggregate was built**.
+
+**Roles** (seeded by `v1_5`): `Dux Trial Balance` reads;
+`Dux Trial Balance Manager` also rebuilds the aggregate. Gating the
+Report and Page records only hides it from the menu, so every whitelisted
+endpoint calls `require_access()` and `tb_aggregate.rebuild` calls
+`require_manager()`. User-Permission company scoping applies on top.
+
+---
+
 
 ## Key Business Logic
 
@@ -464,6 +533,14 @@ Filters: Company, From/To Date, Course, Status (All / Pending / Booked).
 
 ## Recently Completed
 
+- [x] **Dux Trial Balance** — one engine, four groupings, replacing
+      ERPNext's two disconnected trial balances. Free date range,
+      native trust roll-up, monthly aggregate for wide multi-company
+      runs, period/company comparison, inline party expansion on
+      control accounts, drill-through into the Dux ledgers in a new
+      tab, formatted xlsx export, and two dedicated roles. Validated
+      against ERPNext's own Trial Balance: 113 accounts, zero
+      differences on all six value columns, 0.45s against its 48.79s
 - [x] **Party surfaced in ledger Particulars** — rows with no party of
       their own show the voucher's party, so a TDS ledger names the
       deductee instead of the expense head. Display-time only,
@@ -624,6 +701,11 @@ Notable cross-cutting files when you need to find something fast:
 | Student Fee Refund controller + income fields | `dux_voucher/dux_voucher/doctype/student_fee_refund/student_fee_refund.py` |
 | Admission Fee Register report | `dux_voucher/dux_voucher/report/admission_fee_register/` |
 | Student Fee Refund Income report | `dux_voucher/dux_voucher/report/student_fee_refund_income/` |
+| Trial Balance engine (all four views) | `dux_voucher/dux_voucher/report/dux_trial_balance/dux_trial_balance.py` |
+| Trial Balance page (the primary UI) | `dux_voucher/dux_voucher/page/dux_trial_balance/dux_trial_balance.js` |
+| Trial Balance API + role guards | `dux_voucher/dux_voucher/api/trial_balance.py` |
+| TB monthly aggregate + nightly job | `dux_voucher/dux_voucher/api/tb_aggregate.py` |
+| TB Excel export | `reports_export.py` → `export_trial_balance_xlsx` |
 | Voucher controllers | `dux_voucher/dux_voucher/doctype/{payment,receipt}_voucher/` |
 | Ex-student lifecycle | `dux_voucher/dux_voucher/doctype/ex_student*/` |
 
