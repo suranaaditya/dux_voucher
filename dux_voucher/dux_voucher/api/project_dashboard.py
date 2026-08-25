@@ -96,7 +96,7 @@ def get_dashboard(companies=None, from_date=None, to_date=None, status=None):
     unattributed_rows = 0
 
     for company in scan:
-        payable.update(_payable_by_party(company, from_date, to_date))
+        payable.update(_payable_by_party(company, None, to_date))
         rows = _gl_for_company(company, from_date, to_date)
         used_accounts = {
             r["account"] for r in rows if r["project"] != NO_PROJECT
@@ -111,20 +111,24 @@ def get_dashboard(companies=None, from_date=None, to_date=None, status=None):
                     unattributed_rows += int(r["entries"] or 0)
                 continue
             agg = gl.setdefault(r["project"], {
-                "cost": 0.0, "paid": 0.0, "entries": 0, "last_activity": None
+                "cost": 0.0, "paid": 0.0, "period_cost": 0.0,
+                "period_paid": 0.0, "entries": 0, "last_activity": None
             })
             agg["cost"] += flt(r["cost"])
             agg["paid"] += flt(r["paid"])
+            agg["period_cost"] += flt(r["period_cost"])
+            agg["period_paid"] += flt(r["period_paid"])
             agg["entries"] += int(r["entries"] or 0)
             if r["last_activity"] and (
                 not agg["last_activity"] or r["last_activity"] > agg["last_activity"]
             ):
                 agg["last_activity"] = r["last_activity"]
 
-    rows = _assemble(projects, gl, _commitments(companies, projects.keys()))
+    rows = _assemble(projects, gl,
+                     _commitments(companies, projects.keys(), as_at=to_date))
     parties = _party_rows(
         {n: p["company"] for n, p in projects.items()},
-        _party_commitments(companies, projects.keys()), payable)
+        _party_commitments(companies, projects.keys(), as_at=to_date), payable)
 
     return {
         "period": {"from_date": str(from_date), "to_date": str(to_date)},
@@ -189,6 +193,21 @@ def search_companies(txt=None, limit=25):
 def _gl_for_company(company, from_date, to_date):
     """One grouped query per company, keyed on (project, account).
 
+    Returns figures on TWO bases from a single pass:
+
+    * ``cost`` / ``paid`` are **project to date** — everything up to
+      ``to_date``, with no lower bound. That is the only basis on which
+      "against estimate" means anything. A capital project runs for years,
+      and Committed comes from purchase and work orders, which carry no
+      period at all — so reading a twelve-month Invoiced against an
+      all-time Committed was comparing two different windows.
+    * ``period_cost`` / ``period_paid`` are the movement inside
+      ``from_date .. to_date``, for the "in this window" line.
+
+    Dropping the lower bound costs nothing here: measured on dev, the three
+    companies that hold projects carry 76, 34 and 291 live GL rows, and the
+    unbounded scan came back faster than the bounded one.
+
     Grouping on account as well as project is what lets the caller work
     out which accounts projects actually use, so the unattributed figure
     can be restricted to those same accounts — from the same single pass.
@@ -204,13 +223,17 @@ def _gl_for_company(company, from_date, to_date):
                gle.account                                  AS account,
                SUM({cost})                                  AS cost,
                SUM({paid})                                  AS paid,
+               SUM(CASE WHEN gle.posting_date >= %(from_date)s
+                        THEN {cost} ELSE 0 END)             AS period_cost,
+               SUM(CASE WHEN gle.posting_date >= %(from_date)s
+                        THEN {paid} ELSE 0 END)             AS period_paid,
                COUNT(*)                                     AS entries,
                MAX(gle.posting_date)                        AS last_activity
         FROM `tabGL Entry` gle
         INNER JOIN `tabAccount` acc ON acc.name = gle.account
         WHERE gle.company = %(company)s
           AND gle.is_cancelled = 0
-          AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s
+          AND gle.posting_date <= %(to_date)s
         GROUP BY project, gle.account
         """.format(cost=_COST_SQL, paid=_PAID_SQL),
         {
@@ -223,16 +246,23 @@ def _gl_for_company(company, from_date, to_date):
     )
 
 
-def _commitments(companies, project_names):
+def _commitments(companies, project_names, as_at=None):
     """What is on order against each project — ``{project: {po, wo, total}}``.
 
     Document-derived, NOT from GL: neither a Purchase Order nor a Work Order
     Contract posts a ledger entry. That is why Committed is labelled a
     forecast on the page.
 
+    ``as_at`` bounds both sides on their own date field, so Committed is a
+    to-date figure like Invoiced and Paid. Without it, moving the as-at date
+    back left Committed at its all-time value and "% of estimate" compared
+    an all-time numerator against a to-date denominator.
+
     One function so the portfolio table and the drill-down cannot disagree
     about what Committed means — both read this.
     """
+    po_cutoff = "AND po.transaction_date <= %(as_at)s" if as_at else ""
+    wo_cutoff = "AND wo_date <= %(as_at)s" if as_at else ""
     out = {}
     if not project_names:
         return out
@@ -259,9 +289,11 @@ def _commitments(companies, project_names):
           AND po.status NOT IN ('Closed', 'Cancelled')
           AND po.company IN %(companies)s
           AND COALESCE(NULLIF(poi.project, ''), po.project) IN %(projects)s
+          {po_cutoff}
         GROUP BY project
-        """,
-        {"companies": tuple(companies), "projects": tuple(project_names)},
+        """.format(po_cutoff=po_cutoff),
+        {"companies": tuple(companies), "projects": tuple(project_names),
+         "as_at": as_at},
         as_dict=True,
     ):
         if not r["project"]:
@@ -288,9 +320,11 @@ def _commitments(companies, project_names):
             WHERE docstatus = 1
               AND company IN %(companies)s
               AND project IN %(projects)s
+              {wo_cutoff}
             GROUP BY project
-            """,
-            {"companies": tuple(companies), "projects": tuple(project_names)},
+            """.format(wo_cutoff=wo_cutoff),
+            {"companies": tuple(companies), "projects": tuple(project_names),
+             "as_at": as_at},
             as_dict=True,
         ):
             if not r["project"]:
@@ -344,6 +378,8 @@ def _assemble(projects, gl, committed):
             "invoiced": invoiced,
             "paid": paid,
             "outstanding": flt(invoiced - paid),
+            "period_invoiced": flt(agg.get("period_cost")),
+            "period_paid": flt(agg.get("period_paid")),
             "uninvoiced": flt(com - invoiced) if com else 0.0,
             "pct_of_estimate": flt(com / est * 100) if est else None,
             "entries": int(agg.get("entries") or 0),
@@ -366,6 +402,8 @@ def _kpis(rows, unattributed, unattributed_rows):
         "invoiced": flt(invoiced),
         "paid": flt(paid),
         "outstanding": flt(invoiced - paid),
+        "period_invoiced": flt(sum(r["period_invoiced"] for r in rows)),
+        "period_paid": flt(sum(r["period_paid"] for r in rows)),
         "uninvoiced": flt(committed - invoiced),
         "unattributed": flt(unattributed),
         "unattributed_entries": unattributed_rows,
@@ -488,6 +526,7 @@ def _empty():
         "period": {}, "companies": [],
         "companies_searched": 0, "companies_permitted": 0, "scoped": False,
         "kpi": {"committed": 0, "invoiced": 0, "paid": 0, "outstanding": 0,
+                "period_invoiced": 0, "period_paid": 0,
                 "uninvoiced": 0, "unattributed": 0, "unattributed_entries": 0,
                 "active_projects": 0, "total_projects": 0},
         "projects": [], "by_company": [], "attention": [],
@@ -534,7 +573,7 @@ def get_project_detail(project, from_date=None, to_date=None):
         INNER JOIN `tabAccount` acc ON acc.name = gle.account
         WHERE gle.company = %(company)s AND gle.project = %(project)s
           AND gle.is_cancelled = 0
-          AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s
+          AND gle.posting_date <= %(to_date)s
         GROUP BY gle.account
         HAVING amount <> 0
         ORDER BY amount DESC
@@ -544,14 +583,20 @@ def get_project_detail(project, from_date=None, to_date=None):
         as_dict=True,
     )
 
-    vouchers = _project_vouchers(p.company, project, from_date, to_date)
+    # Every voucher up to the as-at date. The summary is project-to-date —
+    # a capital project runs for years and Committed carries no period, so
+    # a twelve-month Invoiced read against an all-time Committed was
+    # comparing two different windows. The date range still governs which
+    # documents count as recent activity.
+    vouchers = _project_vouchers(p.company, project, None, to_date)
+    in_window = [v for v in vouchers if v["posting_date"] >= str(from_date)]
 
-    # Totalled from the very rows the document list shows, so the summary
-    # can never claim something the list below it does not support.
+    # Totalled from the very rows the document list is drawn from, so the
+    # summary can never claim something the list below it does not support.
     invoiced = flt(sum(v["cost"] for v in vouchers))
     paid = flt(sum(v["paid"] for v in vouchers))
 
-    commitment = _commitments([p.company], [project]).get(project) or {
+    commitment = _commitments([p.company], [project], as_at=to_date).get(project) or {
         "po": {"count": 0, "value": 0.0},
         "wo": {"count": 0, "value": 0.0},
         "total": 0.0,
@@ -579,17 +624,24 @@ def get_project_detail(project, from_date=None, to_date=None):
             "uninvoiced": flt(committed - invoiced) if committed else 0.0,
             "pct_of_estimate": flt(committed / estimated * 100) if estimated else None,
         },
-        "chain": _chain(p.company, project, commitment, vouchers),
-        "parties": _project_parties(p.company, project, from_date, to_date, invoiced),
+        "period_totals": {
+            "invoiced": flt(sum(v["cost"] for v in in_window)),
+            "paid": flt(sum(v["paid"] for v in in_window)),
+            "documents": len(in_window),
+        },
+        "chain": _chain(p.company, project, commitment, vouchers, as_at=to_date),
+        "parties": _project_parties(p.company, project, from_date, to_date,
+                                    invoiced, as_at=to_date),
         "accounts": [{"account": r["account"], "amount": flt(r["amount"])}
                      for r in accounts],
-        "recent": vouchers[:40],
-        "recent_total": len(vouchers),
+        "recent": in_window[:40],
+        "recent_total": len(in_window),
+        "documents_to_date": len(vouchers),
         "generated_on": frappe.utils.now(),
     }
 
 
-def _project_parties(company, project, from_date, to_date, invoiced):
+def _project_parties(company, project, from_date, to_date, invoiced, as_at=None):
     """The party block for one project — the donut, the bars and the table.
 
     ``work_orders`` and ``purchase_orders`` are split out because they read
@@ -599,8 +651,8 @@ def _project_parties(company, project, from_date, to_date, invoiced):
     """
     rows = _party_rows(
         {project: company},
-        _party_commitments([company], [project]),
-        _payable_by_party(company, from_date, to_date, project=project),
+        _party_commitments([company], [project], as_at=as_at),
+        _payable_by_party(company, None, to_date, project=project),
     )
 
     def ranked(key):
@@ -641,6 +693,8 @@ _KIND = {
 def _project_vouchers(company, project, from_date, to_date):
     """Every voucher touching the project, one row each, newest first.
 
+    ``from_date`` may be None for a project-to-date read.
+
     Resolves the Dux parent voucher behind a backend Payment Entry or
     Journal Entry, so a row opens ``PV-2026-00034`` rather than the
     ``ACC-JV-2026-08564`` it happened to post — the same
@@ -674,10 +728,12 @@ def _project_vouchers(company, project, from_date, to_date):
                ON je.name = gle.voucher_no AND gle.voucher_type = 'Journal Entry'
         WHERE gle.company = %(company)s AND gle.project = %(project)s
           AND gle.is_cancelled = 0
-          AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s
+          AND gle.posting_date <= %(to_date)s
+          {floor}
         GROUP BY gle.posting_date, gle.voucher_type, gle.voucher_no
         ORDER BY gle.posting_date DESC, gle.voucher_no DESC
-        """.format(cost=_COST_SQL, paid=_PAID_SQL),
+        """.format(cost=_COST_SQL, paid=_PAID_SQL,
+                   floor="AND gle.posting_date >= %(from_date)s" if from_date else ""),
         {"company": company, "project": project,
          "from_date": from_date, "to_date": to_date},
         as_dict=True,
@@ -701,7 +757,7 @@ def _project_vouchers(company, project, from_date, to_date):
     return out
 
 
-def _chain(company, project, commitment, vouchers):
+def _chain(company, project, commitment, vouchers, as_at=None):
     """Count and value at each stage of the spend chain, in order.
 
     The first two stages are document-derived — orders post no ledger
@@ -727,7 +783,7 @@ def _chain(company, project, commitment, vouchers):
     return [
         {"stage": _("Work Orders"), "count": commitment["wo"]["count"],
          "value": flt(commitment["wo"]["value"]), "source": "document",
-         "detail": _work_order_suppliers(company, project)},
+         "detail": _work_order_suppliers(company, project, as_at=as_at)},
         {"stage": _("Purchase Orders"), "count": commitment["po"]["count"],
          "value": flt(commitment["po"]["value"]), "source": "document",
          "detail": ""},
@@ -738,7 +794,7 @@ def _chain(company, project, commitment, vouchers):
     ]
 
 
-def _work_order_suppliers(company, project, limit=2):
+def _work_order_suppliers(company, project, limit=2, as_at=None):
     """Who the work orders are with — a caption, not a figure."""
     if not frappe.db.exists("DocType", "Work Order Contract"):
         return ""
@@ -746,9 +802,11 @@ def _work_order_suppliers(company, project, limit=2):
         """
         SELECT DISTINCT COALESCE(NULLIF(supplier_name, ''), supplier)
         FROM `tabWork Order Contract`
-        WHERE docstatus = 1 AND company = %s AND project = %s
+        WHERE docstatus = 1 AND company = %(company)s AND project = %(project)s
+          {cutoff}
         ORDER BY 1
-        """, (company, project)) if r[0]]
+        """.format(cutoff="AND wo_date <= %(as_at)s" if as_at else ""),
+        {"company": company, "project": project, "as_at": as_at}) if r[0]]
     if not names:
         return ""
     if len(names) <= limit:
@@ -786,7 +844,7 @@ def _work_order_suppliers(company, project, limit=2):
 # contractor ends up showing as paid with nothing billed.
 
 
-def _party_commitments(companies, project_names):
+def _party_commitments(companies, project_names, as_at=None):
     """{(project, party): {"wo": {...}, "po": {...}}} — what is on order.
 
     Document-derived, like ``_commitments``, which this is the party-wise
@@ -796,6 +854,9 @@ def _party_commitments(companies, project_names):
     out = {}
     if not project_names:
         return out
+
+    po_cutoff = "AND po.transaction_date <= %(as_at)s" if as_at else ""
+    wo_cutoff = "AND wo_date <= %(as_at)s" if as_at else ""
 
     def bucket(project, party):
         return out.setdefault((project, party), {
@@ -815,9 +876,11 @@ def _party_commitments(companies, project_names):
           AND po.status NOT IN ('Closed', 'Cancelled')
           AND po.company IN %(companies)s
           AND COALESCE(NULLIF(poi.project, ''), po.project) IN %(projects)s
+          {po_cutoff}
         GROUP BY project, po.supplier
-        """,
-        {"companies": tuple(companies), "projects": tuple(project_names)},
+        """.format(po_cutoff=po_cutoff),
+        {"companies": tuple(companies), "projects": tuple(project_names),
+         "as_at": as_at},
         as_dict=True,
     ):
         if r["project"] and r["party"]:
@@ -833,9 +896,11 @@ def _party_commitments(companies, project_names):
             WHERE docstatus = 1
               AND company IN %(companies)s
               AND project IN %(projects)s
+              {wo_cutoff}
             GROUP BY project, supplier
-            """,
-            {"companies": tuple(companies), "projects": tuple(project_names)},
+            """.format(wo_cutoff=wo_cutoff),
+            {"companies": tuple(companies), "projects": tuple(project_names),
+             "as_at": as_at},
             as_dict=True,
         ):
             if r["project"] and r["party"]:
@@ -853,6 +918,10 @@ def _payable_by_party(company, from_date, to_date, project=None):
     """
     where = "AND gle.project = %(project)s" if project \
         else "AND COALESCE(gle.project, '') <> ''"
+    # ``from_date`` may be None: the party position is project-to-date, to
+    # match the Paid figure it sits under.
+    if from_date:
+        where += " AND gle.posting_date >= %(from_date)s"
 
     rows = frappe.db.sql(
         """
@@ -868,7 +937,7 @@ def _payable_by_party(company, from_date, to_date, project=None):
           AND gle.is_cancelled = 0
           AND COALESCE(acc.account_type, '') = 'Payable'
           AND COALESCE(gle.party, '') <> ''
-          AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s
+          AND gle.posting_date <= %(to_date)s
           {where}
         GROUP BY gle.project, gle.party, gle.party_type
         """.format(where=where),

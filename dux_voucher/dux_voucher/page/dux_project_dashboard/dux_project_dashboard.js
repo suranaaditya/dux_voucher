@@ -221,6 +221,25 @@ class DuxProjectDashboard {
 .dpd-bar-v{font-size:12px;font-weight:600;white-space:nowrap}
 @media (max-width:900px){.dpd-pstats{grid-template-columns:repeat(3,1fr);gap:14px}}
 @media (max-width:560px){.dpd-pstats{grid-template-columns:repeat(2,1fr)}}
+.dpd-basis{margin-top:12px;padding:11px 15px;background:#f8fafb;border:1px solid #eef0f2;
+  border-radius:9px;font-size:11.5px;color:#6b7280;line-height:1.65}
+.dpd-basis b{color:#374151}
+.dpd-figs-5{grid-template-columns:repeat(5,1fr)}
+.dpd-ctot{text-align:right;flex-shrink:0}
+.dpd-ctot-v{font-size:15px;font-weight:700;margin-top:4px;white-space:nowrap}
+/* donut hover */
+.dpd-donut svg circle{transition:opacity .12s,stroke-width .12s;cursor:pointer}
+.dpd-donut.hot svg circle{opacity:.32}
+.dpd-donut.hot svg circle.on{opacity:1;stroke-width:24}
+.dpd-leg.on{background:#f0fdfa}
+.dpd-tip{position:fixed;z-index:1000;pointer-events:none;background:#111827;color:#fff;
+  border-radius:8px;padding:8px 11px;font-size:11.5px;line-height:1.5;
+  box-shadow:0 6px 20px rgba(16,24,40,.22);white-space:nowrap;opacity:0;transition:opacity .1s}
+.dpd-tip.show{opacity:1}
+.dpd-tip .t{font-weight:700;margin-bottom:2px}
+.dpd-tip .v{font-family:'SFMono-Regular',Consolas,monospace;font-variant-numeric:tabular-nums}
+.dpd-tip .p{color:#9ca3af;margin-left:6px}
+@media (max-width:900px){.dpd-figs-5{grid-template-columns:repeat(3,1fr);gap:14px}}
 @media (max-width:1200px){.dpd-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}.dpd-grid{grid-template-columns:1fr}}
 @media (max-width:760px){.dpd-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
 `;
@@ -239,11 +258,11 @@ class DuxProjectDashboard {
       <div class="dpd-drop" id="dpd-drop"></div>
     </div>
     <div class="dpd-fg">
-      <label>From</label>
+      <label title="Only changes which documents count as recent activity">Activity from</label>
       <input type="date" id="dpd-from" value="${_monthsAgo(12)}">
     </div>
     <div class="dpd-fg">
-      <label>To</label>
+      <label title="Every cumulative figure is stated as at this date">As at</label>
       <input type="date" id="dpd-to" value="${_today()}">
     </div>
     <div class="dpd-fg">
@@ -434,16 +453,26 @@ class DuxProjectDashboard {
   <div class="dpd-kpi-sub">${sub}</div>
 </div>`;
 		}
+		var asAt = _date(this.$.find("#dpd-to").val());
 		return '<div class="dpd-kpis">' +
-			tile("", "Committed", _short(k.committed), "Ordered, not yet invoiced") +
+			tile("", "Committed (PO + WO)", _short(k.committed),
+				"Purchase and work orders issued") +
 			tile("", "Invoiced", _short(k.invoiced),
 				k.committed ? Math.round(k.invoiced / k.committed * 100) + "% of committed" : "Booked cost") +
-			tile("", "Paid", _short(k.paid), "Cash actually out") +
+			tile("", "Paid", _short(k.paid),
+				k.period_paid && Math.round(k.period_paid) !== Math.round(k.paid)
+					? "&#8377;" + _short(k.period_paid) + " of it in this window"
+					: "Cash actually out") +
 			tile("dpd-warn", "Outstanding", _short(k.outstanding), "Invoiced, not yet paid") +
 			tile(k.unattributed > 0 ? "dpd-bad" : "", "Unattributed", _short(k.unattributed),
 				k.unattributed_entries ? _num(k.unattributed_entries) + " entries with no project"
 									   : "Spend with no project tagged") +
-			"</div>";
+			"</div>" +
+			`<div class="dpd-basis">
+  Every figure above is <b>project to date</b>, as at ${asAt} &mdash; not just the activity window.
+  In the window shown: <b class="dpd-mono">&#8377;${_short(k.period_invoiced)}</b> invoiced,
+  <b class="dpd-mono">&#8377;${_short(k.period_paid)}</b> paid.
+</div>`;
 	}
 
 	_nothingTagged() {
@@ -493,7 +522,7 @@ class DuxProjectDashboard {
       <th class="dpd-th">Project</th><th class="dpd-th" style="width:150px">Company</th>
       <th class="dpd-th" style="width:96px">Status</th>
       <th class="dpd-th" style="width:110px;text-align:right">Estimate</th>
-      <th class="dpd-th" style="width:110px;text-align:right">Committed</th>
+      <th class="dpd-th" style="width:118px;text-align:right">Committed<br><span style="font-weight:600;letter-spacing:.02em;text-transform:none">PO + WO</span></th>
       <th class="dpd-th" style="width:110px;text-align:right">Invoiced</th>
       <th class="dpd-th" style="width:110px;text-align:right">Paid</th>
       <th class="dpd-th" style="width:118px;text-align:right">Outstanding</th>
@@ -665,7 +694,8 @@ class DuxProjectDashboard {
     </div>
     <button class="dpd-btn" id="dpd-open-erp">Open in ERPNext</button>
   </div>
-  <div class="dpd-dperiod">Ledger figures cover ${_date(period.from_date)} to ${_date(period.to_date)}.</div>
+  <div class="dpd-dperiod">Money figures are project to date, as at ${_date(period.to_date)}.
+    Recent activity is what moved since ${_date(period.from_date)}.</div>
 </div>`;
 	}
 
@@ -702,6 +732,17 @@ class DuxProjectDashboard {
 				(value ? _num(value) : "&mdash;") + "</div></div>";
 		}
 
+		var P = this.detail.period_totals || {};
+		var period = (P.invoiced || P.paid)
+			? `<div class="dpd-basis" style="margin:14px -22px -20px;border-radius:0 0 12px 12px">
+  Figures are <b>project to date</b>. Of that, <b class="dpd-mono">&#8377;${_short(P.invoiced)}</b> was
+  invoiced and <b class="dpd-mono">&#8377;${_short(P.paid)}</b> paid inside the activity window
+  &mdash; ${P.documents} document${P.documents === 1 ? "" : "s"}.
+</div>`
+			: `<div class="dpd-basis" style="margin:14px -22px -20px;border-radius:0 0 12px 12px">
+  Figures are <b>project to date</b>. Nothing moved inside the activity window.
+</div>`;
+
 		var pct = t.pct_of_estimate;
 		var head = t.estimated
 			? '<b style="color:' + (pct > 100 ? "#b91c1c" : "#374151") + ';font-size:13px">' +
@@ -725,12 +766,15 @@ class DuxProjectDashboard {
     ${key("#ccfbf1", "Ordered, uninvoiced")}
     ${t.estimated ? key("#f1f2f4", "Estimate remaining") : ""}
   </div>
-  <div class="dpd-figs">
+  <div class="dpd-figs dpd-figs-5">
     ${fig("Estimate", t.estimated, "#6b7280")}
-    ${fig("Committed", t.committed)}
+    ${fig("Committed &middot; PO + WO", t.committed)}
     ${fig("Invoiced", t.invoiced)}
-    ${fig("Outstanding", t.outstanding, "#92400e")}
+    ${fig("Paid to date", t.paid, "#0f766e")}
+    ${fig(t.outstanding < 0 ? "Paid ahead" : "Outstanding",
+		Math.abs(t.outstanding), t.outstanding < 0 ? "#1d4ed8" : "#92400e")}
   </div>
+  ${period}
 </div>`;
 	}
 
@@ -986,18 +1030,26 @@ class DuxProjectDashboard {
 		}
 
 		var R = 52, SW = 20, C = 2 * Math.PI * R, off = 0;
-		var arcs = top.map(function (s) {
+		var arcs = top.map(function (s, i) {
 			var len = total ? s.value / total * C : 0;
-			var a = '<circle cx="66" cy="66" r="' + R + '" fill="none" stroke="' + s.color +
+			var pct = total ? Math.round(s.value / total * 100) : 0;
+			/* dasharray leaves only the arc painted, and the default
+			   pointer-events:visiblePainted means the hit area is that arc
+			   and nothing else — so each slice hovers independently. */
+			var a = '<circle class="dpd-arc" data-i="' + i +
+				'" data-party="' + _esc(s.party) + '" data-value="' + s.value +
+				'" data-pct="' + pct + '" cx="66" cy="66" r="' + R +
+				'" fill="none" stroke="' + s.color +
 				'" stroke-width="' + SW + '" stroke-dasharray="' + len + " " + (C - len) +
 				'" stroke-dashoffset="' + (-off) + '"></circle>';
 			off += len;
 			return a;
 		}).join("");
 
-		var legend = top.map(function (s) {
+		var legend = top.map(function (s, i) {
 			var pct = total ? Math.round(s.value / total * 100) : 0;
-			return `<div class="dpd-leg" data-party="${_esc(s.party)}">
+			return `<div class="dpd-leg" data-i="${i}" data-party="${_esc(s.party)}"
+     data-value="${s.value}" data-pct="${pct}">
   <span class="dpd-dot" style="background:${s.color}"></span>
   <span class="dpd-leg-n">${_esc(s.party)}</span>
   <span class="dpd-mono dpd-leg-v">${_num(s.value)}</span>
@@ -1006,7 +1058,7 @@ class DuxProjectDashboard {
 		}).join("");
 
 		return `<div class="dpd-card" style="padding:0;overflow:hidden">
-  ${this._cardHead(title, sub)}
+  ${this._cardHead(title, sub, this._cardTotal(slices))}
   <div class="dpd-donut-wrap">
     <div class="dpd-donut">
       <svg width="132" height="132" viewBox="0 0 132 132" style="transform:rotate(-90deg)">${arcs}</svg>
@@ -1046,11 +1098,51 @@ class DuxProjectDashboard {
 
 		var rest = slices.length - shown.length;
 		return `<div class="dpd-card" style="padding:0;overflow:hidden">
-  ${this._cardHead(title, sub)}
+  ${this._cardHead(title, sub, this._cardTotal(slices))}
   <div class="dpd-bars">${bars}${rest
 		? '<div style="font-size:11.5px;color:#9ca3af;margin-top:2px">and ' + rest +
 		  " more supplier" + (rest === 1 ? "" : "s") + "</div>" : ""}</div>
 </div>`;
+	}
+
+	/* Hovering either the arc or its legend line lights the same slice and
+	   shows the value — a donut without this is a pretty shape you cannot
+	   read a number off. */
+	_bindDonutHover(scope) {
+		var $tip = $("#dpd-tip");
+		if (!$tip.length) {
+			$tip = $('<div class="dpd-tip" id="dpd-tip"></div>').appendTo(document.body);
+		}
+
+		function show(e, el) {
+			var $e = $(el);
+			var $donut = $e.closest(".dpd-donut-wrap").find(".dpd-donut");
+			var i = $e.attr("data-i");
+			$donut.addClass("hot").find("circle").removeClass("on")
+				.filter('[data-i="' + i + '"]').addClass("on");
+			$e.closest(".dpd-donut-wrap").find('.dpd-leg[data-i="' + i + '"]').addClass("on");
+
+			$tip.html('<div class="t">' + _esc($e.attr("data-party")) + "</div>" +
+				'<span class="v">&#8377;' + _num($e.attr("data-value")) + "</span>" +
+				'<span class="p">' + $e.attr("data-pct") + "% of total</span>").addClass("show");
+			move(e);
+		}
+		function move(e) {
+			var w = $tip.outerWidth(), h = $tip.outerHeight();
+			var x = e.clientX + 14, y = e.clientY - h - 10;
+			if (x + w > window.innerWidth - 8) x = e.clientX - w - 14;
+			if (y < 8) y = e.clientY + 18;
+			$tip.css({ left: x + "px", top: y + "px" });
+		}
+		function hide() {
+			$tip.removeClass("show");
+			scope.find(".dpd-donut").removeClass("hot").find("circle").removeClass("on");
+			scope.find(".dpd-leg").removeClass("on");
+		}
+
+		scope.on("mouseenter", ".dpd-arc, .dpd-leg", function (e) { show(e, this); });
+		scope.on("mousemove", ".dpd-arc, .dpd-leg", move);
+		scope.on("mouseleave", ".dpd-arc, .dpd-leg", hide);
 	}
 
 	/* A party row, a legend line and a bar all open the same place. */
@@ -1107,6 +1199,17 @@ class DuxProjectDashboard {
 </div>`;
 	}
 
+	/* Both chart cards carry their total in the same place, so the work
+	   order and purchase order totals can be compared at a glance without
+	   reading either list. */
+	_cardTotal(slices) {
+		var total = slices.reduce(function (s, x) { return s + x.value; }, 0);
+		return `<div class="dpd-ctot">
+  <div class="dpd-lbl">Total</div>
+  <div class="dpd-mono dpd-ctot-v">&#8377;${_num(total)}</div>
+</div>`;
+	}
+
 	_bindDetail() {
 		var self = this, d = this.detail;
 
@@ -1114,6 +1217,7 @@ class DuxProjectDashboard {
 		this._partyIndex = {};
 		(d.parties.rows || []).forEach(function (r) { self._partyIndex[r.party] = r; });
 		this._bindParties(this.$, d.period, d.project.company);
+		this._bindDonutHover(this.$);
 
 		this.$.find("#dpd-back").on("click", function (e) {
 			e.preventDefault();
