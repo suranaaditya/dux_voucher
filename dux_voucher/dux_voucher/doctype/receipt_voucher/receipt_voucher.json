@@ -152,7 +152,8 @@
    "fieldname": "project",
    "fieldtype": "Link",
    "label": "Project",
-   "options": "Project"
+   "options": "Project",
+   "description": "Applies to rows that have no Project of their own. A row always wins."
   },
   {
    "fieldname": "remarks_section",
@@ -218,7 +219,7 @@
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-04-20 10:07:03.842062",
+ "modified": "2026-08-25 13:00:00.000000",
  "modified_by": "Administrator",
  "module": "Dux Voucher",
  "name": "Receipt Voucher",

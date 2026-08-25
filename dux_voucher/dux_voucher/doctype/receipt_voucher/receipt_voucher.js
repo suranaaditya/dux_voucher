@@ -27,6 +27,26 @@ function _dux_inject_grid_dropdown_css() {
     document.head.appendChild(s);
 }
 
+// ---------------------------------------------------------------
+// Header Project — say what it actually does, per mode
+//
+// Keep this field: Contra Entry has no rows at all, so the header is the
+// only place a project can go there. In the row-based modes it is a
+// bulk-apply default that any row can override.
+// ---------------------------------------------------------------
+function _rv_set_project_help(frm) {
+    var mode = frm.doc.entry_mode;
+    var msg;
+    if (mode === "Contra Entry") {
+        msg = __("Tags this transfer. Contra has no rows, so this is the only place a Project can be set.");
+    } else if (mode === "Party-wise") {
+        msg = __("Fills every party row that has no Project yet. Clear any row that does not belong.");
+    } else {
+        msg = __("Used for rows that have no Project of their own. A row always wins.");
+    }
+    frm.set_df_property("project", "description", msg);
+}
+
 frappe.ui.form.on("Receipt Voucher", {
 
     setup(frm) { },
@@ -38,6 +58,7 @@ frappe.ui.form.on("Receipt Voucher", {
         _rv_set_received_in_filter(frm);
         _rv_set_cost_center_filter(frm);
         _rv_set_project_filter(frm);
+        _rv_set_project_help(frm);
         _rv_set_account_row_filter(frm);
 
         if (frm.doc.docstatus === 1 && !frm.doc.is_posted) {
@@ -107,6 +128,7 @@ frappe.ui.form.on("Receipt Voucher", {
 
     entry_mode(frm) {
         _rv_apply_entry_mode(frm);
+        _rv_set_project_help(frm);
         _rv_apply_payment_method_labels(frm);
         _rv_set_received_in_filter(frm);
         if (!frm._auto_converting) {
