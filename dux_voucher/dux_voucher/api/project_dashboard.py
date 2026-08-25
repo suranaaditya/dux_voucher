@@ -119,9 +119,7 @@ def get_dashboard(companies=None, from_date=None, to_date=None, status=None):
             ):
                 agg["last_activity"] = r["last_activity"]
 
-    committed = _committed_from_po(companies, projects.keys())
-    _add_work_order_commitment(committed, companies, projects.keys())
-    rows = _assemble(projects, gl, committed)
+    rows = _assemble(projects, gl, _commitments(companies, projects.keys()))
 
     return {
         "period": {"from_date": str(from_date), "to_date": str(to_date)},
@@ -217,21 +215,36 @@ def _gl_for_company(company, from_date, to_date):
     )
 
 
-def _committed_from_po(companies, project_names):
-    """Purchase Orders tagged to a project.
+def _commitments(companies, project_names):
+    """What is on order against each project — ``{project: {po, wo, total}}``.
 
-    Document-derived, NOT from GL — a Purchase Order posts no ledger
-    entries. Item-level project wins over the header, mirroring ERPNext's
-    own dimension precedence. The PO tables are small enough that one
-    query across companies is fine; the per-company loop exists for GL.
+    Document-derived, NOT from GL: neither a Purchase Order nor a Work Order
+    Contract posts a ledger entry. That is why Committed is labelled a
+    forecast on the page.
+
+    One function so the portfolio table and the drill-down cannot disagree
+    about what Committed means — both read this.
     """
+    out = {}
     if not project_names:
-        return {}
+        return out
 
-    rows = frappe.db.sql(
+    def bucket(name):
+        return out.setdefault(name, {
+            "po": {"count": 0, "value": 0.0},
+            "wo": {"count": 0, "value": 0.0},
+            "total": 0.0,
+        })
+
+    # Purchase Orders. Item-level project wins over the header, mirroring
+    # ERPNext's own dimension precedence. The PO tables are small enough
+    # that one query across companies is fine; the per-company loop exists
+    # for GL.
+    for r in frappe.db.sql(
         """
         SELECT COALESCE(NULLIF(poi.project, ''), po.project) AS project,
-               SUM(poi.base_amount)                          AS committed
+               SUM(poi.base_amount)                          AS value,
+               COUNT(DISTINCT po.name)                       AS orders
         FROM `tabPurchase Order Item` poi
         INNER JOIN `tabPurchase Order` po ON po.name = poi.parent
         WHERE po.docstatus = 1
@@ -242,41 +255,44 @@ def _committed_from_po(companies, project_names):
         """,
         {"companies": tuple(companies), "projects": tuple(project_names)},
         as_dict=True,
-    )
-    return {r["project"]: flt(r["committed"]) for r in rows if r["project"]}
+    ):
+        if not r["project"]:
+            continue
+        b = bucket(r["project"])
+        b["po"] = {"count": int(r["orders"] or 0), "value": flt(r["value"])}
 
+    # Work Order Contracts from the dux_civil_works app. For a construction
+    # group the work orders ARE the commitment: on the seeded Nemani project
+    # they are 93 lakh against 10 lakh of purchase orders, so a Committed
+    # figure built from POs alone understates it by an order of magnitude.
+    #
+    # ``total_amount`` is the pre-tax line total — that app carries the taxed
+    # figure separately in ``total_amount_with_tax``. Kept consistent with
+    # their own document totals rather than quietly grossing it up here.
+    #
+    # Guarded on the doctype existing, so this app does not hard-depend on
+    # dux_civil_works being installed.
+    if frappe.db.exists("DocType", "Work Order Contract"):
+        for r in frappe.db.sql(
+            """
+            SELECT project, SUM(total_amount) AS value, COUNT(*) AS contracts
+            FROM `tabWork Order Contract`
+            WHERE docstatus = 1
+              AND company IN %(companies)s
+              AND project IN %(projects)s
+            GROUP BY project
+            """,
+            {"companies": tuple(companies), "projects": tuple(project_names)},
+            as_dict=True,
+        ):
+            if not r["project"]:
+                continue
+            b = bucket(r["project"])
+            b["wo"] = {"count": int(r["contracts"] or 0), "value": flt(r["value"])}
 
-def _add_work_order_commitment(committed, companies, project_names):
-    """Fold in Work Order Contract value from the dux_civil_works app.
-
-    For a construction group the work orders ARE the commitment: on the
-    seeded Nemani project they are 97 lakh against 10 lakh of purchase
-    orders, so a Committed figure built from POs alone understates it by an
-    order of magnitude.
-
-    Guarded on the doctype existing, so this app does not hard-depend on
-    dux_civil_works being installed.
-    """
-    if not project_names:
-        return
-    if not frappe.db.exists("DocType", "Work Order Contract"):
-        return
-
-    rows = frappe.db.sql(
-        """
-        SELECT project, SUM(total_amount) AS committed
-        FROM `tabWork Order Contract`
-        WHERE docstatus = 1
-          AND company IN %(companies)s
-          AND project IN %(projects)s
-        GROUP BY project
-        """,
-        {"companies": tuple(companies), "projects": tuple(project_names)},
-        as_dict=True,
-    )
-    for r in rows:
-        if r["project"]:
-            committed[r["project"]] = flt(committed.get(r["project"])) + flt(r["committed"])
+    for b in out.values():
+        b["total"] = flt(b["po"]["value"] + b["wo"]["value"])
+    return out
 
 
 def _project_master(companies, status=None):
@@ -308,7 +324,7 @@ def _assemble(projects, gl, committed):
         invoiced = flt(agg.get("cost"))
         paid = flt(agg.get("paid"))
         est = flt(p.get("estimated_costing"))
-        com = flt(committed.get(name))
+        com = flt((committed.get(name) or {}).get("total"))
 
         rows.append({
             "name": name,
@@ -477,10 +493,18 @@ def _empty():
 
 @frappe.whitelist()
 def get_project_detail(project, from_date=None, to_date=None):
-    """Account-wise breakdown and recent documents for one project."""
+    """One project, opened up: where the money stands against the estimate,
+    how far each document stage has run, which heads it landed on, and the
+    documents themselves.
+
+    Every figure here is computed the same way as the portfolio row it was
+    clicked from — the same ``_COST_SQL`` / ``_PAID_SQL`` expressions and the
+    same ``_commitments`` reader — so the two surfaces cannot disagree.
+    """
     p = frappe.db.get_value(
         "Project", project,
-        ["name", "project_name", "company", "status", "estimated_costing"],
+        ["name", "project_name", "company", "status", "project_type",
+         "estimated_costing", "expected_start_date", "expected_end_date"],
         as_dict=True,
     )
     if not p:
@@ -509,32 +533,185 @@ def get_project_detail(project, from_date=None, to_date=None):
         as_dict=True,
     )
 
-    recent = frappe.db.sql(
+    vouchers = _project_vouchers(p.company, project, from_date, to_date)
+
+    # Totalled from the very rows the document list shows, so the summary
+    # can never claim something the list below it does not support.
+    invoiced = flt(sum(v["cost"] for v in vouchers))
+    paid = flt(sum(v["paid"] for v in vouchers))
+
+    commitment = _commitments([p.company], [project]).get(project) or {
+        "po": {"count": 0, "value": 0.0},
+        "wo": {"count": 0, "value": 0.0},
+        "total": 0.0,
+    }
+    committed = flt(commitment["total"])
+    estimated = flt(p.get("estimated_costing"))
+
+    return {
+        "project": {
+            "name": p.name,
+            "project_name": p.project_name or p.name,
+            "company": p.company,
+            "status": p.status,
+            "project_type": p.project_type,
+            "expected_start_date": str(p.expected_start_date) if p.expected_start_date else None,
+            "expected_end_date": str(p.expected_end_date) if p.expected_end_date else None,
+        },
+        "period": {"from_date": str(from_date), "to_date": str(to_date)},
+        "totals": {
+            "estimated": estimated,
+            "committed": committed,
+            "invoiced": invoiced,
+            "paid": paid,
+            "outstanding": flt(invoiced - paid),
+            "uninvoiced": flt(committed - invoiced) if committed else 0.0,
+            "pct_of_estimate": flt(committed / estimated * 100) if estimated else None,
+        },
+        "chain": _chain(p.company, project, commitment, vouchers),
+        "accounts": [{"account": r["account"], "amount": flt(r["amount"])}
+                     for r in accounts],
+        "recent": vouchers[:40],
+        "recent_total": len(vouchers),
+        "generated_on": frappe.utils.now(),
+    }
+
+
+# What each document type is called in the drill-down's list. The parent Dux
+# voucher wins over the Payment Entry or Journal Entry it posted, because the
+# parent is the document the operator actually made.
+_KIND = {
+    "Payment Voucher": "Payment",
+    "Receipt Voucher": "Receipt",
+    "Ex Student Receipt": "Receipt",
+    "Ex Student Refund": "Refund",
+    "Ex Student Writeoff": "Writeoff",
+    "Student Fee Receipt": "Receipt",
+    "Student Fee Refund": "Refund",
+    "Inter-Company Transfer": "Transfer",
+    "Purchase Invoice": "Invoice",
+    "Purchase Receipt": "Receipt",
+    "Purchase Order": "Order",
+    "Payment Entry": "Payment",
+    "Journal Entry": "Journal",
+    "Stock Entry": "Stock",
+    "Sales Invoice": "Sales",
+}
+
+
+def _project_vouchers(company, project, from_date, to_date):
+    """Every voucher touching the project, one row each, newest first.
+
+    Resolves the Dux parent voucher behind a backend Payment Entry or
+    Journal Entry, so a row opens ``PV-2026-00034`` rather than the
+    ``ACC-JV-2026-08564`` it happened to post — the same
+    ``custom_source_voucher`` idiom the ledger pages use.
+    """
+    rows = frappe.db.sql(
         """
-        SELECT gle.posting_date, gle.voucher_type, gle.voucher_no,
-               SUM(gle.debit) AS debit, SUM(gle.credit) AS credit
+        SELECT gle.posting_date,
+               gle.voucher_type,
+               gle.voucher_no,
+               SUM({cost}) AS cost,
+               SUM({paid}) AS paid,
+               GROUP_CONCAT(DISTINCT NULLIF(gle.party, '')
+                   ORDER BY gle.party SEPARATOR ' · ') AS parties,
+               MAX(gle.remarks) AS remarks,
+               MAX(CASE WHEN gle.voucher_type = 'Payment Entry'
+                        THEN pe.custom_source_voucher_doctype ELSE
+                    CASE WHEN gle.voucher_type = 'Journal Entry'
+                        THEN je.custom_source_voucher_doctype ELSE NULL END
+               END) AS source_doctype,
+               MAX(CASE WHEN gle.voucher_type = 'Payment Entry'
+                        THEN pe.custom_source_voucher ELSE
+                    CASE WHEN gle.voucher_type = 'Journal Entry'
+                        THEN je.custom_source_voucher ELSE NULL END
+               END) AS source_voucher
         FROM `tabGL Entry` gle
+        INNER JOIN `tabAccount` acc ON acc.name = gle.account
+        LEFT JOIN `tabPayment Entry` pe
+               ON pe.name = gle.voucher_no AND gle.voucher_type = 'Payment Entry'
+        LEFT JOIN `tabJournal Entry` je
+               ON je.name = gle.voucher_no AND gle.voucher_type = 'Journal Entry'
         WHERE gle.company = %(company)s AND gle.project = %(project)s
           AND gle.is_cancelled = 0
           AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s
         GROUP BY gle.posting_date, gle.voucher_type, gle.voucher_no
         ORDER BY gle.posting_date DESC, gle.voucher_no DESC
-        LIMIT 40
-        """,
-        {"company": p.company, "project": project,
+        """.format(cost=_COST_SQL, paid=_PAID_SQL),
+        {"company": company, "project": project,
          "from_date": from_date, "to_date": to_date},
         as_dict=True,
     )
 
-    return {
-        "project": p,
-        "accounts": [{"account": r["account"], "amount": flt(r["amount"])}
-                     for r in accounts],
-        "recent": [{
+    out = []
+    for r in rows:
+        doctype = r["source_doctype"] or r["voucher_type"]
+        name = r["source_voucher"] or r["voucher_no"]
+        out.append({
             "posting_date": str(r["posting_date"]),
-            "voucher_type": r["voucher_type"],
-            "voucher_no": r["voucher_no"],
-            "debit": flt(r["debit"]),
-            "credit": flt(r["credit"]),
-        } for r in recent],
-    }
+            "doctype": doctype,
+            "name": name,
+            "kind": _KIND.get(doctype, doctype),
+            "posted_as": r["voucher_no"] if r["source_voucher"] else None,
+            "party": r["parties"] or None,
+            "remark": (r["remarks"] or "").strip() or None,
+            "cost": flt(r["cost"]),
+            "paid": flt(r["paid"]),
+        })
+    return out
+
+
+def _chain(company, project, commitment, vouchers):
+    """Count and value at each stage of the spend chain, in order.
+
+    The first two stages are document-derived — orders post no ledger
+    entries. The last two are read straight off the ledger rows above, so
+    Invoiced and Paid here are the same numbers as the KPI row and the
+    against-estimate bar rather than a second opinion assembled from
+    Purchase Invoice totals.
+    """
+    def counted(rows, key):
+        hit = [v for v in rows if abs(v[key]) > 0.005]
+        mix = {}
+        for v in hit:
+            mix[v["kind"]] = mix.get(v["kind"], 0) + 1
+        detail = " · ".join(
+            "{0} {1}{2}".format(n, k.lower(), "" if n == 1 else "s")
+            for k, n in sorted(mix.items(), key=lambda kv: (-kv[1], kv[0]))
+        )
+        return len(hit), flt(sum(v[key] for v in hit)), detail
+
+    inv_count, inv_value, inv_detail = counted(vouchers, "cost")
+    paid_count, paid_value, paid_detail = counted(vouchers, "paid")
+
+    return [
+        {"stage": _("Work Orders"), "count": commitment["wo"]["count"],
+         "value": flt(commitment["wo"]["value"]), "source": "document",
+         "detail": _work_order_suppliers(company, project)},
+        {"stage": _("Purchase Orders"), "count": commitment["po"]["count"],
+         "value": flt(commitment["po"]["value"]), "source": "document",
+         "detail": ""},
+        {"stage": _("Invoiced"), "count": inv_count, "value": inv_value,
+         "source": "ledger", "detail": inv_detail},
+        {"stage": _("Paid"), "count": paid_count, "value": paid_value,
+         "source": "ledger", "detail": paid_detail},
+    ]
+
+
+def _work_order_suppliers(company, project, limit=2):
+    """Who the work orders are with — a caption, not a figure."""
+    if not frappe.db.exists("DocType", "Work Order Contract"):
+        return ""
+    names = [r[0] for r in frappe.db.sql(
+        """
+        SELECT DISTINCT COALESCE(NULLIF(supplier_name, ''), supplier)
+        FROM `tabWork Order Contract`
+        WHERE docstatus = 1 AND company = %s AND project = %s
+        ORDER BY 1
+        """, (company, project)) if r[0]]
+    if not names:
+        return ""
+    if len(names) <= limit:
+        return ", ".join(names)
+    return "{0} +{1} more".format(", ".join(names[:limit]), len(names) - limit)

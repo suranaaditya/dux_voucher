@@ -53,6 +53,18 @@ function _short(v) {
 	return sign + _num(a);
 }
 
+/* dd-mm-yyyy — an Indian accountant reads dates that way. */
+function _date(iso) {
+	if (!iso) return "";
+	var p = String(iso).slice(0, 10).split("-");
+	return p.length === 3 ? p[2] + "-" + p[1] + "-" + p[0] : iso;
+}
+
+/* Documents open beside the dashboard, not over it. */
+function _openTab(href) {
+	window.open(href, "_blank", "noopener");
+}
+
 function _today() {
 	var d = new Date();
 	return d.toISOString().slice(0, 10);
@@ -72,6 +84,9 @@ class DuxProjectDashboard {
 		/* Empty means group-wide. The client's default view is the whole
 		   group, so an untouched picker must not narrow anything. */
 		this.companies = [];
+		this.view = "portfolio";
+		this.project = null;
+		this.detail = null;
 
 		this._injectStyles();
 		this._renderShell();
@@ -143,6 +158,42 @@ class DuxProjectDashboard {
 .dpd-foot{margin-top:16px;font-size:11px;color:#8b929e;line-height:1.65}
 .dpd-attn{border-top:1px solid #f4f5f7;padding:13px 18px;display:flex;gap:11px;align-items:flex-start}
 .dpd-spin{padding:60px;text-align:center;color:#8b929e;font-size:13px}
+/* ---- drill-down ---- */
+.dpd-dhead{padding:2px 0 18px;border-bottom:1px solid #eef0f2;margin-bottom:18px}
+.dpd-crumb{font-size:11.5px;margin-bottom:10px}
+.dpd-crumb a{color:#8b929e;text-decoration:none}
+.dpd-crumb a:hover{color:#0d9488}
+.dpd-dhead-row{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+.dpd-dtitle{display:flex;align-items:center;gap:11px;margin-bottom:6px;flex-wrap:wrap;
+  font-size:21px;font-weight:700;letter-spacing:-.02em}
+.dpd-dmeta{font-size:12px;color:#8b929e}
+.dpd-dperiod{font-size:11.5px;color:#9ca3af;margin-top:10px}
+.dpd-dgrid{display:grid;gap:14px}
+.dpd-dgrid-top{grid-template-columns:2fr 1fr;margin-bottom:14px}
+.dpd-dgrid-bottom{grid-template-columns:1fr 1.35fr;align-items:start}
+.dpd-stack{height:32px;background:#f1f2f4;border-radius:7px;overflow:hidden;display:flex;margin-bottom:12px}
+.dpd-keys{display:flex;gap:20px;font-size:11.5px;color:#6b7280;flex-wrap:wrap}
+.dpd-figs{display:grid;grid-template-columns:repeat(4,1fr);margin-top:22px;padding-top:18px;
+  border-top:1px solid #f4f5f7}
+.dpd-dfig{font-size:17px;font-weight:700}
+.dpd-step{display:flex;gap:13px}
+.dpd-rail{display:flex;flex-direction:column;align-items:center}
+.dpd-rail i{width:9px;height:9px;border-radius:5px;margin-top:5px;flex-shrink:0}
+.dpd-line{width:2px;flex:1;background:#e2e6ea;min-height:26px}
+.dpd-stepbody{flex:1;padding-bottom:16px}
+.dpd-stepbody.last{padding-bottom:0}
+.dpd-steprow{display:flex;justify-content:space-between;gap:10px}
+.dpd-stepname{font-size:12.5px;font-weight:600;display:flex;align-items:center;gap:7px}
+.dpd-stepval{font-size:12.5px;font-weight:700;white-space:nowrap}
+.dpd-stepsub{font-size:11px;color:#8b929e;margin-top:2px;line-height:1.45}
+.dpd-tag{font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  color:#8b929e;background:#f4f5f7;border-radius:4px;padding:2px 5px}
+.dpd-chead{padding:17px 20px 13px;display:flex;justify-content:space-between;align-items:center;gap:12px}
+.dpd-total{font-weight:700;font-size:12.5px;border-bottom:none;border-top:2px solid #eef0f2}
+.dpd-sub{font-size:11px;color:#8b929e;margin-top:2px}
+.dpd-drow:hover .dpd-td{background:#f6fefb;cursor:pointer}
+@media (max-width:1100px){.dpd-dgrid-top,.dpd-dgrid-bottom{grid-template-columns:1fr}}
+@media (max-width:640px){.dpd-figs{grid-template-columns:repeat(2,1fr);gap:14px}}
 @media (max-width:1200px){.dpd-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}.dpd-grid{grid-template-columns:1fr}}
 @media (max-width:760px){.dpd-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
 `;
@@ -271,6 +322,12 @@ class DuxProjectDashboard {
 	}
 
 	load() {
+		/* The dates apply to both views; re-running while drilled in
+		   should re-range the project, not throw you back to the list. */
+		if (this.view === "detail" && this.project) {
+			this.openProject(this.project);
+			return;
+		}
 		if (this._busy) return;
 		this._busy = true;
 		var self = this;
@@ -463,8 +520,338 @@ class DuxProjectDashboard {
 	_bindRows() {
 		var self = this;
 		this.$.find(".dpd-tr").on("click", function () {
-			var p = $(this).data("project");
-			if (p) frappe.set_route("Form", "Project", p);
+			var p = $(this).attr("data-project");
+			if (p) self.openProject(p);
+		});
+	}
+
+	/* ================================================================
+	   Drill-down — one project
+
+	   Opened by clicking a row. The portfolio payload is kept in
+	   this.data, so coming back is a re-render rather than a re-query.
+	   ================================================================ */
+
+	openProject(name) {
+		var self = this;
+		this.view = "detail";
+		this.project = name;
+		this._chrome();
+		this.$.find("#dpd-body").html('<div class="dpd-spin">Loading…</div>');
+
+		frappe.call({
+			method: "dux_voucher.dux_voucher.api.project_dashboard.get_project_detail",
+			args: {
+				project: name,
+				from_date: this.$.find("#dpd-from").val() || null,
+				to_date: this.$.find("#dpd-to").val() || null,
+			},
+			callback: function (r) {
+				if (!r || !r.message) return;
+				self.detail = r.message;
+				self._renderDetail();
+			},
+			error: function () {
+				self.$.find("#dpd-body").html(
+					'<div class="dpd-spin" style="color:#b91c1c">Could not open this project. See the error above.</div>');
+			},
+		});
+	}
+
+	backToPortfolio() {
+		this.view = "portfolio";
+		this.project = null;
+		this._chrome();
+		if (this.data) this._render(); else this.load();
+	}
+
+	/* Companies and Status belong to the portfolio; the dates still apply
+	   to a single project, so they stay. */
+	_chrome() {
+		var detail = this.view === "detail";
+		this.$.find(".dpd-co, #dpd-status").closest(".dpd-fg").toggle(!detail);
+		this.$.find("#dpd-meta").toggle(!detail);
+	}
+
+	_renderDetail() {
+		var d = this.detail, p = d.project, t = d.totals;
+
+		this.$.find("#dpd-body").html(
+			this._detailHead(p, d.period) +
+			'<div class="dpd-dgrid dpd-dgrid-top">' +
+				this._estimateCard(t) +
+				this._chainCard(d.chain) +
+			"</div>" +
+			'<div class="dpd-dgrid dpd-dgrid-bottom">' +
+				this._accountsCard(d.accounts, t.invoiced) +
+				this._recentCard(d) +
+			"</div>" +
+			`<div class="dpd-foot">
+  Invoiced and Paid are the ledger's own totals for this project, so they tie to the books and to
+  the figures on the portfolio. <b style="color:#6b7280">Work Orders</b> and
+  <b style="color:#6b7280">Purchase Orders</b> post no ledger entries at all &mdash; those two rows
+  are read from the documents and are a forecast of what is still to come.
+</div>`);
+
+		this._bindDetail();
+	}
+
+	_detailHead(p, period) {
+		var when = [];
+		if (p.expected_start_date) when.push(_date(p.expected_start_date));
+		if (p.expected_end_date) when.push(_date(p.expected_end_date));
+
+		return `<div class="dpd-dhead">
+  <div class="dpd-crumb"><a href="#" id="dpd-back">&lsaquo;&nbsp; Capital Projects</a></div>
+  <div class="dpd-dhead-row">
+    <div>
+      <div class="dpd-dtitle">
+        <span>${_esc(p.project_name)}</span>
+        <span class="dpd-pill" style="background:${p.status === "Open" ? "#f0fdfa;color:#0f766e" : "#f4f5f7;color:#6b7280"}">${_esc(p.status)}</span>
+        ${p.project_type ? '<span class="dpd-pill" style="background:#f4f5f7;color:#4b5563">' + _esc(p.project_type) + "</span>" : ""}
+      </div>
+      <div class="dpd-dmeta dpd-mono">${_esc(p.name)} &nbsp;&middot;&nbsp; ${_esc(p.company)}${
+			when.length ? " &nbsp;&middot;&nbsp; " + when.join(" &rarr; ") : ""}</div>
+    </div>
+    <button class="dpd-btn" id="dpd-open-erp">Open in ERPNext</button>
+  </div>
+  <div class="dpd-dperiod">Ledger figures cover ${_date(period.from_date)} to ${_date(period.to_date)}.</div>
+</div>`;
+	}
+
+	/* ---- against estimate ------------------------------------------
+	   Four stacked segments over whichever is larger, the estimate or
+	   what has actually been committed — so a project that has run past
+	   its estimate still renders a full bar instead of overflowing. */
+	_estimateCard(t) {
+		var uninvoiced = Math.max(0, t.uninvoiced);
+		var spent = t.paid + t.outstanding + uninvoiced;
+		var base = Math.max(t.estimated, spent, 1);
+		var remaining = Math.max(0, base - spent);
+
+		function seg(v, bg, fg, label) {
+			var w = v / base * 100;
+			if (w <= 0.05) return "";
+			// Only caption a band wide enough to hold the words.
+			var text = w >= 17 && label ? label : "";
+			return '<div style="width:' + w + "%;background:" + bg +
+				';height:100%;display:flex;align-items:center;padding-left:' +
+				(text ? "12px" : "0") + ";color:" + fg +
+				';font-size:11.5px;font-weight:600;white-space:nowrap;overflow:hidden">' +
+				text + "</div>";
+		}
+		function key(bg, label) {
+			return '<span style="display:flex;align-items:center;gap:6px">' +
+				'<span style="width:9px;height:9px;border-radius:2px;background:' + bg + '"></span>' +
+				label + "</span>";
+		}
+		function fig(label, value, tone) {
+			return '<div><div class="dpd-lbl" style="margin-bottom:6px' +
+				(tone ? ";color:" + tone : "") + '">' + label + "</div>" +
+				'<div class="dpd-mono dpd-dfig"' + (tone ? ' style="color:' + tone + '"' : "") + ">" +
+				(value ? _num(value) : "&mdash;") + "</div></div>";
+		}
+
+		var pct = t.pct_of_estimate;
+		var head = t.estimated
+			? '<b style="color:' + (pct > 100 ? "#b91c1c" : "#374151") + ';font-size:13px">' +
+			  Math.round(pct) + "%</b> committed" + (pct > 100 ? " &mdash; over estimate" : "")
+			: '<span style="color:#9ca3af">no estimate set</span>';
+
+		return `<div class="dpd-card" style="padding:20px 22px">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:16px">
+    <div class="dpd-lbl">Against estimate</div>
+    <div style="font-size:12px;color:#8b929e">${head}</div>
+  </div>
+  <div class="dpd-stack">
+    ${seg(t.paid, "#0d9488", "#fff", "Paid &nbsp;&#8377;" + _short(t.paid))}
+    ${seg(t.outstanding, "#2dd4bf", "#0f766e", "&#8377;" + _short(t.outstanding))}
+    ${seg(uninvoiced, "#ccfbf1", "#0f766e", "&#8377;" + _short(uninvoiced))}
+    ${seg(remaining, "#f1f2f4", "#8b929e", "")}
+  </div>
+  <div class="dpd-keys">
+    ${key("#0d9488", "Paid")}
+    ${key("#2dd4bf", "Invoiced, unpaid")}
+    ${key("#ccfbf1", "Ordered, uninvoiced")}
+    ${t.estimated ? key("#f1f2f4", "Estimate remaining") : ""}
+  </div>
+  <div class="dpd-figs">
+    ${fig("Estimate", t.estimated, "#6b7280")}
+    ${fig("Committed", t.committed)}
+    ${fig("Invoiced", t.invoiced)}
+    ${fig("Outstanding", t.outstanding, "#92400e")}
+  </div>
+</div>`;
+	}
+
+	/* ---- the chain -------------------------------------------------- */
+	_chainCard(chain) {
+		var DOT = ["#0d9488", "#0d9488", "#2dd4bf", "#99f6e4"];
+
+		var rows = chain.map(function (c, i) {
+			var last = i === chain.length - 1;
+			var caption = [];
+			if (c.source === "document" && c.count) {
+				caption.push(c.count + " " +
+					(c.stage === "Work Orders" ? "contract" : "order") + (c.count === 1 ? "" : "s"));
+			}
+			/* A ledger stage's detail already counts its own documents —
+			   "12 invoices · 4 journals" — so prefixing "16 vouchers"
+			   only says it twice. */
+			if (c.detail) caption.push(c.detail);
+
+			return `<div class="dpd-step">
+  <div class="dpd-rail">
+    <i style="background:${DOT[i] || "#99f6e4"}"></i>
+    ${last ? "" : '<span class="dpd-line"></span>'}
+  </div>
+  <div class="dpd-stepbody${last ? " last" : ""}">
+    <div class="dpd-steprow">
+      <span class="dpd-stepname">${_esc(c.stage)}${
+		c.source === "document" ? '<span class="dpd-tag">forecast</span>' : ""}</span>
+      <span class="dpd-mono dpd-stepval">${c.value ? "&#8377;" + _short(c.value) : "&mdash;"}</span>
+    </div>
+    <div class="dpd-stepsub">${caption.length ? _esc(caption.join("  ·  ")) : "nothing yet"}</div>
+  </div>
+</div>`;
+		}).join("");
+
+		return `<div class="dpd-card" style="padding:20px 22px">
+  <div class="dpd-lbl" style="margin-bottom:16px">The chain</div>
+  ${rows}
+</div>`;
+	}
+
+	/* ---- where it went ---------------------------------------------- */
+	_accountsCard(accounts, invoiced) {
+		if (!accounts.length) {
+			return `<div class="dpd-card" style="overflow:hidden">
+  ${this._cardHead("Where it went", "Account-wise, from the ledger")}
+  <div style="padding:28px 20px;font-size:12.5px;color:#9ca3af;text-align:center">
+    No cost has been booked against this project in this period.</div>
+</div>`;
+		}
+
+		var body = accounts.map(function (a) {
+			return `<tr><td class="dpd-td" style="font-size:12.5px">${_esc(a.account)}</td>
+  <td class="dpd-td dpd-mono" style="text-align:right;font-weight:600">${_num(a.amount)}</td></tr>`;
+		}).join("");
+
+		return `<div class="dpd-card" style="overflow:hidden">
+  ${this._cardHead("Where it went", "Account-wise, from the ledger")}
+  <table style="width:100%;border-collapse:collapse">
+    <thead><tr><th class="dpd-th">Account</th>
+      <th class="dpd-th" style="text-align:right;width:140px">Amount</th></tr></thead>
+    <tbody>${body}
+      <tr><td class="dpd-td dpd-total">Total invoiced</td>
+          <td class="dpd-td dpd-mono dpd-total" style="text-align:right">${_num(invoiced)}</td></tr>
+    </tbody>
+  </table>
+</div>`;
+	}
+
+	/* ---- recent documents ------------------------------------------- */
+	_recentCard(d) {
+		var TONE = {
+			"Payment":  "background:#f0fdfa;color:#0f766e",
+			"Receipt":  "background:#f0fdfa;color:#0f766e",
+			"Refund":   "background:#fef3c7;color:#b45309",
+			"Writeoff": "background:#fee2e2;color:#b91c1c",
+		};
+
+		if (!d.recent.length) {
+			return `<div class="dpd-card" style="overflow:hidden">
+  ${this._cardHead("Recent activity", "Every document touching this project")}
+  <div style="padding:28px 20px;font-size:12.5px;color:#9ca3af;text-align:center">
+    Nothing has been posted against this project in this period.</div>
+</div>`;
+		}
+
+		/* Recent, not exhaustive: a long list pushes the summary above it
+		   off the screen, which is the part worth reading first. The rest
+		   are one click away in the ledger. */
+		var shown = d.recent.slice(0, 12);
+
+		var body = shown.map(function (r) {
+			// One amount column: what this voucher did to the project. The
+			// pill says which side that was, so the number is never ambiguous.
+			var isCost = Math.abs(r.cost) > 0.005;
+			var amount = isCost ? r.cost : r.paid;
+			var caption = isCost
+				? (Math.abs(r.paid) > 0.005 ? "cost · also &#8377;" + _short(r.paid) + " paid" : "cost")
+				: "paid";
+			var sub = r.party || r.remark || "";
+
+			return `<tr class="dpd-drow" data-doctype="${_esc(r.doctype)}" data-name="${_esc(r.name)}">
+  <td class="dpd-td dpd-mono" style="font-size:12px;color:#8b929e;white-space:nowrap">${_date(r.posting_date)}</td>
+  <td class="dpd-td"><span class="dpd-pill" style="${TONE[r.kind] || "background:#f4f5f7;color:#4b5563"}">${_esc(r.kind)}</span></td>
+  <td class="dpd-td">
+    <span class="dpd-mono" style="font-size:12px;color:#0d9488;font-weight:600">${_esc(r.name)}</span>
+    ${sub ? '<div class="dpd-sub">' + _esc(sub) + "</div>" : ""}
+  </td>
+  <td class="dpd-td dpd-mono" style="text-align:right;white-space:nowrap">
+    <div style="font-weight:600">${_num(amount)}</div>
+    <div style="font-size:10.5px;color:#9ca3af;margin-top:2px">${caption}</div>
+  </td>
+</tr>`;
+		}).join("");
+
+		var more = d.recent_total > shown.length
+			? `<tr><td class="dpd-td" colspan="4" style="text-align:center;border-bottom:none;padding:12px">
+   <a href="#" id="dpd-all" style="font-size:12px;font-weight:600;color:#0d9488">All ${_num(d.recent_total)} documents</a></td></tr>`
+			: "";
+
+		return `<div class="dpd-card" style="overflow:hidden">
+  ${this._cardHead("Recent activity", d.recent_total + " document" + (d.recent_total === 1 ? "" : "s") +
+		" touching this project", '<a href="#" id="dpd-gl" style="font-size:12px;font-weight:600;color:#0d9488">View ledger</a>')}
+  <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:520px">
+    <thead><tr>
+      <th class="dpd-th" style="width:96px">Date</th>
+      <th class="dpd-th" style="width:96px">Type</th>
+      <th class="dpd-th">Reference</th>
+      <th class="dpd-th" style="text-align:right;width:140px">Amount</th>
+    </tr></thead>
+    <tbody>${body}${more}</tbody>
+  </table></div>
+</div>`;
+	}
+
+	_cardHead(title, sub, right) {
+		return `<div class="dpd-chead">
+  <div><div class="dpd-h">${title}</div><div class="dpd-hs">${sub}</div></div>
+  ${right || ""}
+</div>`;
+	}
+
+	_bindDetail() {
+		var self = this, d = this.detail;
+
+		this.$.find("#dpd-back").on("click", function (e) {
+			e.preventDefault();
+			self.backToPortfolio();
+		});
+
+		this.$.find("#dpd-open-erp").on("click", function () {
+			_openTab("/app/project/" + encodeURIComponent(d.project.name));
+		});
+
+		/* A new tab, so the drill-down you were reading is still there when
+		   you come back from the voucher. Same gesture the Trial Balance
+		   page uses for its own drill-through. */
+		this.$.find(".dpd-drow").on("click", function () {
+			var dt = $(this).attr("data-doctype"), nm = $(this).attr("data-name");
+			if (dt && nm) _openTab("/app/" + frappe.router.slug(dt) + "/" + encodeURIComponent(nm));
+		});
+
+		this.$.find("#dpd-gl, #dpd-all").on("click", function (e) {
+			e.preventDefault();
+			_openTab("/app/query-report/General%20Ledger?" + $.param({
+				company: d.project.company,
+				project: d.project.name,
+				from_date: d.period.from_date,
+				to_date: d.period.to_date,
+				group_by: "Group by Voucher (Consolidated)",
+			}));
 		});
 	}
 }
