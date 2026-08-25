@@ -43,9 +43,16 @@ _COST_SQL = """
               ('Bank', 'Cash', 'Receivable', 'Payable')
          THEN gle.debit - gle.credit ELSE 0 END
 """
+# Paid is read off the PAYABLE side, not the bank side, and that is
+# deliberate. A Payment Voucher in Party + Head mode nets several parties
+# into ONE bank credit row, so that row cannot belong to a single project —
+# measured on real data, 75.4 lakh of bank movement was necessarily
+# untagged while every supplier debit carried its own project correctly.
+# Debits on a payable account are supplier settlements; credits are the
+# invoices raising the liability, so only the debit side is "paid".
 _PAID_SQL = """
-    CASE WHEN COALESCE(acc.account_type, '') IN ('Bank', 'Cash')
-         THEN gle.credit - gle.debit ELSE 0 END
+    CASE WHEN COALESCE(acc.account_type, '') = 'Payable'
+         THEN gle.debit ELSE 0 END
 """
 
 
@@ -93,7 +100,7 @@ def get_dashboard(companies=None, from_date=None, to_date=None, status=None):
                 # Only count untagged spend on accounts that tagged projects
                 # actually use. Without that restriction this would sweep in
                 # salaries and every other expense and mean nothing.
-                if r["account"] in used_accounts:
+                if r["account"] in used_accounts and abs(flt(r["cost"])) > 0.005:
                     unattributed += flt(r["cost"])
                     unattributed_rows += int(r["entries"] or 0)
                 continue
