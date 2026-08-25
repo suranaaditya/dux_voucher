@@ -66,11 +66,24 @@ def get_dashboard(companies=None, from_date=None, to_date=None, status=None):
     from_date, to_date = _resolve_period(from_date, to_date)
 
     projects = _project_master(companies, status)
+
+    # Only scan companies that actually have projects. A company with none
+    # can contribute nothing: its GL has no project to attribute to, and
+    # "unattributed" is defined relative to accounts that tagged projects
+    # use, so it has no such accounts either.
+    #
+    # This is not a micro-optimisation. Scanning all 69 companies over a
+    # wide date range took 69.8s measured on dev — inside gunicorn's 120s
+    # worker timeout, but only just, and unusable for a dashboard. Scoping
+    # to the companies that hold projects cuts the loop to the handful that
+    # can possibly matter.
+    scan = [c for c in companies if c in {p["company"] for p in projects.values()}]
+
     gl = {}
     unattributed = 0.0
     unattributed_rows = 0
 
-    for company in companies:
+    for company in scan:
         rows = _gl_for_company(company, from_date, to_date)
         used_accounts = {
             r["account"] for r in rows if r["project"] != NO_PROJECT
@@ -100,7 +113,8 @@ def get_dashboard(companies=None, from_date=None, to_date=None, status=None):
 
     return {
         "period": {"from_date": str(from_date), "to_date": str(to_date)},
-        "companies": companies,
+        "companies": scan,
+        "companies_permitted": len(companies),
         "kpi": _kpis(rows, unattributed, unattributed_rows),
         "projects": rows,
         "by_company": _by_company(rows),
