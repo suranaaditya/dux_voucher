@@ -170,6 +170,7 @@ class DuxProjectDashboard {
 .dpd-dperiod{font-size:11.5px;color:#9ca3af;margin-top:10px}
 .dpd-dgrid{display:grid;gap:14px}
 .dpd-dgrid-top{grid-template-columns:2fr 1fr;margin-bottom:14px}
+.dpd-dgrid-charts{grid-template-columns:1fr 1fr;margin-bottom:14px;align-items:start}
 .dpd-dgrid-bottom{grid-template-columns:1fr 1.35fr;align-items:start}
 .dpd-stack{height:32px;background:#f1f2f4;border-radius:7px;overflow:hidden;display:flex;margin-bottom:12px}
 .dpd-keys{display:flex;gap:20px;font-size:11.5px;color:#6b7280;flex-wrap:wrap}
@@ -192,8 +193,34 @@ class DuxProjectDashboard {
 .dpd-total{font-weight:700;font-size:12.5px;border-bottom:none;border-top:2px solid #eef0f2}
 .dpd-sub{font-size:11px;color:#8b929e;margin-top:2px}
 .dpd-drow:hover .dpd-td{background:#f6fefb;cursor:pointer}
-@media (max-width:1100px){.dpd-dgrid-top,.dpd-dgrid-bottom{grid-template-columns:1fr}}
+@media (max-width:1100px){.dpd-dgrid-top,.dpd-dgrid-charts,.dpd-dgrid-bottom{grid-template-columns:1fr}}
 @media (max-width:640px){.dpd-figs{grid-template-columns:repeat(2,1fr);gap:14px}}
+/* ---- who the money is with ---- */
+.dpd-pstats{display:grid;grid-template-columns:repeat(5,1fr);gap:0;padding:0 20px 18px;
+  border-bottom:1px solid #eef0f2}
+.dpd-pstat-v{font-size:16px;font-weight:700;margin-top:5px}
+.dpd-prow:hover .dpd-td{background:#f6fefb;cursor:pointer}
+.dpd-prow.noco:hover .dpd-td{background:#fafafa;cursor:default}
+.dpd-bridge{padding:12px 20px;font-size:11.5px;color:#8b929e;line-height:1.6}
+.dpd-donut-wrap{display:flex;gap:18px;align-items:center;padding:4px 20px 20px;flex-wrap:wrap}
+.dpd-donut{position:relative;width:132px;height:132px;flex-shrink:0}
+.dpd-donut-mid{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:2px;pointer-events:none}
+.dpd-legend{flex:1;min-width:190px;display:flex;flex-direction:column;gap:2px}
+.dpd-leg{display:flex;align-items:center;gap:8px;font-size:12px;padding:4px 6px;border-radius:6px;cursor:pointer}
+.dpd-leg:hover{background:#f6fefb}
+.dpd-dot{width:9px;height:9px;border-radius:2px;flex-shrink:0}
+.dpd-leg-n{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#374151}
+.dpd-leg-v{font-weight:600;white-space:nowrap}
+.dpd-leg-p{color:#9ca3af;width:34px;text-align:right;white-space:nowrap}
+.dpd-bars{padding:4px 20px 20px;display:flex;flex-direction:column;gap:11px}
+.dpd-barrow{cursor:pointer;border-radius:6px;padding:3px 6px;margin:-3px -6px}
+.dpd-barrow:hover{background:#f6fefb}
+.dpd-barhead{display:flex;justify-content:space-between;gap:10px;margin-bottom:5px}
+.dpd-bar-n{font-size:12px;color:#374151;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dpd-bar-v{font-size:12px;font-weight:600;white-space:nowrap}
+@media (max-width:900px){.dpd-pstats{grid-template-columns:repeat(3,1fr);gap:14px}}
+@media (max-width:560px){.dpd-pstats{grid-template-columns:repeat(2,1fr)}}
 @media (max-width:1200px){.dpd-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}.dpd-grid{grid-template-columns:1fr}}
 @media (max-width:760px){.dpd-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
 `;
@@ -379,6 +406,12 @@ class DuxProjectDashboard {
 			html += this._projectTable(d.projects, true);
 		} else {
 			html += this._projectTable(d.projects, false);
+			if (d.parties && d.parties.length) {
+				html += '<div style="margin-top:14px">' +
+					this._partyCard(
+						{ rows: d.parties, totals: d.party_totals },
+						{ showCompany: true, total: d.parties_total }) + "</div>";
+			}
 			html += '<div class="dpd-grid">' + this._byCompany(d.by_company) +
 				this._attention(d.attention) + "</div>";
 		}
@@ -523,6 +556,15 @@ class DuxProjectDashboard {
 			var p = $(this).attr("data-project");
 			if (p) self.openProject(p);
 		});
+
+		var d = this.data;
+		if (d && d.parties && d.parties.length) {
+			this._partyIndex = {};
+			d.parties.forEach(function (r) { self._partyIndex[r.party] = r; });
+			/* No fallback company here: the portfolio can span several, and
+			   a party that works for two cannot be opened unambiguously. */
+			this._bindParties(this.$, d.period, null);
+		}
 	}
 
 	/* ================================================================
@@ -582,6 +624,14 @@ class DuxProjectDashboard {
 				this._estimateCard(t) +
 				this._chainCard(d.chain) +
 			"</div>" +
+			'<div class="dpd-dgrid dpd-dgrid-charts">' +
+				this._donutCard(d.parties.work_orders, "Work orders by contractor",
+					"Contract value, from the work orders") +
+				this._barsCard(d.parties.purchase_orders, "Purchase orders by supplier",
+					"Order value, from the purchase orders") +
+			"</div>" +
+			'<div style="margin-bottom:14px">' +
+				this._partyCard(d.parties, { limit: 25 }) + "</div>" +
 			'<div class="dpd-dgrid dpd-dgrid-bottom">' +
 				this._accountsCard(d.accounts, t.invoiced) +
 				this._recentCard(d) +
@@ -816,6 +866,240 @@ class DuxProjectDashboard {
 </div>`;
 	}
 
+	/* ---- who the money is with -------------------------------------
+
+	   Read off the PAYABLE side, not the cost side. A Purchase Invoice
+	   debits CWIP with no party and credits the payable with one, so the
+	   cost leg carries no party at all and cannot be split by contractor.
+
+	   Owed and Advance are shown as two columns rather than one signed
+	   balance: a project is routinely owed money on one contractor while
+	   sitting ahead on another, and netting them hides whichever is
+	   smaller. Advance is the one people ask for by name — cash out with
+	   no bill against it. */
+	_partyCard(P, opts) {
+		var t = P.totals, rows = P.rows, self = this;
+		if (!rows.length) {
+			return `<div class="dpd-card" style="overflow:hidden">
+  ${this._cardHead("Who the money is with", "Contractors and suppliers on this project")}
+  <div style="padding:28px 20px;font-size:12.5px;color:#9ca3af;text-align:center">
+    No contractor has been ordered from, billed or paid on this project yet.</div>
+</div>`;
+		}
+
+		function stat(label, value, tone) {
+			return '<div class="dpd-pstat"><div class="dpd-lbl"' +
+				(tone ? ' style="color:' + tone + '"' : "") + ">" + label + "</div>" +
+				'<div class="dpd-mono dpd-pstat-v"' + (tone ? ' style="color:' + tone + '"' : "") +
+				">" + (value ? _num(value) : "&mdash;") + "</div></div>";
+		}
+
+		var shown = rows.slice(0, opts && opts.limit ? opts.limit : rows.length);
+		var total = (opts && opts.total) || rows.length;
+		var body = shown.map(function (r) {
+			return `<tr class="dpd-prow${r.company ? "" : " noco"}"
+     data-party="${_esc(r.party)}" data-ptype="${_esc(r.party_type)}"
+     data-account="${_esc(r.account || "")}" data-company="${_esc(r.company || "")}">
+  <td class="dpd-td">
+    <div style="font-weight:600;font-size:12.5px;color:${r.company ? "#0d9488" : "#374151"}">${_esc(r.party)}</div>
+    ${opts && opts.showCompany && r.company
+		? '<div class="dpd-sub">' + _esc(r.company) + "</div>" : ""}
+  </td>
+  <td class="dpd-td dpd-mono" style="text-align:right">${r.ordered ? _num(r.ordered) : "&mdash;"}</td>
+  <td class="dpd-td dpd-mono" style="text-align:right">${r.billed ? _num(r.billed) : "&mdash;"}</td>
+  <td class="dpd-td dpd-mono" style="text-align:right">${r.paid ? _num(r.paid) : "&mdash;"}</td>
+  <td class="dpd-td dpd-mono" style="text-align:right;font-weight:${r.owed ? 700 : 400};color:${r.owed ? "#92400e" : "#c3c8d0"}">${r.owed ? _num(r.owed) : "&mdash;"}</td>
+  <td class="dpd-td dpd-mono" style="text-align:right;font-weight:${r.advance ? 700 : 400};color:${r.advance ? "#1d4ed8" : "#c3c8d0"}">${r.advance ? _num(r.advance) : "&mdash;"}</td>
+</tr>`;
+		}).join("");
+
+		var more = rows.length > shown.length
+			? '<tr><td class="dpd-td" colspan="6" style="text-align:center;border-bottom:none;padding:11px;font-size:11.5px;color:#9ca3af">and ' +
+			  _num(rows.length - shown.length) + " more with smaller balances</td></tr>"
+			: "";
+
+		/* The one number that stops this table reading as broken. */
+		var bridge = t.cost_without_party > 0.005
+			? `<div class="dpd-bridge">
+  <b class="dpd-mono">&#8377;${_num(t.cost_without_party)}</b> of cost is booked to the project but never
+  reached a contractor's payable, so it is in Invoiced above and in no row here. That happens when a
+  voucher tags its expense line to the project and leaves the Creditors line untagged.
+</div>` : "";
+
+		return `<div class="dpd-card" style="overflow:hidden">
+  ${this._cardHead("Who the money is with",
+		(total > shown.length
+			? "largest " + shown.length + " of " + total + " parties"
+			: shown.length + " " + (shown.length === 1 ? "party" : "parties")) +
+		" &nbsp;&middot;&nbsp; ordered, billed and settled &mdash; from the payable side of the ledger")}
+  <div class="dpd-pstats">
+    ${stat("Ordered", t.ordered)}
+    ${stat("Billed", t.billed)}
+    ${stat("Paid", t.paid)}
+    ${stat("Still owed", t.owed, "#92400e")}
+    ${stat("Advance paid", t.advance, "#1d4ed8")}
+  </div>
+  <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:720px">
+    <thead><tr>
+      <th class="dpd-th">Party</th>
+      <th class="dpd-th" style="text-align:right;width:120px">Ordered</th>
+      <th class="dpd-th" style="text-align:right;width:120px">Billed</th>
+      <th class="dpd-th" style="text-align:right;width:120px">Paid</th>
+      <th class="dpd-th" style="text-align:right;width:120px">Still owed</th>
+      <th class="dpd-th" style="text-align:right;width:130px">Advance paid</th>
+    </tr></thead>
+    <tbody>${body}${more}</tbody>
+  </table></div>
+  ${bridge}
+  <div class="dpd-bridge" style="border-top:1px solid #f4f5f7;color:#9ca3af">
+    <b style="color:#1d4ed8">Advance paid</b> is cash out with no bill against it &mdash; the payable
+    has been debited for this party and never credited. Read off the ledger balance, not ERPNext's
+    advance flag, so it catches payments made through any voucher type.
+  </div>
+</div>`;
+	}
+
+	/* ---- work orders: a donut ---------------------------------------
+	   Five contractors, one of them most of the value — that reads well
+	   as a donut. The purchase orders next to it do not, which is why
+	   they get bars instead. */
+	_donutCard(slices, title, sub) {
+		if (!slices.length) {
+			return `<div class="dpd-card" style="padding:0;overflow:hidden">
+  ${this._cardHead(title, sub)}
+  <div style="padding:24px 20px 30px;font-size:12.5px;color:#9ca3af;text-align:center">Nothing yet.</div>
+</div>`;
+		}
+
+		var RAMP = ["#0d9488", "#14b8a6", "#2dd4bf", "#5eead4", "#99f6e4"];
+		var total = slices.reduce(function (s, x) { return s + x.value; }, 0);
+		var top = slices.slice(0, 5).map(function (s, i) {
+			return { party: s.party, value: s.value, color: RAMP[i] };
+		});
+		var rest = slices.slice(5);
+		if (rest.length) {
+			top.push({
+				party: rest.length + " more",
+				value: rest.reduce(function (s, x) { return s + x.value; }, 0),
+				color: "#e2e6ea",
+			});
+		}
+
+		var R = 52, SW = 20, C = 2 * Math.PI * R, off = 0;
+		var arcs = top.map(function (s) {
+			var len = total ? s.value / total * C : 0;
+			var a = '<circle cx="66" cy="66" r="' + R + '" fill="none" stroke="' + s.color +
+				'" stroke-width="' + SW + '" stroke-dasharray="' + len + " " + (C - len) +
+				'" stroke-dashoffset="' + (-off) + '"></circle>';
+			off += len;
+			return a;
+		}).join("");
+
+		var legend = top.map(function (s) {
+			var pct = total ? Math.round(s.value / total * 100) : 0;
+			return `<div class="dpd-leg" data-party="${_esc(s.party)}">
+  <span class="dpd-dot" style="background:${s.color}"></span>
+  <span class="dpd-leg-n">${_esc(s.party)}</span>
+  <span class="dpd-mono dpd-leg-v">${_num(s.value)}</span>
+  <span class="dpd-leg-p">${pct}%</span>
+</div>`;
+		}).join("");
+
+		return `<div class="dpd-card" style="padding:0;overflow:hidden">
+  ${this._cardHead(title, sub)}
+  <div class="dpd-donut-wrap">
+    <div class="dpd-donut">
+      <svg width="132" height="132" viewBox="0 0 132 132" style="transform:rotate(-90deg)">${arcs}</svg>
+      <div class="dpd-donut-mid">
+        <div class="dpd-lbl">Total</div>
+        <div class="dpd-mono" style="font-size:15px;font-weight:700">&#8377;${_short(total)}</div>
+      </div>
+    </div>
+    <div class="dpd-legend">${legend}</div>
+  </div>
+</div>`;
+	}
+
+	/* ---- purchase orders: ranked bars -------------------------------
+	   Eleven suppliers with six of them under sixty thousand. A pie of
+	   that is a ring of invisible slivers; ranked bars stay readable and
+	   keep every name clickable. */
+	_barsCard(slices, title, sub) {
+		if (!slices.length) {
+			return `<div class="dpd-card" style="padding:0;overflow:hidden">
+  ${this._cardHead(title, sub)}
+  <div style="padding:24px 20px 30px;font-size:12.5px;color:#9ca3af;text-align:center">Nothing yet.</div>
+</div>`;
+		}
+
+		var max = slices[0].value || 1;
+		var shown = slices.slice(0, 8);
+		var bars = shown.map(function (s) {
+			return `<div class="dpd-barrow" data-party="${_esc(s.party)}">
+  <div class="dpd-barhead">
+    <span class="dpd-bar-n">${_esc(s.party)}</span>
+    <span class="dpd-mono dpd-bar-v">${_num(s.value)}</span>
+  </div>
+  <div class="dpd-prog"><i style="width:${Math.max(2, Math.round(s.value / max * 100))}%;background:#0d9488"></i></div>
+</div>`;
+		}).join("");
+
+		var rest = slices.length - shown.length;
+		return `<div class="dpd-card" style="padding:0;overflow:hidden">
+  ${this._cardHead(title, sub)}
+  <div class="dpd-bars">${bars}${rest
+		? '<div style="font-size:11.5px;color:#9ca3af;margin-top:2px">and ' + rest +
+		  " more supplier" + (rest === 1 ? "" : "s") + "</div>" : ""}</div>
+</div>`;
+	}
+
+	/* A party row, a legend line and a bar all open the same place. */
+	_bindParties(scope, period, fallbackCompany) {
+		var self = this;
+
+		function open(party, ptype, account, company) {
+			company = company || fallbackCompany;
+			if (!company) {
+				frappe.show_alert({
+					message: __("{0} works for more than one company — open the Party Ledger and pick one.", [party]),
+					indicator: "orange",
+				});
+				return;
+			}
+			if (!account) {
+				frappe.show_alert({
+					message: __("No payable account found for {0}.", [party]),
+					indicator: "orange",
+				});
+				return;
+			}
+			_openTab("/app/dux-party-ledger?" + $.param({
+				company: company,
+				party: party,
+				party_type: ptype || "Supplier",
+				account: account,
+				party_label: party,
+				from_date: period.from_date,
+				to_date: period.to_date,
+			}));
+		}
+		this._openParty = open;
+
+		scope.find(".dpd-prow").on("click", function () {
+			var $t = $(this);
+			open($t.attr("data-party"), $t.attr("data-ptype"),
+				$t.attr("data-account"), $t.attr("data-company"));
+		});
+
+		/* Charts carry only a name, so look the rest up in the same rows
+		   the table was built from. "N more" is a bucket, not a party. */
+		scope.find(".dpd-leg, .dpd-barrow").on("click", function () {
+			var name = $(this).attr("data-party");
+			var hit = (self._partyIndex || {})[name];
+			if (hit) open(hit.party, hit.party_type, hit.account, hit.company);
+		});
+	}
+
 	_cardHead(title, sub, right) {
 		return `<div class="dpd-chead">
   <div><div class="dpd-h">${title}</div><div class="dpd-hs">${sub}</div></div>
@@ -825,6 +1109,11 @@ class DuxProjectDashboard {
 
 	_bindDetail() {
 		var self = this, d = this.detail;
+
+		/* Charts pass a name only; the table rows carry the rest. */
+		this._partyIndex = {};
+		(d.parties.rows || []).forEach(function (r) { self._partyIndex[r.party] = r; });
+		this._bindParties(this.$, d.period, d.project.company);
 
 		this.$.find("#dpd-back").on("click", function (e) {
 			e.preventDefault();

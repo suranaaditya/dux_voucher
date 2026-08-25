@@ -91,10 +91,12 @@ def get_dashboard(companies=None, from_date=None, to_date=None, status=None):
     scan = [c for c in companies if c in {p["company"] for p in projects.values()}]
 
     gl = {}
+    payable = {}
     unattributed = 0.0
     unattributed_rows = 0
 
     for company in scan:
+        payable.update(_payable_by_party(company, from_date, to_date))
         rows = _gl_for_company(company, from_date, to_date)
         used_accounts = {
             r["account"] for r in rows if r["project"] != NO_PROJECT
@@ -120,6 +122,9 @@ def get_dashboard(companies=None, from_date=None, to_date=None, status=None):
                 agg["last_activity"] = r["last_activity"]
 
     rows = _assemble(projects, gl, _commitments(companies, projects.keys()))
+    parties = _party_rows(
+        {n: p["company"] for n, p in projects.items()},
+        _party_commitments(companies, projects.keys()), payable)
 
     return {
         "period": {"from_date": str(from_date), "to_date": str(to_date)},
@@ -130,6 +135,9 @@ def get_dashboard(companies=None, from_date=None, to_date=None, status=None):
         "kpi": _kpis(rows, unattributed, unattributed_rows),
         "projects": rows,
         "by_company": _by_company(rows),
+        "parties": parties[:12],
+        "parties_total": len(parties),
+        "party_totals": _party_totals(parties, sum(r["invoiced"] for r in rows)),
         "attention": _attention(rows, unattributed, unattributed_rows),
         "generated_on": frappe.utils.now(),
     }
@@ -483,6 +491,9 @@ def _empty():
                 "uninvoiced": 0, "unattributed": 0, "unattributed_entries": 0,
                 "active_projects": 0, "total_projects": 0},
         "projects": [], "by_company": [], "attention": [],
+        "parties": [], "parties_total": 0,
+        "party_totals": {"ordered": 0, "billed": 0, "paid": 0, "owed": 0,
+                         "advance": 0, "cost_without_party": 0},
         "generated_on": frappe.utils.now(),
     }
 
@@ -569,11 +580,39 @@ def get_project_detail(project, from_date=None, to_date=None):
             "pct_of_estimate": flt(committed / estimated * 100) if estimated else None,
         },
         "chain": _chain(p.company, project, commitment, vouchers),
+        "parties": _project_parties(p.company, project, from_date, to_date, invoiced),
         "accounts": [{"account": r["account"], "amount": flt(r["amount"])}
                      for r in accounts],
         "recent": vouchers[:40],
         "recent_total": len(vouchers),
         "generated_on": frappe.utils.now(),
+    }
+
+
+def _project_parties(company, project, from_date, to_date, invoiced):
+    """The party block for one project — the donut, the bars and the table.
+
+    ``work_orders`` and ``purchase_orders`` are split out because they read
+    very differently: the work orders are a handful of large contracts and
+    make a legible donut, while the purchase orders are a long tail of small
+    suppliers that a pie would render as invisible slivers.
+    """
+    rows = _party_rows(
+        {project: company},
+        _party_commitments([company], [project]),
+        _payable_by_party(company, from_date, to_date, project=project),
+    )
+
+    def ranked(key):
+        out = [{"party": r["party"], "value": r[key]} for r in rows if r[key] > 0.005]
+        out.sort(key=lambda x: -x["value"])
+        return out
+
+    return {
+        "rows": rows,
+        "work_orders": ranked("wo"),
+        "purchase_orders": ranked("po"),
+        "totals": _party_totals(rows, invoiced),
     }
 
 
@@ -715,3 +754,225 @@ def _work_order_suppliers(company, project, limit=2):
     if len(names) <= limit:
         return ", ".join(names)
     return "{0} +{1} more".format(", ".join(names[:limit]), len(names) - limit)
+
+
+# =====================================================================
+# Who the money is with
+# =====================================================================
+#
+# The party dimension cannot be read off the cost side of the ledger. A
+# Purchase Invoice debits CWIP or an expense head with NO party and credits
+# the payable WITH one, so every rupee of "cost" on this site sits on rows
+# whose party is blank — measured on PROJ-0007: 85,17,106 of cost, none of
+# it party-tagged.
+#
+# So party-wise money is read off the PAYABLE account, the same side Paid
+# already comes from:
+#
+#   billed  = SUM(credit) on Payable   — bills raised against the project
+#   paid    = SUM(debit)  on Payable   — settlements
+#   owed    = billed - paid, floored at zero
+#   advance = paid - billed, floored at zero
+#
+# ``owed`` and ``advance`` are kept apart rather than netted into one signed
+# balance: a project can genuinely be both owed money on one contractor and
+# ahead on another, and one signed column hides whichever is smaller.
+#
+# These figures are on a different basis from the Invoiced / Outstanding
+# pair above them, and will not net to the same number. The bridge is
+# ``cost_without_party`` — cost booked to the project whose payable leg was
+# never tagged. On the seeded rent journals the debit row carries the
+# project and the credit row to Creditors does not, which is exactly how a
+# contractor ends up showing as paid with nothing billed.
+
+
+def _party_commitments(companies, project_names):
+    """{(project, party): {"wo": {...}, "po": {...}}} — what is on order.
+
+    Document-derived, like ``_commitments``, which this is the party-wise
+    cut of. Kept separate rather than folded in, because the portfolio
+    totals never need it and it is two more queries.
+    """
+    out = {}
+    if not project_names:
+        return out
+
+    def bucket(project, party):
+        return out.setdefault((project, party), {
+            "wo": {"count": 0, "value": 0.0},
+            "po": {"count": 0, "value": 0.0},
+        })
+
+    for r in frappe.db.sql(
+        """
+        SELECT COALESCE(NULLIF(poi.project, ''), po.project) AS project,
+               po.supplier                                   AS party,
+               SUM(poi.base_amount)                          AS value,
+               COUNT(DISTINCT po.name)                       AS orders
+        FROM `tabPurchase Order Item` poi
+        INNER JOIN `tabPurchase Order` po ON po.name = poi.parent
+        WHERE po.docstatus = 1
+          AND po.status NOT IN ('Closed', 'Cancelled')
+          AND po.company IN %(companies)s
+          AND COALESCE(NULLIF(poi.project, ''), po.project) IN %(projects)s
+        GROUP BY project, po.supplier
+        """,
+        {"companies": tuple(companies), "projects": tuple(project_names)},
+        as_dict=True,
+    ):
+        if r["project"] and r["party"]:
+            bucket(r["project"], r["party"])["po"] = {
+                "count": int(r["orders"] or 0), "value": flt(r["value"])}
+
+    if frappe.db.exists("DocType", "Work Order Contract"):
+        for r in frappe.db.sql(
+            """
+            SELECT project, supplier AS party,
+                   SUM(total_amount) AS value, COUNT(*) AS contracts
+            FROM `tabWork Order Contract`
+            WHERE docstatus = 1
+              AND company IN %(companies)s
+              AND project IN %(projects)s
+            GROUP BY project, supplier
+            """,
+            {"companies": tuple(companies), "projects": tuple(project_names)},
+            as_dict=True,
+        ):
+            if r["project"] and r["party"]:
+                bucket(r["project"], r["party"])["wo"] = {
+                    "count": int(r["contracts"] or 0), "value": flt(r["value"])}
+
+    return out
+
+
+def _payable_by_party(company, from_date, to_date, project=None):
+    """{(project, party): {...}} off the payable account, one query.
+
+    ``account`` comes back with it because the Party Ledger deep-link
+    refuses to run without one.
+    """
+    where = "AND gle.project = %(project)s" if project \
+        else "AND COALESCE(gle.project, '') <> ''"
+
+    rows = frappe.db.sql(
+        """
+        SELECT gle.project        AS project,
+               gle.party          AS party,
+               gle.party_type     AS party_type,
+               MAX(gle.account)   AS account,
+               SUM(gle.credit)    AS billed,
+               SUM(gle.debit)     AS paid
+        FROM `tabGL Entry` gle
+        INNER JOIN `tabAccount` acc ON acc.name = gle.account
+        WHERE gle.company = %(company)s
+          AND gle.is_cancelled = 0
+          AND COALESCE(acc.account_type, '') = 'Payable'
+          AND COALESCE(gle.party, '') <> ''
+          AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s
+          {where}
+        GROUP BY gle.project, gle.party, gle.party_type
+        """.format(where=where),
+        {"company": company, "project": project,
+         "from_date": from_date, "to_date": to_date},
+        as_dict=True,
+    )
+    return {(r["project"], r["party"]): r for r in rows}
+
+
+def _party_rows(projects, commitments, payable):
+    """Merge the ordered side and the ledger side into one row per party.
+
+    ``projects`` maps project -> company, so the same helper serves one
+    project on the drill-down and a whole filtered selection on the
+    portfolio. Each row keeps the companies it drew from: the Party Ledger
+    deep-link needs exactly one, and a party working for two institutes
+    cannot be opened unambiguously.
+    """
+    agg = {}
+
+    def row(party, company, party_type=None, account=None):
+        r = agg.setdefault(party, {
+            "party": party, "party_type": party_type or "Supplier",
+            "companies": set(), "account": None,
+            "wo": 0.0, "po": 0.0, "ordered": 0.0, "billed": 0.0, "paid": 0.0,
+        })
+        if company:
+            r["companies"].add(company)
+        if party_type:
+            r["party_type"] = party_type
+        if account and not r["account"]:
+            r["account"] = account
+        return r
+
+    for (project, party), c in commitments.items():
+        if project not in projects:
+            continue
+        r = row(party, projects[project])
+        r["wo"] += flt(c["wo"]["value"])
+        r["po"] += flt(c["po"]["value"])
+
+    for (project, party), g in payable.items():
+        if project not in projects:
+            continue
+        r = row(party, projects[project], g.get("party_type"), g.get("account"))
+        r["billed"] += flt(g["billed"])
+        r["paid"] += flt(g["paid"])
+
+    # A party that only ever appeared on a work order has no ledger row, so
+    # no account came back with it — and the Party Ledger refuses to open
+    # without one. Resolve those from the party's own default, per company.
+    wanted = {}
+    for r in agg.values():
+        if not r["account"] and len(r["companies"]) == 1:
+            wanted.setdefault(next(iter(r["companies"])), []).append(r["party"])
+    resolved = {}
+    for co, parties in wanted.items():
+        for party, acc in _default_payable_accounts(co, parties).items():
+            resolved[(co, party)] = acc
+
+    out = []
+    for r in agg.values():
+        company = next(iter(r["companies"])) if len(r["companies"]) == 1 else None
+        if not r["account"] and company:
+            r["account"] = resolved.get((company, r["party"]))
+        r["company"] = company
+        r.pop("companies", None)
+        r["ordered"] = flt(r["wo"] + r["po"])
+        r["owed"] = flt(max(0.0, r["billed"] - r["paid"]))
+        r["advance"] = flt(max(0.0, r["paid"] - r["billed"]))
+        out.append(r)
+
+    # Largest relationship first — ordered value if there is one, else what
+    # has actually moved through the ledger.
+    out.sort(key=lambda r: (-(r["ordered"] or r["billed"] or r["paid"]),
+                            r["party"]))
+    return out
+
+
+def _default_payable_accounts(company, parties):
+    """Each party's default payable account, for the ledger deep-link."""
+    out = {}
+    try:
+        from erpnext.accounts.party import get_party_account
+    except ImportError:
+        return out
+    for party in parties[:50]:
+        try:
+            out[party] = get_party_account("Supplier", party, company)
+        except Exception:
+            continue
+    return out
+
+
+def _party_totals(rows, invoiced):
+    billed = flt(sum(r["billed"] for r in rows))
+    return {
+        "ordered": flt(sum(r["ordered"] for r in rows)),
+        "billed": billed,
+        "paid": flt(sum(r["paid"] for r in rows)),
+        "owed": flt(sum(r["owed"] for r in rows)),
+        "advance": flt(sum(r["advance"] for r in rows)),
+        # The bridge back to Invoiced: cost booked to the project whose
+        # payable leg never carried the project, so it reached no party.
+        "cost_without_party": flt(invoiced - billed),
+    }
