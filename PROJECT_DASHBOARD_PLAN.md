@@ -360,11 +360,33 @@ deliberate replacement, not a fight with it.
 
 ---
 
-## 10. Open questions
+## 10. Decisions taken
 
-1. **§4a** — auto-prefix the institute onto project names? (Recommended.)
-2. **§4c** — make Work Order Contract's project required?
-3. Do any projects span more than one institute, or is one project always one
-   company?
-4. Should the dashboard be group-wide (all 69) or per-institute by default?
-   The per-company query loop matters at trust level.
+| # | Decision | Consequence |
+|---|---|---|
+| 1 | **Auto-prefix the institute onto project names** | Create screen composes `{abbr} — {name}`; user types the plain name. Solves the global-uniqueness blocker (§4a) invisibly |
+| 2 | **One project belongs to exactly one company** | Company is a plain filter on the dashboard. No cross-company roll-up, no shared-project edge cases |
+| 3 | **Dashboard defaults to group-wide** (all 69) | The per-company query loop is mandatory from day one, not an optimisation. A single wide `company IN (...)` GROUP BY blows the 120s gunicorn timeout — see CLAUDE.md §9 |
+| 4 | **No project budgets for now** | Drop Budget / Variance / % of budget from the dashboard. `estimated_costing` may still be shown as a reference figure, clearly labelled as an estimate, not a control |
+
+Still open, for the WO session: whether `Work Order Contract.project` becomes
+required (§4c).
+
+### Revised dashboard KPI row
+
+Budget is out, so the row reads:
+
+Committed (PO, not yet invoiced) · Invoiced (PI) · Paid (PE/JE) · Outstanding
+· **Unattributed** (GL with no project — the leak indicator).
+
+---
+
+## 11. Progress
+
+- [x] **Payment Entry project gap closed** — commit `e88c6b9`. All seven
+      posting paths across both vouchers now carry project. Runtime
+      verification against dev still pending.
+- [ ] New Project screen (§9)
+- [ ] Project dashboard (§8)
+- [ ] WO session: Purchase Invoice ← Work Order Contract, Material Request
+      project (§7)
