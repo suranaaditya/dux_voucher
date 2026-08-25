@@ -2,11 +2,37 @@
 
 let _rv_party_dialog_open = false;
 
+// ---------------------------------------------------------------
+// Grid link dropdowns
+//
+// Project is the last column in the party grid, so its suggestion list
+// opened off the right edge of the window and the second line
+// ("PROJ-0001, Open, ...") was cut in half. Anchor the list to the right so
+// it opens inward, give it a usable width, and let long lines wrap.
+// Scoped to the project column inside a grid row, so no other form moves.
+// ---------------------------------------------------------------
+var _DUX_GRID_DROPDOWN_CSS =
+    '.grid-row .grid-static-col[data-fieldname="project"] .awesomplete > ul,' +
+    '.grid-row .col[data-fieldname="project"] .awesomplete > ul' +
+    '{ left: auto; right: 0; min-width: 300px; max-width: 420px; }' +
+    '.grid-row .grid-static-col[data-fieldname="project"] .awesomplete > ul > li,' +
+    '.grid-row .col[data-fieldname="project"] .awesomplete > ul > li' +
+    '{ white-space: normal; overflow-wrap: anywhere; line-height: 1.4; }';
+
+function _dux_inject_grid_dropdown_css() {
+    if (document.getElementById("dux-grid-dropdown-css")) return;
+    var s = document.createElement("style");
+    s.id = "dux-grid-dropdown-css";
+    s.textContent = _DUX_GRID_DROPDOWN_CSS;
+    document.head.appendChild(s);
+}
+
 frappe.ui.form.on("Receipt Voucher", {
 
     setup(frm) { },
 
     refresh(frm) {
+        _dux_inject_grid_dropdown_css();
         _rv_apply_entry_mode(frm);
         _rv_apply_payment_method_labels(frm);
         _rv_set_received_in_filter(frm);
