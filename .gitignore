@@ -57,3 +57,8 @@ jspm_packages/
 # Claude Code session scratch
 .claude/
 _deliverables/
+
+# Client sample data — never commit (this repo is public)
+_sampledata/
+*.rar
+nemanisitedata.zip
