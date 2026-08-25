@@ -58,15 +58,12 @@ def get_form_options():
         abbr = frappe.db.get_value("Company", name, "abbr")
         companies.append({"name": name, "abbr": abbr or ""})
 
-    project_types = [
-        r.name for r in frappe.get_all(
-            "Project Type", fields=["name"], order_by="name asc", limit=100
-        )
-    ]
-
+    # Project Type is deliberately not offered. ERPNext ships Internal /
+    # External / Other and nothing else exists here; all existing projects
+    # leave it blank. create_project still accepts the argument, so putting
+    # a real list of types back is a UI-only change.
     return {
         "companies": companies,
-        "project_types": project_types,
         "separator": NAME_SEPARATOR,
     }
 
@@ -91,7 +88,7 @@ def create_project(company, project_name, project_type=None,
     plain = (project_name or "").strip()
 
     if not company:
-        frappe.throw(_("Institute is required."))
+        frappe.throw(_("Company is required."))
     if not plain:
         frappe.throw(_("Project name is required."))
 

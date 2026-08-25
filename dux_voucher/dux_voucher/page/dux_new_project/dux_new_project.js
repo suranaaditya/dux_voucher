@@ -6,7 +6,7 @@
    fields across five tabs; a capital project at an institute needs six
    of them. Everything else stays at its default.
 
-   The institute abbreviation is prefixed onto the project name behind
+   The company abbreviation is prefixed onto the project name behind
    the scenes — Project.project_name is unique across the whole site
    with no company qualifier, so without it two institutes cannot both
    have a "Hostel Block A". The operator types only the plain name and
@@ -46,7 +46,7 @@ class DuxNewProject {
 	constructor(wrapper, page) {
 		this.wrapper = wrapper;
 		this.page = page;
-		this.opts = { companies: [], project_types: [], separator: " - " };
+		this.opts = { companies: [], separator: " - " };
 		this._busy = false;
 
 		this._injectStyles();
@@ -108,7 +108,7 @@ class DuxNewProject {
 
     <div class="dnp-row">
       <div class="dnp-fg">
-        <label>Institute<span class="dnp-req">*</span></label>
+        <label>Company<span class="dnp-req">*</span></label>
         <select id="dnp-company"><option value="">Loading…</option></select>
       </div>
     </div>
@@ -117,7 +117,7 @@ class DuxNewProject {
       <div class="dnp-fg">
         <label>Project name<span class="dnp-req">*</span></label>
         <input type="text" id="dnp-name" placeholder="Hostel Block A" autocomplete="off">
-        <div class="dnp-hint">Just the name — the institute is added automatically.</div>
+        <div class="dnp-hint">Just the name — the company abbreviation is added automatically.</div>
       </div>
     </div>
 
@@ -128,23 +128,16 @@ class DuxNewProject {
 
     <div class="dnp-row">
       <div class="dnp-fg">
-        <label>Type</label>
-        <select id="dnp-type"><option value="">Not set</option></select>
-      </div>
-      <div class="dnp-fg">
-        <label>Estimated cost</label>
-        <input type="number" id="dnp-cost" placeholder="0.00" min="0" step="0.01">
-      </div>
-    </div>
-
-    <div class="dnp-row">
-      <div class="dnp-fg">
         <label>Expected start</label>
         <input type="date" id="dnp-start">
       </div>
       <div class="dnp-fg">
         <label>Expected finish</label>
         <input type="date" id="dnp-end">
+      </div>
+      <div class="dnp-fg">
+        <label>Estimated cost</label>
+        <input type="number" id="dnp-cost" placeholder="0.00" min="0" step="0.01">
       </div>
     </div>
 
@@ -198,12 +191,11 @@ class DuxNewProject {
 				var o = (r && r.message) || {};
 				self.opts = {
 					companies: o.companies || [],
-					project_types: o.project_types || [],
 					separator: o.separator || " - ",
 				};
 
 				var $c = self.$.find("#dnp-company");
-				$c.empty().append('<option value="">Choose an institute…</option>');
+				$c.empty().append('<option value="">Choose a company…</option>');
 				self.opts.companies.forEach(function (c) {
 					$c.append('<option value="' + _esc(c.name) + '" data-abbr="' +
 						_esc(c.abbr) + '">' + _esc(c.name) + "</option>");
@@ -211,12 +203,6 @@ class DuxNewProject {
 				if (self.opts.companies.length === 1) {
 					$c.val(self.opts.companies[0].name);
 				}
-
-				var $t = self.$.find("#dnp-type");
-				$t.empty().append('<option value="">Not set</option>');
-				self.opts.project_types.forEach(function (t) {
-					$t.append('<option value="' + _esc(t) + '">' + _esc(t) + "</option>");
-				});
 
 				self._preview();
 			},
@@ -262,7 +248,7 @@ class DuxNewProject {
 
 		if (!company) {
 			this.$.find("#dnp-company").addClass("dnp-err");
-			return this._error("Pick the institute this project belongs to.");
+			return this._error("Pick the company this project belongs to.");
 		}
 		if (!name) {
 			this.$.find("#dnp-name").addClass("dnp-err").focus();
@@ -281,7 +267,6 @@ class DuxNewProject {
 			args: {
 				company: company,
 				project_name: name,
-				project_type: this.$.find("#dnp-type").val() || null,
 				expected_start_date: start || null,
 				expected_end_date: end || null,
 				estimated_costing: this.$.find("#dnp-cost").val() || null,
@@ -312,7 +297,6 @@ class DuxNewProject {
 
 	_reset() {
 		this.$.find("#dnp-name, #dnp-cost, #dnp-start, #dnp-end, #dnp-notes").val("");
-		this.$.find("#dnp-type").val("");
 		this.$.find("#dnp-company, #dnp-name, #dnp-start, #dnp-end").removeClass("dnp-err");
 		this._error("");
 		this.$.find("#dnp-preview").removeClass("dnp-on");
