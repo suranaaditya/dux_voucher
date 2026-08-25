@@ -65,8 +65,12 @@ def get_dashboard(companies=None, from_date=None, to_date=None, status=None):
     """One payload for the whole dashboard.
 
     ``companies`` may be a list or a JSON string (Frappe passes either).
+    Empty means group-wide — every company the user may see — because that
+    is the view the client asked to land on.
     """
-    companies = _resolve_companies(companies)
+    permitted = _permitted_companies()
+    selected = _parse_companies(companies)
+    companies = _resolve_companies(selected, permitted)
     if not companies:
         return _empty()
 
@@ -122,13 +126,54 @@ def get_dashboard(companies=None, from_date=None, to_date=None, status=None):
     return {
         "period": {"from_date": str(from_date), "to_date": str(to_date)},
         "companies": scan,
-        "companies_permitted": len(companies),
+        "companies_searched": len(companies),
+        "companies_permitted": len(permitted) or len(companies),
+        "scoped": bool(selected),
         "kpi": _kpis(rows, unattributed, unattributed_rows),
         "projects": rows,
         "by_company": _by_company(rows),
         "attention": _attention(rows, unattributed, unattributed_rows),
         "generated_on": frappe.utils.now(),
     }
+
+
+@frappe.whitelist()
+def search_companies(txt=None, limit=25):
+    """Companies for the dashboard's picker — only ones that hold a project.
+
+    Deliberately not every company on the site. Three of this site's
+    sixty-nine hold a project, so a picker listing all of them is a
+    haystack in which sixty-six of the choices render an empty dashboard.
+    One grouped read of ``tabProject`` gives both the list and the counts
+    that make each option worth picking.
+
+    Permission-scoped here as well as in ``get_dashboard`` — a whitelisted
+    endpoint is reachable directly, whatever the picker offers.
+    """
+    permitted = set(_permitted_companies())
+    like = "%{0}%".format(txt or "")
+
+    rows = frappe.db.sql(
+        """
+        SELECT p.company                                   AS value,
+               COUNT(*)                                    AS projects,
+               SUM(CASE WHEN p.status = 'Open' THEN 1 ELSE 0 END) AS open_projects
+        FROM `tabProject` p
+        INNER JOIN `tabCompany` c ON c.name = p.company
+        WHERE p.company LIKE %(l)s OR c.abbr LIKE %(l)s
+        GROUP BY p.company
+        ORDER BY projects DESC, p.company
+        LIMIT %(lim)s
+        """,
+        {"l": like, "lim": int(limit)},
+        as_dict=True,
+    )
+
+    return [{
+        "value": r["value"],
+        "projects": int(r["projects"] or 0),
+        "open_projects": int(r["open_projects"] or 0),
+    } for r in rows if not permitted or r["value"] in permitted]
 
 
 # =====================================================================
@@ -375,20 +420,30 @@ def _money(v):
     return frappe.utils.fmt_money(flt(v), currency="INR")
 
 
-def _resolve_companies(companies):
-    """Company scoping is enforced here, not by narrowing the picker — a
-    whitelisted endpoint is reachable directly."""
+def _permitted_companies():
     from dux_voucher.dux_voucher.api.reports_api import get_permitted_companies
 
+    return get_permitted_companies() or []
+
+
+def _parse_companies(companies):
+    """Frappe hands a list through as a JSON string over HTTP."""
     if isinstance(companies, str):
         import json
         try:
             companies = json.loads(companies)
         except ValueError:
             companies = [companies] if companies else []
-    companies = [c for c in (companies or []) if c]
+    return [c for c in (companies or []) if c]
 
-    permitted = get_permitted_companies() or []
+
+def _resolve_companies(companies, permitted=None):
+    """Company scoping is enforced here, not by narrowing the picker — a
+    whitelisted endpoint is reachable directly."""
+    companies = _parse_companies(companies)
+    if permitted is None:
+        permitted = _permitted_companies()
+
     if not companies:
         return permitted
     if not permitted:
@@ -407,6 +462,7 @@ def _resolve_period(from_date, to_date):
 def _empty():
     return {
         "period": {}, "companies": [],
+        "companies_searched": 0, "companies_permitted": 0, "scoped": False,
         "kpi": {"committed": 0, "invoiced": 0, "paid": 0, "outstanding": 0,
                 "uninvoiced": 0, "unattributed": 0, "unattributed_entries": 0,
                 "active_projects": 0, "total_projects": 0},

@@ -69,6 +69,9 @@ class DuxProjectDashboard {
 		this.page = page;
 		this.data = null;
 		this._busy = false;
+		/* Empty means group-wide. The client's default view is the whole
+		   group, so an untouched picker must not narrow anything. */
+		this.companies = [];
 
 		this._injectStyles();
 		this._renderShell();
@@ -91,6 +94,25 @@ class DuxProjectDashboard {
 .dpd-fg label{font-size:10px;font-weight:700;color:#8b929e;text-transform:uppercase;letter-spacing:.08em}
 .dpd-fg select,.dpd-fg input{height:34px;border:1px solid #e8eaed;border-radius:8px;padding:0 10px;font-size:12.5px;color:#111827;background:#fff;outline:none;font-family:inherit;box-sizing:border-box}
 .dpd-fg select:focus,.dpd-fg input:focus{border-color:#0d9488;box-shadow:0 0 0 3px rgba(13,148,136,.08)}
+.dpd-co{position:relative;flex:0 1 320px;min-width:250px}
+.dpd-chips{display:flex;flex-wrap:wrap;gap:5px;align-items:center;min-height:34px;
+  border:1px solid #e8eaed;border-radius:8px;padding:3px 8px;background:#fff;cursor:text;box-sizing:border-box}
+.dpd-chips:focus-within{border-color:#0d9488;box-shadow:0 0 0 3px rgba(13,148,136,.08)}
+.dpd-chip{display:inline-flex;align-items:center;gap:6px;background:#f0fdfa;color:#0f766e;
+  border-radius:6px;padding:2px 7px;font-size:11.5px;font-weight:600;max-width:170px}
+.dpd-chip .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dpd-chip .x{cursor:pointer;opacity:.55;font-size:14px;line-height:1}
+.dpd-chip .x:hover{opacity:1}
+.dpd-chips input{border:0;outline:0;background:transparent;flex:1;min-width:70px;height:26px;
+  font-size:12.5px;color:#111827;font-family:inherit}
+.dpd-drop{position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:50;background:#fff;
+  border:1px solid #e8eaed;border-radius:10px;box-shadow:0 8px 24px rgba(16,24,40,.10);
+  max-height:280px;overflow-y:auto;display:none}
+.dpd-drop.open{display:block}
+.dpd-opt{padding:9px 12px;cursor:pointer;font-size:12.5px;display:flex;justify-content:space-between;
+  gap:10px;align-items:center}
+.dpd-opt:hover{background:#f6fefb}
+.dpd-opt .c{font-size:10.5px;color:#8b929e;white-space:nowrap}
 .dpd-btn{height:34px;padding:0 15px;border-radius:8px;font-size:12.5px;font-weight:600;cursor:pointer;border:1px solid #e8eaed;background:#fff;color:#374151;font-family:inherit}
 .dpd-btn:hover{background:#f9fafb}
 .dpd-btn-p{background:#0d9488;border-color:#0d9488;color:#fff}
@@ -131,6 +153,13 @@ class DuxProjectDashboard {
 		this.$.html(`
 <div class="dpd">
   <div class="dpd-bar">
+    <div class="dpd-fg dpd-co">
+      <label>Companies</label>
+      <div class="dpd-chips" id="dpd-chips">
+        <input id="dpd-co-inp" placeholder="All companies" autocomplete="off">
+      </div>
+      <div class="dpd-drop" id="dpd-drop"></div>
+    </div>
     <div class="dpd-fg">
       <label>From</label>
       <input type="date" id="dpd-from" value="${_monthsAgo(12)}">
@@ -158,6 +187,87 @@ class DuxProjectDashboard {
 		var self = this;
 		this.$.find("#dpd-go").on("click", function () { self.load(); });
 		this.$.find("#dpd-from, #dpd-to, #dpd-status").on("change", function () { self.load(); });
+		this._bindCompanyPicker();
+	}
+
+	/* ---- company picker -------------------------------------------
+	   Chips, not a <select multiple>: the group runs to 69 companies and
+	   a native multi-select gives no way to see what is currently on
+	   without scrolling it. Same pattern as the Trial Balance page. */
+	_bindCompanyPicker() {
+		var self = this, $w = this.$, t = null;
+
+		$w.on("click", "#dpd-chips", function () { $w.find("#dpd-co-inp").focus(); });
+
+		$w.on("input", "#dpd-co-inp", function (e) {
+			clearTimeout(t);
+			var txt = e.target.value;
+			t = setTimeout(function () { self._searchCompanies(txt); }, 180);
+		});
+		$w.on("focus", "#dpd-co-inp", function () {
+			self._searchCompanies($w.find("#dpd-co-inp").val());
+		});
+
+		/* Namespaced so re-entering the page does not stack handlers. */
+		$(document).off("click.dpd").on("click.dpd", function (e) {
+			if (!$(e.target).closest(".dpd-co").length) $w.find("#dpd-drop").removeClass("open");
+		});
+
+		$w.on("click", ".dpd-opt[data-v]", function () {
+			var v = $(this).attr("data-v");
+			if (self.companies.indexOf(v) === -1) self.companies.push(v);
+			$w.find("#dpd-co-inp").val("");
+			$w.find("#dpd-drop").removeClass("open");
+			self._renderChips();
+			self.load();
+		});
+
+		$w.on("click", ".dpd-chip .x", function (e) {
+			e.stopPropagation();
+			var v = $(this).closest(".dpd-chip").attr("data-v");
+			self.companies = self.companies.filter(function (c) { return c !== v; });
+			self._renderChips();
+			self.load();
+		});
+	}
+
+	_searchCompanies(txt) {
+		var self = this;
+		frappe.call({
+			method: "dux_voucher.dux_voucher.api.project_dashboard.search_companies",
+			args: { txt: txt || "" },
+			callback: function (r) {
+				var rows = (r && r.message) || [];
+				var picked = self.companies;
+				var open = rows.filter(function (o) { return picked.indexOf(o.value) === -1; });
+				var $d = self.$.find("#dpd-drop");
+
+				if (!open.length) {
+					$d.html('<div class="dpd-opt" style="color:#9ca3af;cursor:default">' +
+						(rows.length ? "All matching companies are already selected"
+									 : "No company with a project matches") + "</div>");
+				} else {
+					$d.html(open.map(function (o) {
+						return '<div class="dpd-opt" data-v="' + _esc(o.value) + '">' +
+							"<span>" + _esc(o.value) + "</span>" +
+							'<span class="c">' + o.projects + " project" + (o.projects === 1 ? "" : "s") +
+							"</span></div>";
+					}).join(""));
+				}
+				$d.addClass("open");
+			},
+		});
+	}
+
+	_renderChips() {
+		var $c = this.$.find("#dpd-chips");
+		$c.find(".dpd-chip").remove();
+		$c.prepend(this.companies.map(function (v) {
+			return '<span class="dpd-chip" data-v="' + _esc(v) + '"><span class="n">' +
+				_esc(v) + '</span><span class="x">&times;</span></span>';
+		}).join(""));
+		this.$.find("#dpd-co-inp").attr(
+			"placeholder", this.companies.length ? "Add another…" : "All companies");
 	}
 
 	load() {
@@ -169,6 +279,7 @@ class DuxProjectDashboard {
 		frappe.call({
 			method: "dux_voucher.dux_voucher.api.project_dashboard.get_dashboard",
 			args: {
+				companies: this.companies,
 				from_date: this.$.find("#dpd-from").val() || null,
 				to_date: this.$.find("#dpd-to").val() || null,
 				status: this.$.find("#dpd-status").val() || "All",
@@ -191,8 +302,12 @@ class DuxProjectDashboard {
 		var d = this.data, k = d.kpi;
 
 		this.$.find("#dpd-meta").html(
-			_esc(d.companies.length) + " of " + _esc(d.companies_permitted) + " companies hold projects<br>" +
-			"as at " + _esc((d.generated_on || "").slice(0, 16))
+			(d.scoped
+				? _esc(d.companies_searched) + " of " + _esc(d.companies_permitted) +
+				  " companies selected"
+				: _esc(d.companies.length) + " of " + _esc(d.companies_permitted) +
+				  " companies hold projects") +
+			"<br>as at " + _esc((d.generated_on || "").slice(0, 16))
 		);
 
 		var html = this._kpis(k);
