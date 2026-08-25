@@ -116,6 +116,7 @@ def get_dashboard(companies=None, from_date=None, to_date=None, status=None):
                 agg["last_activity"] = r["last_activity"]
 
     committed = _committed_from_po(companies, projects.keys())
+    _add_work_order_commitment(committed, companies, projects.keys())
     rows = _assemble(projects, gl, committed)
 
     return {
@@ -198,6 +199,39 @@ def _committed_from_po(companies, project_names):
         as_dict=True,
     )
     return {r["project"]: flt(r["committed"]) for r in rows if r["project"]}
+
+
+def _add_work_order_commitment(committed, companies, project_names):
+    """Fold in Work Order Contract value from the dux_civil_works app.
+
+    For a construction group the work orders ARE the commitment: on the
+    seeded Nemani project they are 97 lakh against 10 lakh of purchase
+    orders, so a Committed figure built from POs alone understates it by an
+    order of magnitude.
+
+    Guarded on the doctype existing, so this app does not hard-depend on
+    dux_civil_works being installed.
+    """
+    if not project_names:
+        return
+    if not frappe.db.exists("DocType", "Work Order Contract"):
+        return
+
+    rows = frappe.db.sql(
+        """
+        SELECT project, SUM(total_amount) AS committed
+        FROM `tabWork Order Contract`
+        WHERE docstatus = 1
+          AND company IN %(companies)s
+          AND project IN %(projects)s
+        GROUP BY project
+        """,
+        {"companies": tuple(companies), "projects": tuple(project_names)},
+        as_dict=True,
+    )
+    for r in rows:
+        if r["project"]:
+            committed[r["project"]] = flt(committed.get(r["project"])) + flt(r["committed"])
 
 
 def _project_master(companies, status=None):
