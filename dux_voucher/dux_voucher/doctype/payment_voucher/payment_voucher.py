@@ -245,6 +245,12 @@ class PaymentVoucher(Document):
             pe.remarks = self.remarks or ""
             pe.custom_source_voucher_doctype = "Payment Voucher"
             pe.custom_source_voucher = self.name
+            # Project is an accounting dimension: ERPNext's get_gl_dict seeds
+            # every GL row with the parent's `project`, so setting it here is
+            # all that's needed for the payment to be attributable. Party-wise
+            # has no per-row project (PV Party Row carries only party fields),
+            # so every PE from this voucher takes the header value.
+            pe.project = self.project or ""
 
             _submit_doc(pe)
             refs.append({
@@ -328,6 +334,9 @@ class PaymentVoucher(Document):
         pe.remarks = self.remarks or ""
         pe.custom_source_voucher_doctype = "Payment Voucher"
         pe.custom_source_voucher = self.name
+        # A contra moves money between two of our own bank/cash accounts, so
+        # the header project is the only sensible source — there are no rows.
+        pe.project = self.project or ""
 
         _submit_doc(pe)
         return [{
