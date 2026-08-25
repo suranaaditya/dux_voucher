@@ -1,84 +1,94 @@
 {
-    "actions": [],
-    "allow_rename": 1,
-    "creation": "2026-03-29 07:19:08.237559",
-    "doctype": "DocType",
-    "editable_grid": 1,
-    "engine": "InnoDB",
-    "field_order": [
-        "party",
-        "party_type",
-        "party_name",
-        "amount",
-        "current_balance",
-        "balance_type"
-    ],
-    "fields": [
-        {
-            "columns": 4,
-            "fieldname": "party",
-            "fieldtype": "Data",
-            "in_list_view": 1,
-            "label": "Party",
-            "reqd": 1
-        },
-        {
-            "fieldname": "party_type",
-            "fieldtype": "Select",
-            "hidden": 1,
-            "label": "Party Type",
-            "options": "\nCustomer\nSupplier\nEmployee",
-            "read_only": 1
-        },
-        {
-            "columns": 3,
-            "fieldname": "party_name",
-            "fieldtype": "Data",
-            "in_list_view": 1,
-            "label": "Name",
-            "read_only": 1
-        },
-        {
-            "columns": 2,
-            "fieldname": "amount",
-            "fieldtype": "Currency",
-            "in_list_view": 1,
-            "label": "Amount",
-            "reqd": 1
-        },
-        {
-            "columns": 2,
-            "fieldname": "current_balance",
-            "fieldtype": "Currency",
-            "in_list_view": 1,
-            "label": "Balance",
-            "no_copy": 1,
-            "read_only": 1
-        },
-        {
-            "columns": 1,
-            "fieldname": "balance_type",
-            "fieldtype": "Select",
-            "in_list_view": 1,
-            "label": "Dr/Cr",
-            "no_copy": 1,
-            "options": "\nDr\nCr\nNil",
-            "read_only": 1
-        }
-    ],
-    "grid_page_length": 50,
-    "index_web_pages_for_search": 1,
-    "istable": 1,
-    "links": [],
-    "modified": "2026-03-31 00:00:00.000000",
-    "modified_by": "Administrator",
-    "module": "Dux Voucher",
-    "name": "PV Party Row",
-    "owner": "Administrator",
-    "permissions": [],
-    "row_format": "Dynamic",
-    "rows_threshold_for_grid_search": 20,
-    "sort_field": "creation",
-    "sort_order": "DESC",
-    "states": []
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-03-29 07:19:08.237559",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "party",
+  "party_type",
+  "party_name",
+  "amount",
+  "current_balance",
+  "balance_type",
+  "project"
+ ],
+ "fields": [
+  {
+   "columns": 4,
+   "fieldname": "party",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Party",
+   "reqd": 1
+  },
+  {
+   "fieldname": "party_type",
+   "fieldtype": "Select",
+   "hidden": 1,
+   "label": "Party Type",
+   "options": "\nCustomer\nSupplier\nEmployee",
+   "read_only": 1
+  },
+  {
+   "columns": 3,
+   "fieldname": "party_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Name",
+   "read_only": 1
+  },
+  {
+   "columns": 2,
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Amount",
+   "reqd": 1
+  },
+  {
+   "columns": 2,
+   "fieldname": "current_balance",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Balance",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "columns": 1,
+   "fieldname": "balance_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Dr/Cr",
+   "no_copy": 1,
+   "options": "\nDr\nCr\nNil",
+   "read_only": 1
+  },
+  {
+   "columns": 2,
+   "fieldname": "project",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Project",
+   "options": "Project",
+   "description": "Leave blank to use the voucher-level Project"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-25 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Dux Voucher",
+ "name": "PV Party Row",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
 }

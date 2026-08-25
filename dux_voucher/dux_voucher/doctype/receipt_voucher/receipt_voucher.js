@@ -666,6 +666,9 @@ function _rv_set_account_row_filter(frm) {
     frm.set_query("project", "combined_rows", function () {
         return { filters: { company: frm.doc.company } };
     });
+    frm.set_query("project", "party_rows", function () {
+        return { filters: { company: frm.doc.company } };
+    });
 }
 
 
@@ -1134,3 +1137,32 @@ function _rv_convert_combined_to(frm, target_mode) {
         indicator: "blue"
     }, 6);
 }
+
+// ---------------------------------------------------------------
+// Header Project → blank party rows
+//
+// Party-wise posts one Payment Entry per row and each row carries its own
+// Project, so a voucher paying five parties can tag only the two that
+// belong to the project. Filling the header pushes it into rows that are
+// still blank — visible in the grid, so what you see is what posts. Clear
+// any row that does not belong.
+// ---------------------------------------------------------------
+frappe.ui.form.on("Receipt Voucher", {
+    project: function (frm) {
+        if (!frm.doc.project) return;
+        var touched = 0;
+        (frm.doc.party_rows || []).forEach(function (row) {
+            if (!row.project) {
+                frappe.model.set_value(row.doctype, row.name, "project", frm.doc.project);
+                touched++;
+            }
+        });
+        if (touched) {
+            frm.refresh_field("party_rows");
+            frappe.show_alert({
+                message: __("Project applied to {0} party row(s). Clear any that do not belong.", [touched]),
+                indicator: "blue",
+            }, 6);
+        }
+    },
+});

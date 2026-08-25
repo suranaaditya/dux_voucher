@@ -213,10 +213,12 @@ class ReceiptVoucher(Document):
             pe.custom_source_voucher = self.name
             # Project is an accounting dimension: ERPNext's get_gl_dict seeds
             # every GL row with the parent's `project`, so setting it here is
-            # all that's needed for the receipt to be attributable. Party-wise
-            # has no per-row project (RV Party Row carries only party fields),
-            # so every PE from this voucher takes the header value.
-            pe.project = self.project or ""
+            # all that's needed for the receipt to be attributable.
+            #
+            # PER ROW, not per voucher — one voucher can collect from several
+            # parties and only some of them belong to the project. Same
+            # row-then-header idiom as the JE modes.
+            pe.project = row.project or self.project or ""
 
             _submit_doc(pe)
             refs.append({
