@@ -912,11 +912,29 @@ def _work_order_billing(company, project, as_at=None):
         })
 
     def bucket(rows_):
+        """Grouped by supplier, because that is the question it answers.
+
+        A contractor's Billed in the party table counts every bill they
+        raised; the work-order rows count only the bills that name a work
+        order. The difference is exactly what lands here, so naming the
+        supplier is what lets a reader tie the two cards together instead
+        of doing the subtraction themselves.
+        """
+        by_supplier = {}
+        for r in rows_:
+            b = by_supplier.setdefault(r["supplier"], {
+                "supplier": r["supplier"], "value": 0.0, "invoices": [],
+            })
+            b["value"] += flt(r["value"])
+            b["invoices"].append({
+                "name": r["name"],
+                "posting_date": str(r["posting_date"]),
+                "value": flt(r["value"]),
+            })
+        suppliers = sorted(by_supplier.values(), key=lambda x: -x["value"])
         return {"value": flt(sum(flt(r["value"]) for r in rows_)),
                 "count": len(rows_),
-                "invoices": [{"name": r["name"], "supplier": r["supplier"],
-                              "posting_date": str(r["posting_date"]),
-                              "value": flt(r["value"])} for r in rows_[:8]]}
+                "suppliers": suppliers}
 
     on_po = bucket([i for i in invoices if not i["wo"] and i["from_po"]])
     loose = bucket([i for i in invoices if not i["wo"] and not i["from_po"]])

@@ -243,6 +243,10 @@ class DuxProjectDashboard {
 .dpd-wobar{height:6px;background:#f1f2f4;border-radius:3px;overflow:hidden;margin-top:5px;width:110px}
 .dpd-wobar i{display:block;height:100%}
 .dpd-worow:hover .dpd-td{background:#f6fefb;cursor:pointer}
+.dpd-supline{display:flex;align-items:baseline;gap:12px;padding:5px 0;flex-wrap:wrap}
+.dpd-supname{font-size:12px;font-weight:600;color:#374151;min-width:170px}
+.dpd-supinv{flex:1;min-width:150px}
+.dpd-supval{font-size:12.5px;font-weight:700;white-space:nowrap;margin-left:auto}
 .dpd-loose{border-top:1px solid #eef0f2;padding:14px 20px;display:flex;gap:13px;align-items:flex-start}
 .dpd-loose-v{font-size:15px;font-weight:700}
 .dpd-loose-l{font-size:12.5px;font-weight:600;color:#111827}
@@ -968,19 +972,37 @@ class DuxProjectDashboard {
 </tr>`;
 		}).join("");
 
+		/* Grouped by contractor, not just listed as invoice numbers. Whose
+		   bills these are is the whole reason the figure differs from the
+		   same contractor's Billed in the party table below. */
 		function loose(kind, b, tone, label, note) {
 			if (!b.count) return "";
-			var links = b.invoices.map(function (i) {
-				return '<span class="dpd-inv" data-pi="' + _esc(i.name) + '">' + _esc(i.name) + "</span>";
+			var shown = b.suppliers.slice(0, 6);
+			var lines = shown.map(function (sup) {
+				var links = sup.invoices.slice(0, 5).map(function (i) {
+					return '<span class="dpd-inv" data-pi="' + _esc(i.name) + '">' + _esc(i.name) + "</span>";
+				}).join("");
+				var extra = sup.invoices.length - 5;
+				return `<div class="dpd-supline">
+  <div class="dpd-supname">${_esc(sup.supplier)}</div>
+  <div class="dpd-supinv">${links}${extra > 0
+		? '<span style="font-size:11px;color:#9ca3af">+' + extra + " more</span>" : ""}</div>
+  <div class="dpd-mono dpd-supval">${_num(sup.value)}</div>
+</div>`;
 			}).join("");
+			var restSup = b.suppliers.length - shown.length;
+
 			return `<div class="dpd-loose">
-  <div style="flex:1">
-    <div class="dpd-loose-l" style="color:${tone}">${label}</div>
+  <div style="flex:1;min-width:0">
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline">
+      <div class="dpd-loose-l" style="color:${tone}">${label}</div>
+      <div class="dpd-mono dpd-loose-v" style="color:${tone};white-space:nowrap">${_num(b.value)}</div>
+    </div>
     <div class="dpd-loose-s">${note}</div>
-    <div style="margin-top:7px">${links}${b.count > b.invoices.length
-		? '<span style="font-size:11px;color:#9ca3af">and ' + (b.count - b.invoices.length) + " more</span>" : ""}</div>
+    <div style="margin-top:9px">${lines}${restSup > 0
+		? '<div style="font-size:11px;color:#9ca3af;margin-top:6px">and ' + restSup +
+		  " more contractor" + (restSup === 1 ? "" : "s") + "</div>" : ""}</div>
   </div>
-  <div class="dpd-mono dpd-loose-v" style="color:${tone};white-space:nowrap">${_num(b.value)}</div>
 </div>`;
 		}
 
@@ -990,6 +1012,11 @@ class DuxProjectDashboard {
   ${this._cardHead("Work orders",
 		W.rows.length + " contract" + (W.rows.length === 1 ? "" : "s") +
 		" &nbsp;&middot;&nbsp; ordered against billed, from the invoices that name each one")}
+  <div class="dpd-bridge" style="border-bottom:1px solid #eef0f2;padding-top:0">
+    <b>Billed</b> here counts only invoices that name a work order. A contractor&rsquo;s total billing
+    is in <b>Who the money is with</b> below &mdash; the difference is whatever sits in the two
+    unlinked blocks at the foot of this card.
+  </div>
   <div class="dpd-pstats" style="grid-template-columns:repeat(3,1fr)">
     ${stat("Ordered", t.ordered)}
     ${stat("Billed", t.billed)}
