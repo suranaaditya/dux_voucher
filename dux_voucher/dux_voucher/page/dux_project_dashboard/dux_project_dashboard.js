@@ -22,13 +22,21 @@ frappe.pages["dux-project-dashboard"].on_page_load = function (wrapper) {
 			title: "Capital Projects",
 			single_column: true,
 		});
-		new DuxProjectDashboard(wrapper, page);
+		wrapper.__dux = new DuxProjectDashboard(wrapper, page);
 	} catch (e) {
 		$(wrapper).find(".layout-main-section").html(
 			'<div style="padding:40px;color:red;font-size:13px">Error: ' + e.message + "</div>"
 		);
 		console.error("dux-project-dashboard:", e);
 	}
+};
+
+/* A drilled-in project lives at /app/dux-project-dashboard/PROJ-0007, so the
+   view can be linked to and the browser's back button works. Frappe calls
+   this on every route change into the page, including sub-route changes and
+   history navigation, which is what makes back and forward behave. */
+frappe.pages["dux-project-dashboard"].on_page_show = function (wrapper) {
+	if (wrapper.__dux) wrapper.__dux.syncFromRoute();
 };
 
 function _esc(s) {
@@ -90,7 +98,20 @@ class DuxProjectDashboard {
 
 		this._injectStyles();
 		this._renderShell();
-		this.load();
+
+		/* Land where the URL says, not always on the portfolio. */
+		var routed = (frappe.get_route() || [])[1];
+		if (routed) this.openProject(routed, true);
+		else this.load();
+	}
+
+	/* Route -> view. Guarded on the current state so that writing the route
+	   ourselves does not bounce straight back through here. */
+	syncFromRoute() {
+		var want = (frappe.get_route() || [])[1] || null;
+		if (want === this.project) return;
+		if (want) this.openProject(want, true);
+		else this.backToPortfolio(true);
 	}
 
 	get $() { return $(this.wrapper).find(".layout-main-section"); }
@@ -163,6 +184,8 @@ class DuxProjectDashboard {
 .dpd-crumb{font-size:11.5px;margin-bottom:10px}
 .dpd-crumb a{color:#8b929e;text-decoration:none}
 .dpd-crumb a:hover{color:#0d9488}
+.dpd-copy{margin-left:12px;font-size:11px;color:#8b929e;cursor:pointer;border-bottom:1px dotted #c3c8d0}
+.dpd-copy:hover{color:#0d9488;border-bottom-color:#0d9488}
 .dpd-dhead-row{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
 .dpd-dtitle{display:flex;align-items:center;gap:11px;margin-bottom:6px;flex-wrap:wrap;
   font-size:21px;font-weight:700;letter-spacing:-.02em}
@@ -243,6 +266,21 @@ class DuxProjectDashboard {
 .dpd-wobar{height:6px;background:#f1f2f4;border-radius:3px;overflow:hidden;margin-top:5px;width:110px}
 .dpd-wobar i{display:block;height:100%}
 .dpd-worow:hover .dpd-td{background:#f6fefb;cursor:pointer}
+.dpd-link{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.04em;
+  text-transform:uppercase;color:#0d9488;background:#f0fdfa;border:1px solid #ccfbf1;
+  border-radius:5px;padding:2px 7px;margin-left:8px;cursor:pointer;vertical-align:middle}
+.dpd-link:hover{background:#ccfbf1}
+.dpd-opt-wo{border:1px solid #e8eaed;border-radius:9px;padding:11px 13px;margin-bottom:8px;cursor:pointer}
+.dpd-opt-wo:hover{border-color:#0d9488;background:#f6fefb}
+.dpd-opt-wo.on{border-color:#0d9488;background:#f0fdfa;box-shadow:0 0 0 3px rgba(13,148,136,.09)}
+.dpd-opt-wo.over{border-color:#fde68a}
+.dpd-opt-wo.over.on{border-color:#f59e0b;box-shadow:0 0 0 3px rgba(245,158,11,.12)}
+.dpd-opt-head{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+.dpd-opt-name{font-size:12.5px;font-weight:700;font-family:'SFMono-Regular',Consolas,monospace;color:#0d9488}
+.dpd-opt-title{font-size:11.5px;color:#8b929e;margin-top:2px}
+.dpd-opt-nums{display:flex;gap:16px;margin-top:9px;font-size:11px;color:#6b7280;flex-wrap:wrap}
+.dpd-opt-nums b{color:#111827;font-family:'SFMono-Regular',Consolas,monospace;font-weight:700}
+.dpd-opt-after{font-size:11.5px;font-weight:600;white-space:nowrap}
 .dpd-supline{display:flex;align-items:baseline;gap:12px;padding:5px 0;flex-wrap:wrap}
 .dpd-supname{font-size:12px;font-weight:600;color:#374151;min-width:170px}
 .dpd-supinv{flex:1;min-width:150px}
@@ -385,7 +423,7 @@ class DuxProjectDashboard {
 		/* The dates apply to both views; re-running while drilled in
 		   should re-range the project, not throw you back to the list. */
 		if (this.view === "detail" && this.project) {
-			this.openProject(this.project);
+			this.openProject(this.project, true);
 			return;
 		}
 		if (this._busy) return;
@@ -617,10 +655,11 @@ class DuxProjectDashboard {
 	   this.data, so coming back is a re-render rather than a re-query.
 	   ================================================================ */
 
-	openProject(name) {
+	openProject(name, fromRoute) {
 		var self = this;
 		this.view = "detail";
 		this.project = name;
+		if (!fromRoute) frappe.set_route("dux-project-dashboard", name);
 		this._chrome();
 		this.$.find("#dpd-body").html('<div class="dpd-spin">Loading…</div>');
 
@@ -643,9 +682,10 @@ class DuxProjectDashboard {
 		});
 	}
 
-	backToPortfolio() {
+	backToPortfolio(fromRoute) {
 		this.view = "portfolio";
 		this.project = null;
+		if (!fromRoute) frappe.set_route("dux-project-dashboard");
 		this._chrome();
 		if (this.data) this._render(); else this.load();
 	}
@@ -699,7 +739,10 @@ class DuxProjectDashboard {
 		if (p.expected_end_date) when.push(_date(p.expected_end_date));
 
 		return `<div class="dpd-dhead">
-  <div class="dpd-crumb"><a href="#" id="dpd-back">&lsaquo;&nbsp; Capital Projects</a></div>
+  <div class="dpd-crumb">
+    <a href="#" id="dpd-back">&lsaquo;&nbsp; Capital Projects</a>
+    <span class="dpd-copy" id="dpd-copy" title="Copy a link to this project">copy link</span>
+  </div>
   <div class="dpd-dhead-row">
     <div>
       <div class="dpd-dtitle">
@@ -928,6 +971,132 @@ class DuxProjectDashboard {
 </div>`;
 	}
 
+	/* ---- link an invoice to its work order --------------------------
+
+	   The field is allow_on_submit=0 and these invoices are submitted, so
+	   the write goes through a whitelisted endpoint rather than a form.
+	   The dialog exists because "which contract" is a judgement, and it is
+	   only makeable with the numbers in front of you: what each work order
+	   is worth, what is already billed against it, and what this invoice
+	   would take it to. */
+	_openLinkDialog(invoice) {
+		var self = this;
+		frappe.call({
+			method: "dux_voucher.dux_voucher.api.project_dashboard.get_link_options",
+			args: { invoice: invoice },
+			callback: function (r) {
+				if (!r || !r.message) return;
+				self._linkDialog(r.message);
+			},
+		});
+	}
+
+	_linkDialog(d) {
+		var self = this, chosen = d.linked_to || null;
+
+		if (!d.options.length) {
+			frappe.msgprint({
+				title: __("No work order to link to"),
+				message: __("{0} has no submitted work order on this project, so there is nothing for {1} to point at.",
+					[d.supplier, d.invoice]),
+				indicator: "orange",
+			});
+			return;
+		}
+
+		var body = d.options.map(function (o) {
+			var pct = o.pct_after == null ? null : Math.round(o.pct_after);
+			return `<div class="dpd-opt-wo ${o.overbills ? "over" : ""} ${o.current ? "on" : ""}" data-wo="${_esc(o.name)}">
+  <div class="dpd-opt-head">
+    <div>
+      <div class="dpd-opt-name">${_esc(o.name)}${o.current ? ' <span style="color:#8b929e;font-weight:600">— linked now</span>' : ""}</div>
+      ${o.title ? '<div class="dpd-opt-title">' + _esc(String(o.title).slice(0, 70)) + "</div>" : ""}
+    </div>
+    <div class="dpd-opt-after" style="color:${o.overbills ? "#b45309" : "#0f766e"}">
+      ${pct == null ? "" : "&rarr; " + pct + "% billed"}
+      ${o.overbills ? '<div style="font-size:10.5px;font-weight:600;text-align:right;margin-top:2px">over the contract</div>' : ""}
+    </div>
+  </div>
+  <div class="dpd-opt-nums">
+    <span>Ordered <b>${_num(o.ordered)}</b></span>
+    <span>Billed <b>${_num(o.billed)}</b></span>
+    <span>Left <b>${_num(o.left)}</b></span>
+  </div>
+</div>`;
+		}).join("");
+
+		var unlink = d.linked_to
+			? function () {
+				frappe.call({
+					method: "dux_voucher.dux_voucher.api.project_dashboard.unlink_invoice_from_work_order",
+					args: { invoice: d.invoice },
+					freeze: true,
+					callback: function () {
+						dlg.hide();
+						frappe.show_alert({ message: __("{0} unlinked", [d.invoice]), indicator: "orange" });
+						self.openProject(self.project, true);
+					},
+				});
+			}
+			: null;
+
+		var dlg = new frappe.ui.Dialog({
+			title: __("Link {0}", [d.invoice]),
+			fields: [{ fieldtype: "HTML", fieldname: "body" }],
+			primary_action_label: __("Link"),
+			secondary_action_label: unlink ? __("Unlink") : undefined,
+			secondary_action: unlink || undefined,
+			primary_action: function () {
+				if (!chosen) {
+					frappe.show_alert({ message: __("Pick a work order first."), indicator: "orange" });
+					return;
+				}
+				var opt = d.options.filter(function (o) { return o.name === chosen; })[0];
+				var go = function () {
+					frappe.call({
+						method: "dux_voucher.dux_voucher.api.project_dashboard.link_invoice_to_work_order",
+						args: { invoice: d.invoice, work_order: chosen },
+						freeze: true,
+						callback: function (r) {
+							if (!r || !r.message) return;
+							dlg.hide();
+							frappe.show_alert({
+								message: __("{0} linked to {1}", [d.invoice, chosen]),
+								indicator: "green",
+							});
+							self.openProject(self.project, true);
+						},
+					});
+				};
+				/* Over-billing may be legitimate — a variation, a contract
+				   raised short — so it warns rather than blocks. */
+				if (opt && opt.overbills) {
+					frappe.confirm(
+						__("This takes {0} to {1}% of its contract value. Link anyway?",
+							[chosen, Math.round(opt.pct_after)]), go);
+				} else {
+					go();
+				}
+			},
+		});
+
+		dlg.fields_dict.body.$wrapper.html(
+			`<div style="font-size:12.5px;color:#6b7280;margin-bottom:14px;line-height:1.6">
+  <b style="color:#111827">${_esc(d.supplier)}</b> &nbsp;&middot;&nbsp;
+  invoice value <b class="dpd-mono" style="color:#111827">&#8377;${_num(d.value)}</b><br>
+  Only this contractor&rsquo;s work orders on this project are offered &mdash; those are the two
+  things the link has to match.
+</div>` + body);
+
+		dlg.$wrapper.on("click", ".dpd-opt-wo", function () {
+			chosen = $(this).attr("data-wo");
+			dlg.$wrapper.find(".dpd-opt-wo").removeClass("on");
+			$(this).addClass("on");
+		});
+
+		dlg.show();
+	}
+
 	/* ---- billing against each work order ---------------------------
 
 	   The Raisoni process is Work Order -> Purchase Invoice, with no RA Bill
@@ -958,6 +1127,10 @@ class DuxProjectDashboard {
   <td class="dpd-td">
     <div class="dpd-mono" style="font-size:12px;font-weight:600;color:#0d9488">${_esc(r.name)}</div>
     ${r.title ? '<div class="dpd-sub">' + _esc(String(r.title).slice(0, 68)) + "</div>" : ""}
+    ${(r.invoice_list || []).length ? '<div style="margin-top:6px">' + r.invoice_list.map(function (i) {
+		return '<span class="dpd-inv" data-pi="' + _esc(i.name) + '">' + _esc(i.name) + "</span>" +
+			'<span class="dpd-link" data-link="' + _esc(i.name) + '" title="Change or remove this link">change</span>';
+	}).join("") + "</div>" : ""}
   </td>
   <td class="dpd-td" style="font-size:12.5px">${_esc(r.supplier)}</td>
   <td class="dpd-td dpd-mono" style="text-align:right">${r.ordered ? _num(r.ordered) : "&mdash;"}</td>
@@ -980,7 +1153,13 @@ class DuxProjectDashboard {
 			var shown = b.suppliers.slice(0, 6);
 			var lines = shown.map(function (sup) {
 				var links = sup.invoices.slice(0, 5).map(function (i) {
-					return '<span class="dpd-inv" data-pi="' + _esc(i.name) + '">' + _esc(i.name) + "</span>";
+					/* Only the genuinely unattached ones get the action.
+					   A material invoice on a purchase order has nothing to
+					   link to, and offering it would be noise. */
+					return '<span class="dpd-inv" data-pi="' + _esc(i.name) + '">' + _esc(i.name) + "</span>" +
+						(kind === "loose"
+							? '<span class="dpd-link" data-link="' + _esc(i.name) + '">link</span>'
+							: "");
 				}).join("");
 				var extra = sup.invoices.length - 5;
 				return `<div class="dpd-supline">
@@ -1361,10 +1540,22 @@ class DuxProjectDashboard {
 			e.stopPropagation();
 			_openTab("/app/purchase-invoice/" + encodeURIComponent($(this).attr("data-pi")));
 		});
+		this.$.find(".dpd-link").on("click", function (e) {
+			e.stopPropagation();
+			self._openLinkDialog($(this).attr("data-link"));
+		});
 
 		this.$.find("#dpd-back").on("click", function (e) {
 			e.preventDefault();
 			self.backToPortfolio();
+		});
+
+		this.$.find("#dpd-copy").on("click", function () {
+			/* The address bar already holds it, and this site serves desk
+			   at /desk rather than /app — composing a path by hand would
+			   guess the wrong prefix. */
+			frappe.utils.copy_to_clipboard(window.location.href);
+			frappe.show_alert({ message: __("Link copied"), indicator: "green" });
 		});
 
 		this.$.find("#dpd-open-erp").on("click", function () {

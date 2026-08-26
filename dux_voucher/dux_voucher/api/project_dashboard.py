@@ -816,6 +816,195 @@ def _work_order_suppliers(company, project, limit=2, as_at=None):
 
 
 # =====================================================================
+# Linking an invoice to its work order, from the dashboard
+# =====================================================================
+#
+# ``Purchase Invoice.work_order_contract`` carries ``allow_on_submit = 0`` and
+# every invoice worth linking is submitted, so ``doc.save()`` is not merely
+# inconvenient — Frappe rejects it outright with UpdateAfterSubmitError. The
+# only route is ``db.set_value``, which writes the column and runs nothing
+# else.
+#
+# That is safe here, and the reason it is safe is specific rather than
+# general. The field's whole behaviour in dux_civil_works is a
+# ``before_validate`` hook that fills a BLANK header project from the work
+# order and cascades it to item rows; with ``allow_on_submit = 0`` that hook
+# can never fire on a submitted document at all. Nothing on the Work Order
+# Contract side is maintained — it has no billed-to-date field, no status,
+# no invoice table — so there is no aggregate left stale by writing the
+# column directly. The RA-bill machinery is keyed off the ITEM-level
+# ``wo_ra_bill``, never off this header link.
+#
+# Writing the column directly does skip the app's own company check, so it is
+# re-implemented below, along with the supplier check the app only enforces
+# in client script and therefore does not enforce at all.
+#
+# Two consequences the caller is told about rather than protected from:
+# linking makes the Work Order Contract un-cancellable (Frappe's own link
+# check), and db.set_value writes no Version row, so a timeline Comment is
+# added instead to leave an audit trail.
+
+
+def _assert_can_link(invoice, work_order=None):
+    """Everything that must hold before the column is written."""
+    frappe.has_permission("Purchase Invoice", "write", doc=invoice, throw=True)
+
+    pi = frappe.db.get_value(
+        "Purchase Invoice", invoice,
+        ["name", "company", "supplier", "project", "docstatus",
+         "work_order_contract"], as_dict=True)
+    if not pi:
+        frappe.throw(_("Purchase Invoice {0} not found").format(invoice))
+    if pi.docstatus == 2:
+        frappe.throw(_("{0} is cancelled.").format(invoice))
+    if not pi.project:
+        # The link fills a blank project on a later save, and project is a
+        # GL-repost trigger on Purchase Invoice. Refuse rather than leave a
+        # document that reposts the ledger the next time someone edits it.
+        frappe.throw(_("{0} has no project, so it cannot be linked from here.")
+                     .format(invoice))
+    _resolve_companies([pi.company]) or frappe.throw(
+        _("You do not have access to {0}.").format(pi.company),
+        frappe.PermissionError)
+
+    if work_order is None:
+        return pi, None
+
+    wo = frappe.db.get_value(
+        "Work Order Contract", work_order,
+        ["name", "company", "supplier", "project", "docstatus",
+         "total_amount", "work_title"], as_dict=True)
+    if not wo:
+        frappe.throw(_("Work Order {0} not found").format(work_order))
+    if wo.docstatus != 1:
+        frappe.throw(_("Work Order {0} is not submitted.").format(work_order))
+    # The app's own guard, re-implemented because db.set_value skips validate.
+    if wo.company != pi.company:
+        frappe.throw(_("{0} belongs to {1}, but the invoice is on {2}.")
+                     .format(work_order, wo.company, pi.company))
+    # The app enforces this only in client script, so it is not enforced at
+    # all against a direct call.
+    if wo.supplier != pi.supplier:
+        frappe.throw(_("{0} is with {1}, but the invoice is from {2}.")
+                     .format(work_order, wo.supplier, pi.supplier))
+    if wo.project != pi.project:
+        frappe.throw(_("{0} is on project {1}, but the invoice is on {2}.")
+                     .format(work_order, wo.project, pi.project))
+    return pi, wo
+
+
+@frappe.whitelist()
+def get_link_options(invoice):
+    """The work orders this invoice could belong to, with what each would become.
+
+    Scoped to the invoice's own supplier and project — those are the two
+    constraints the link must satisfy, so offering anything else would only
+    produce an error on submit. Each option carries what it is already billed
+    and what this invoice would take it to, because "which contract" is a
+    judgement someone makes on the numbers.
+    """
+    pi, _wo = _assert_can_link(invoice)
+
+    value = flt(frappe.db.sql(
+        """
+        SELECT SUM(base_net_amount) FROM `tabPurchase Invoice Item`
+        WHERE parent = %s
+        """, invoice)[0][0])
+
+    orders = frappe.db.sql(
+        """
+        SELECT name, work_title, wo_date, total_amount
+        FROM `tabWork Order Contract`
+        WHERE docstatus = 1 AND company = %(company)s
+          AND supplier = %(supplier)s AND project = %(project)s
+        ORDER BY total_amount DESC
+        """,
+        {"company": pi.company, "supplier": pi.supplier, "project": pi.project},
+        as_dict=True,
+    )
+    if not orders:
+        return {"invoice": invoice, "supplier": pi.supplier, "value": value,
+                "linked_to": pi.work_order_contract, "options": []}
+
+    billed = dict(frappe.db.sql(
+        """
+        SELECT pi.work_order_contract, SUM(pii.base_net_amount)
+        FROM `tabPurchase Invoice Item` pii
+        INNER JOIN `tabPurchase Invoice` pi ON pi.name = pii.parent
+        WHERE pi.docstatus = 1 AND pi.work_order_contract IN %(orders)s
+          AND pi.name <> %(invoice)s
+        GROUP BY pi.work_order_contract
+        """,
+        {"orders": tuple(o["name"] for o in orders), "invoice": invoice}) or [])
+
+    options = []
+    for o in orders:
+        already = flt(billed.get(o["name"]))
+        ordered = flt(o["total_amount"])
+        after = already + value
+        options.append({
+            "name": o["name"],
+            "title": o["work_title"],
+            "wo_date": str(o["wo_date"]) if o["wo_date"] else None,
+            "ordered": ordered,
+            "billed": already,
+            "left": flt(ordered - already),
+            "after": after,
+            "pct_after": flt(after / ordered * 100) if ordered else None,
+            "overbills": bool(ordered and after > ordered + 0.005),
+            "current": o["name"] == pi.work_order_contract,
+        })
+    return {"invoice": invoice, "supplier": pi.supplier, "value": value,
+            "linked_to": pi.work_order_contract, "options": options}
+
+
+@frappe.whitelist()
+def link_invoice_to_work_order(invoice, work_order):
+    """Point a submitted invoice at its work order. See the note above."""
+    pi, wo = _assert_can_link(invoice, work_order)
+    previous = pi.work_order_contract
+    if previous == work_order:
+        return {"invoice": invoice, "work_order": work_order, "changed": False}
+
+    frappe.db.set_value("Purchase Invoice", invoice, "work_order_contract",
+                        work_order, update_modified=False)
+    _note(invoice, _("Linked to work order {0}{1}.").format(
+        work_order, _(" (was {0})").format(previous) if previous else ""))
+    return {"invoice": invoice, "work_order": work_order,
+            "previous": previous, "changed": True}
+
+
+@frappe.whitelist()
+def unlink_invoice_from_work_order(invoice):
+    """Undo a link. Without this the dashboard action is one-way, and it also
+    releases the work order, which cannot be cancelled while an invoice
+    points at it."""
+    pi, _wo = _assert_can_link(invoice)
+    if not pi.work_order_contract:
+        return {"invoice": invoice, "changed": False}
+
+    frappe.db.set_value("Purchase Invoice", invoice, "work_order_contract",
+                        None, update_modified=False)
+    _note(invoice, _("Unlinked from work order {0}.").format(pi.work_order_contract))
+    return {"invoice": invoice, "previous": pi.work_order_contract, "changed": True}
+
+
+def _note(invoice, text):
+    """db.set_value writes no Version row, so leave the trail by hand."""
+    try:
+        frappe.get_doc({
+            "doctype": "Comment",
+            "comment_type": "Info",
+            "reference_doctype": "Purchase Invoice",
+            "reference_name": invoice,
+            "content": text,
+        }).insert(ignore_permissions=True)
+    except Exception:
+        frappe.log_error(frappe.get_traceback(),
+                         "project_dashboard: could not add link comment")
+
+
+# =====================================================================
 # Billing against each work order
 # =====================================================================
 #
@@ -890,10 +1079,19 @@ def _work_order_billing(company, project, as_at=None):
 
     billed = {}
     counts = {}
+    # The invoices behind each row, so a linked one stays reachable. Without
+    # this the link action is one-way: once an invoice is attributed it
+    # leaves the unlinked block and there is nowhere left to undo it from.
+    attached = {}
     for inv in invoices:
         if inv["wo"]:
             billed[inv["wo"]] = flt(billed.get(inv["wo"])) + flt(inv["value"])
             counts[inv["wo"]] = counts.get(inv["wo"], 0) + 1
+            attached.setdefault(inv["wo"], []).append({
+                "name": inv["name"],
+                "posting_date": str(inv["posting_date"]),
+                "value": flt(inv["value"]),
+            })
 
     rows = []
     for o in orders:
@@ -908,6 +1106,7 @@ def _work_order_billing(company, project, as_at=None):
             "billed": b,
             "balance": flt(ordered - b),
             "invoices": counts.get(o["name"], 0),
+            "invoice_list": attached.get(o["name"], []),
             "pct": flt(b / ordered * 100) if ordered else None,
         })
 
