@@ -632,6 +632,7 @@ def get_project_detail(project, from_date=None, to_date=None):
         "chain": _chain(p.company, project, commitment, vouchers, as_at=to_date),
         "parties": _project_parties(p.company, project, from_date, to_date,
                                     invoiced, as_at=to_date),
+        "work_orders": _work_order_billing(p.company, project, as_at=to_date),
         "accounts": [{"account": r["account"], "amount": flt(r["amount"])}
                      for r in accounts],
         "recent": in_window[:40],
@@ -812,6 +813,125 @@ def _work_order_suppliers(company, project, limit=2, as_at=None):
     if len(names) <= limit:
         return ", ".join(names)
     return "{0} +{1} more".format(", ".join(names[:limit]), len(names) - limit)
+
+
+# =====================================================================
+# Billing against each work order
+# =====================================================================
+#
+# The Raisoni process is Work Order -> Purchase Invoice directly: no RA Bill
+# sits between them, so ``Purchase Invoice.work_order_contract`` is the whole
+# chain and this reads straight off it.
+#
+# Ordered and billed are compared on the SAME basis — both pre-tax.
+# ``Work Order Contract.total_amount`` sums line amounts before tax (that app
+# carries the taxed figure separately in ``total_amount_with_tax``), so
+# billing is summed on ``base_net_amount`` rather than the invoice grand
+# total. Comparing a taxed bill against an untaxed order would show every
+# work order over-billed by its GST.
+#
+# There is deliberately no "paid" column. A payment settles a supplier's
+# payable, not a particular contract — nothing in the ledger attributes cash
+# to one work order, and inventing a split would be a guess. Who has been
+# paid what is the party table's job.
+
+
+def _work_order_billing(company, project, as_at=None):
+    """Ordered against billed, per work order, plus what is not linked.
+
+    The unlinked buckets are the point of the card as much as the rows are:
+    an invoice on this project that names no work order is either material
+    bought on a purchase order — normal — or an unattributed bill someone
+    still has to place, and the two should not look alike.
+    """
+    if not frappe.db.exists("DocType", "Work Order Contract"):
+        return None
+
+    cutoff = "AND wo.wo_date <= %(as_at)s" if as_at else ""
+    orders = frappe.db.sql(
+        """
+        SELECT wo.name, wo.supplier,
+               COALESCE(NULLIF(wo.supplier_name, ''), wo.supplier) AS supplier_name,
+               wo.wo_date, wo.work_title, wo.total_amount AS ordered
+        FROM `tabWork Order Contract` wo
+        WHERE wo.docstatus = 1 AND wo.company = %(company)s
+          AND wo.project = %(project)s
+          {cutoff}
+        ORDER BY wo.total_amount DESC
+        """.format(cutoff=cutoff),
+        {"company": company, "project": project, "as_at": as_at},
+        as_dict=True,
+    )
+
+    # Every submitted purchase invoice on this project, one row per invoice,
+    # carrying whichever work order it names and whether its lines came off a
+    # purchase order.
+    invoices = frappe.db.sql(
+        """
+        SELECT pi.name,
+               pi.supplier,
+               pi.posting_date,
+               pi.work_order_contract               AS wo,
+               SUM(pii.base_net_amount)             AS value,
+               MAX(CASE WHEN COALESCE(pii.purchase_order, '') <> ''
+                        THEN 1 ELSE 0 END)          AS from_po
+        FROM `tabPurchase Invoice Item` pii
+        INNER JOIN `tabPurchase Invoice` pi ON pi.name = pii.parent
+        WHERE pi.docstatus = 1 AND pi.company = %(company)s
+          AND COALESCE(NULLIF(pii.project, ''), pi.project) = %(project)s
+          AND pi.posting_date <= %(to_date)s
+        GROUP BY pi.name, pi.supplier, pi.posting_date,
+                 pi.work_order_contract
+        ORDER BY pi.posting_date DESC, pi.name DESC
+        """,
+        {"company": company, "project": project, "to_date": as_at or "2999-12-31"},
+        as_dict=True,
+    )
+
+    billed = {}
+    counts = {}
+    for inv in invoices:
+        if inv["wo"]:
+            billed[inv["wo"]] = flt(billed.get(inv["wo"])) + flt(inv["value"])
+            counts[inv["wo"]] = counts.get(inv["wo"], 0) + 1
+
+    rows = []
+    for o in orders:
+        b = flt(billed.get(o["name"]))
+        ordered = flt(o["ordered"])
+        rows.append({
+            "name": o["name"],
+            "supplier": o["supplier_name"] or o["supplier"],
+            "wo_date": str(o["wo_date"]) if o["wo_date"] else None,
+            "title": o["work_title"],
+            "ordered": ordered,
+            "billed": b,
+            "balance": flt(ordered - b),
+            "invoices": counts.get(o["name"], 0),
+            "pct": flt(b / ordered * 100) if ordered else None,
+        })
+
+    def bucket(rows_):
+        return {"value": flt(sum(flt(r["value"]) for r in rows_)),
+                "count": len(rows_),
+                "invoices": [{"name": r["name"], "supplier": r["supplier"],
+                              "posting_date": str(r["posting_date"]),
+                              "value": flt(r["value"])} for r in rows_[:8]]}
+
+    on_po = bucket([i for i in invoices if not i["wo"] and i["from_po"]])
+    loose = bucket([i for i in invoices if not i["wo"] and not i["from_po"]])
+
+    return {
+        "rows": rows,
+        "totals": {
+            "ordered": flt(sum(r["ordered"] for r in rows)),
+            "billed": flt(sum(r["billed"] for r in rows)),
+            "balance": flt(sum(r["balance"] for r in rows)),
+        },
+        "on_purchase_orders": on_po,
+        "unattributed": loose,
+        "invoice_total": flt(sum(flt(i["value"]) for i in invoices)),
+    }
 
 
 # =====================================================================

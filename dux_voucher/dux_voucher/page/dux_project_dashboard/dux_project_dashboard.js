@@ -240,6 +240,16 @@ class DuxProjectDashboard {
 .dpd-tip .v{font-family:'SFMono-Regular',Consolas,monospace;font-variant-numeric:tabular-nums}
 .dpd-tip .p{color:#9ca3af;margin-left:6px}
 @media (max-width:900px){.dpd-figs-5{grid-template-columns:repeat(3,1fr);gap:14px}}
+.dpd-wobar{height:6px;background:#f1f2f4;border-radius:3px;overflow:hidden;margin-top:5px;width:110px}
+.dpd-wobar i{display:block;height:100%}
+.dpd-worow:hover .dpd-td{background:#f6fefb;cursor:pointer}
+.dpd-loose{border-top:1px solid #eef0f2;padding:14px 20px;display:flex;gap:13px;align-items:flex-start}
+.dpd-loose-v{font-size:15px;font-weight:700}
+.dpd-loose-l{font-size:12.5px;font-weight:600;color:#111827}
+.dpd-loose-s{font-size:11px;color:#8b929e;margin-top:3px;line-height:1.55}
+.dpd-inv{display:inline-block;font-size:11px;margin-right:10px;color:#0d9488;cursor:pointer;
+  font-family:'SFMono-Regular',Consolas,monospace}
+.dpd-inv:hover{text-decoration:underline}
 @media (max-width:1200px){.dpd-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}.dpd-grid{grid-template-columns:1fr}}
 @media (max-width:760px){.dpd-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
 `;
@@ -659,6 +669,10 @@ class DuxProjectDashboard {
 				this._barsCard(d.parties.purchase_orders, "Purchase orders by supplier",
 					"Order value, from the purchase orders") +
 			"</div>" +
+			(d.work_orders
+				? '<div style="margin-bottom:14px">' +
+				  this._workOrderCard(d.work_orders, t.invoiced) + "</div>"
+				: "") +
 			'<div style="margin-bottom:14px">' +
 				this._partyCard(d.parties, { limit: 25 }) + "</div>" +
 			'<div class="dpd-dgrid dpd-dgrid-bottom">' +
@@ -907,6 +921,99 @@ class DuxProjectDashboard {
     </tr></thead>
     <tbody>${body}${more}</tbody>
   </table></div>
+</div>`;
+	}
+
+	/* ---- billing against each work order ---------------------------
+
+	   The Raisoni process is Work Order -> Purchase Invoice, with no RA Bill
+	   in between, so this reads straight off the invoice's own work-order
+	   link. Ordered and billed are both pre-tax: Work Order Contract's
+	   total_amount excludes tax, so billing is summed on base_net_amount —
+	   a taxed bill against an untaxed order would show every contract
+	   over-billed by its GST.
+
+	   There is no Paid column on purpose. A payment settles a supplier's
+	   payable, not a particular contract, and nothing in the ledger splits
+	   cash across one contractor's several work orders. */
+	_workOrderCard(W, invoicedTotal) {
+		if (!W || !W.rows.length) return "";
+		var t = W.totals;
+
+		function stat(label, value, tone) {
+			return '<div class="dpd-pstat"><div class="dpd-lbl"' +
+				(tone ? ' style="color:' + tone + '"' : "") + ">" + label + "</div>" +
+				'<div class="dpd-mono dpd-pstat-v"' + (tone ? ' style="color:' + tone + '"' : "") +
+				">" + (value ? _num(value) : "&mdash;") + "</div></div>";
+		}
+
+		var body = W.rows.map(function (r) {
+			var pct = r.pct == null ? 0 : Math.min(100, r.pct);
+			var over = r.pct != null && r.pct > 100;
+			return `<tr class="dpd-worow" data-wo="${_esc(r.name)}">
+  <td class="dpd-td">
+    <div class="dpd-mono" style="font-size:12px;font-weight:600;color:#0d9488">${_esc(r.name)}</div>
+    ${r.title ? '<div class="dpd-sub">' + _esc(String(r.title).slice(0, 68)) + "</div>" : ""}
+  </td>
+  <td class="dpd-td" style="font-size:12.5px">${_esc(r.supplier)}</td>
+  <td class="dpd-td dpd-mono" style="text-align:right">${r.ordered ? _num(r.ordered) : "&mdash;"}</td>
+  <td class="dpd-td dpd-mono" style="text-align:right;font-weight:${r.billed ? 600 : 400};color:${r.billed ? "#111827" : "#c3c8d0"}">${r.billed ? _num(r.billed) : "&mdash;"}</td>
+  <td class="dpd-td dpd-mono" style="text-align:right;font-weight:${r.balance ? 600 : 400};color:${r.balance > 0 ? "#92400e" : "#c3c8d0"}">${r.balance ? _num(r.balance) : "&mdash;"}</td>
+  <td class="dpd-td">
+    <div class="dpd-wobar"><i style="width:${pct}%;background:${over ? "#dc2626" : (r.billed ? "#0d9488" : "#e2e6ea")}"></i></div>
+    <div class="dpd-mono" style="font-size:10.5px;color:${over ? "#b91c1c" : "#8b929e"};margin-top:3px">${
+		r.billed ? Math.round(r.pct) + "% billed" + (over ? " &mdash; over" : "")
+				 : "not billed yet"}</div>
+  </td>
+</tr>`;
+		}).join("");
+
+		function loose(kind, b, tone, label, note) {
+			if (!b.count) return "";
+			var links = b.invoices.map(function (i) {
+				return '<span class="dpd-inv" data-pi="' + _esc(i.name) + '">' + _esc(i.name) + "</span>";
+			}).join("");
+			return `<div class="dpd-loose">
+  <div style="flex:1">
+    <div class="dpd-loose-l" style="color:${tone}">${label}</div>
+    <div class="dpd-loose-s">${note}</div>
+    <div style="margin-top:7px">${links}${b.count > b.invoices.length
+		? '<span style="font-size:11px;color:#9ca3af">and ' + (b.count - b.invoices.length) + " more</span>" : ""}</div>
+  </div>
+  <div class="dpd-mono dpd-loose-v" style="color:${tone};white-space:nowrap">${_num(b.value)}</div>
+</div>`;
+		}
+
+		var journals = invoicedTotal - W.invoice_total;
+
+		return `<div class="dpd-card" style="overflow:hidden">
+  ${this._cardHead("Work orders",
+		W.rows.length + " contract" + (W.rows.length === 1 ? "" : "s") +
+		" &nbsp;&middot;&nbsp; ordered against billed, from the invoices that name each one")}
+  <div class="dpd-pstats" style="grid-template-columns:repeat(3,1fr)">
+    ${stat("Ordered", t.ordered)}
+    ${stat("Billed", t.billed)}
+    ${stat("Left to bill", t.balance, "#92400e")}
+  </div>
+  <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:760px">
+    <thead><tr>
+      <th class="dpd-th">Work order</th>
+      <th class="dpd-th" style="width:180px">Contractor</th>
+      <th class="dpd-th" style="text-align:right;width:120px">Ordered</th>
+      <th class="dpd-th" style="text-align:right;width:120px">Billed</th>
+      <th class="dpd-th" style="text-align:right;width:120px">Left to bill</th>
+      <th class="dpd-th" style="width:130px">Progress</th>
+    </tr></thead>
+    <tbody>${body}</tbody>
+  </table></div>
+  ${loose("po", W.on_purchase_orders, "#4b5563", "Billed against purchase orders",
+		"Material bought on a purchase order rather than a work order. Nothing to link.")}
+  ${loose("loose", W.unattributed, "#b45309", "Not linked to anything",
+		"On this project but naming neither a work order nor a purchase order. Someone still has to place these.")}
+  ${Math.abs(journals) > 0.005 ? `<div class="dpd-bridge" style="border-top:1px solid #f4f5f7">
+  A further <b class="dpd-mono">&#8377;${_num(journals)}</b> of cost reached this project through journals rather
+  than purchase invoices, so it appears in Invoiced above but in none of these rows.
+</div>` : ""}
 </div>`;
 	}
 
@@ -1218,6 +1325,15 @@ class DuxProjectDashboard {
 		(d.parties.rows || []).forEach(function (r) { self._partyIndex[r.party] = r; });
 		this._bindParties(this.$, d.period, d.project.company);
 		this._bindDonutHover(this.$);
+
+		this.$.find(".dpd-worow").on("click", function () {
+			var wo = $(this).attr("data-wo");
+			if (wo) _openTab("/app/work-order-contract/" + encodeURIComponent(wo));
+		});
+		this.$.find(".dpd-inv").on("click", function (e) {
+			e.stopPropagation();
+			_openTab("/app/purchase-invoice/" + encodeURIComponent($(this).attr("data-pi")));
+		});
 
 		this.$.find("#dpd-back").on("click", function (e) {
 			e.preventDefault();
