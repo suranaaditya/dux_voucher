@@ -950,15 +950,28 @@ def _work_order_suppliers(company, project, limit=2, as_at=None):
 # added instead to leave an audit trail.
 
 
+def _require_wo_link():
+    """Refuse the link actions on a site whose Purchase Invoice has no
+    work-order column, rather than letting a raw SQL error surface."""
+    if not _has_wo_link():
+        frappe.throw(
+            _("This site's Purchase Invoice has no work-order link field. "
+              "It ships with the Work Orders app — ask an administrator to "
+              "update it before linking invoices to work orders."),
+            frappe.ValidationError)
+
+
 def _assert_can_link(invoice, work_order=None):
     """Everything that must hold before the column is written."""
     require_access()
     frappe.has_permission("Purchase Invoice", "write", doc=invoice, throw=True)
 
-    pi = frappe.db.get_value(
-        "Purchase Invoice", invoice,
-        ["name", "company", "supplier", "project", "docstatus",
-         "work_order_contract"], as_dict=True)
+    cols = ["name", "company", "supplier", "project", "docstatus"]
+    if _has_wo_link():
+        cols.append("work_order_contract")
+    pi = frappe.db.get_value("Purchase Invoice", invoice, cols, as_dict=True)
+    if pi and "work_order_contract" not in pi:
+        pi.work_order_contract = None
     if not pi:
         frappe.throw(_("Purchase Invoice {0} not found").format(invoice))
     if pi.docstatus == 2:
@@ -1010,6 +1023,7 @@ def get_link_options(invoice):
     judgement someone makes on the numbers.
     """
     pi, _wo = _assert_can_link(invoice)
+    _require_wo_link()
 
     value = flt(frappe.db.sql(
         """
@@ -1068,6 +1082,7 @@ def get_link_options(invoice):
 def link_invoice_to_work_order(invoice, work_order):
     """Point a submitted invoice at its work order. See the note above."""
     pi, wo = _assert_can_link(invoice, work_order)
+    _require_wo_link()
     previous = pi.work_order_contract
     if previous == work_order:
         return {"invoice": invoice, "work_order": work_order, "changed": False}
@@ -1086,6 +1101,7 @@ def unlink_invoice_from_work_order(invoice):
     releases the work order, which cannot be cancelled while an invoice
     points at it."""
     pi, _wo = _assert_can_link(invoice)
+    _require_wo_link()
     if not pi.work_order_contract:
         return {"invoice": invoice, "changed": False}
 
@@ -1131,6 +1147,17 @@ def _note(invoice, text):
 # paid what is the party table's job.
 
 
+def _has_wo_link():
+    """Whether Purchase Invoice actually carries the work-order link column.
+
+    dux_civil_works ships it as a Custom Field, so a site can have the Work
+    Order Contract doctype and not the column — the doctype and the field
+    arrived in different releases of that app. Checking the doctype alone
+    lets a bare SQL error reach the user.
+    """
+    return bool(frappe.db.has_column("Purchase Invoice", "work_order_contract"))
+
+
 def _work_order_billing(company, project, as_at=None):
     """Ordered against billed, per work order, plus what is not linked.
 
@@ -1142,6 +1169,7 @@ def _work_order_billing(company, project, as_at=None):
     if not frappe.db.exists("DocType", "Work Order Contract"):
         return None
 
+    linked = _has_wo_link()
     cutoff = "AND wo.wo_date <= %(as_at)s" if as_at else ""
     orders = frappe.db.sql(
         """
@@ -1166,7 +1194,7 @@ def _work_order_billing(company, project, as_at=None):
         SELECT pi.name,
                pi.supplier,
                pi.posting_date,
-               pi.work_order_contract               AS wo,
+               {wo_col}                             AS wo,
                SUM(pii.base_net_amount)             AS value,
                MAX(CASE WHEN COALESCE(pii.purchase_order, '') <> ''
                         THEN 1 ELSE 0 END)          AS from_po
@@ -1175,10 +1203,9 @@ def _work_order_billing(company, project, as_at=None):
         WHERE pi.docstatus = 1 AND pi.company = %(company)s
           AND COALESCE(NULLIF(pii.project, ''), pi.project) = %(project)s
           AND pi.posting_date <= %(to_date)s
-        GROUP BY pi.name, pi.supplier, pi.posting_date,
-                 pi.work_order_contract
+        GROUP BY pi.name, pi.supplier, pi.posting_date, {wo_col}
         ORDER BY pi.posting_date DESC, pi.name DESC
-        """,
+        """.format(wo_col="pi.work_order_contract" if linked else "NULL"),
         {"company": company, "project": project, "to_date": as_at or "2999-12-31"},
         as_dict=True,
     )
