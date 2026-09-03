@@ -31,13 +31,74 @@ from frappe import _
 from frappe.utils import flt, getdate, nowdate, add_months
 
 
+# The roles the Page itself is gated on. Gating the Page record hides the
+# dashboard from the menu; it does not stop anyone POSTing to these
+# endpoints directly, so the check has to live where the data is served.
+# The Trial Balance in this app learned that first — see
+# trial_balance.require_access — and this is the same pattern.
+DASHBOARD_ROLES = {
+    "System Manager",
+    "Accounts Manager",
+    "Accounts User",
+    "Projects Manager",
+    "Projects User",
+}
+
+
+def require_access():
+    """Refuse anyone who could not open the page itself.
+
+    Without this, any authenticated account on the site — including a portal
+    user with no roles at all, which on an institutional ERP means students,
+    parents and vendors — can read the whole group's capital spend.
+    """
+    if set(frappe.get_roles()) & DASHBOARD_ROLES:
+        return
+    frappe.throw(
+        _("You do not have access to Capital Projects. Ask an administrator "
+          "for the 'Projects User' role."),
+        frappe.PermissionError)
+
+
 # GL rows with no project are bucketed under this sentinel so one grouped
 # query can serve both the per-project figures and the unattributed total.
 NO_PROJECT = "\x00none"
 
 # Accounts that represent the project's own cost. Bank/cash is the payment
 # side and party accounts are settlement — neither is a cost.
+#
+# The Asset side is deliberately a WHITELIST rather than "everything that is
+# not a bank or a party account". Measured on production: 17,735 non-group
+# Asset ledgers carry a BLANK account_type, and the largest of them are
+# inter-company and Branch & Division accounts holding 126, 104 and 81 crore.
+# Under the old rule a single mis-tagged inter-company transfer would have
+# reported a hundred crore of project cost. Every Asset account our own
+# projects book to is properly typed (Capital Work in Progress, Fixed Asset),
+# and blank-typed accounts we rely on are all root_type Expense, where blank
+# is normal and unambiguous.
+#
+# Anything the whitelist sets aside is REPORTED, not silently dropped — see
+# _COST_LOOSE_SQL and the "set_aside" figure.
+_CAPITAL_ASSET_TYPES = (
+    "Capital Work in Progress",
+    "Fixed Asset",
+    "Stock",
+    "Asset Received But Not Billed",
+    "Expenses Included In Asset Valuation",
+)
 _COST_SQL = """
+    CASE WHEN (acc.root_type = 'Expense'
+               OR (acc.root_type = 'Asset'
+                   AND acc.account_type IN {capital}))
+          AND COALESCE(acc.account_type, '') NOT IN
+              ('Bank', 'Cash', 'Receivable', 'Payable')
+         THEN gle.debit - gle.credit ELSE 0 END
+""".format(capital=str(_CAPITAL_ASSET_TYPES))
+
+# The rule as it stood before the whitelist. Kept only so the difference can
+# be surfaced: cost that looks like project spend but sits on an untyped
+# Asset ledger is a tagging mistake worth seeing, not worth hiding.
+_COST_LOOSE_SQL = """
     CASE WHEN acc.root_type IN ('Expense', 'Asset')
           AND COALESCE(acc.account_type, '') NOT IN
               ('Bank', 'Cash', 'Receivable', 'Payable')
@@ -68,6 +129,7 @@ def get_dashboard(companies=None, from_date=None, to_date=None, status=None):
     Empty means group-wide — every company the user may see — because that
     is the view the client asked to land on.
     """
+    require_access()
     permitted = _permitted_companies()
     selected = _parse_companies(companies)
     companies = _resolve_companies(selected, permitted)
@@ -94,6 +156,14 @@ def get_dashboard(companies=None, from_date=None, to_date=None, status=None):
     payable = {}
     unattributed = 0.0
     unattributed_rows = 0
+    # Cost that the old, looser rule would have counted but the Asset
+    # whitelist sets aside — a tagging mistake worth surfacing.
+    set_aside = 0.0
+    # Whether "unattributed" is even measurable. It is defined relative to
+    # the accounts that TAGGED projects use, so a company with projects but
+    # no tagging has nothing to measure against and would otherwise report a
+    # confident zero. See _kpis.
+    measurable = False
 
     for company in scan:
         payable.update(_payable_by_party(company, None, to_date))
@@ -101,6 +171,8 @@ def get_dashboard(companies=None, from_date=None, to_date=None, status=None):
         used_accounts = {
             r["account"] for r in rows if r["project"] != NO_PROJECT
         }
+        if used_accounts:
+            measurable = True
         for r in rows:
             if r["project"] == NO_PROJECT:
                 # Only count untagged spend on accounts that tagged projects
@@ -116,6 +188,7 @@ def get_dashboard(companies=None, from_date=None, to_date=None, status=None):
             })
             agg["cost"] += flt(r["cost"])
             agg["paid"] += flt(r["paid"])
+            set_aside += flt(r["loose_cost"]) - flt(r["cost"])
             agg["period_cost"] += flt(r["period_cost"])
             agg["period_paid"] += flt(r["period_paid"])
             agg["entries"] += int(r["entries"] or 0)
@@ -136,13 +209,14 @@ def get_dashboard(companies=None, from_date=None, to_date=None, status=None):
         "companies_searched": len(companies),
         "companies_permitted": len(permitted) or len(companies),
         "scoped": bool(selected),
-        "kpi": _kpis(rows, unattributed, unattributed_rows),
+        "kpi": _kpis(rows, unattributed, unattributed_rows, measurable, set_aside),
         "projects": rows,
         "by_company": _by_company(rows),
         "parties": parties[:12],
         "parties_total": len(parties),
         "party_totals": _party_totals(parties, sum(r["invoiced"] for r in rows)),
-        "attention": _attention(rows, unattributed, unattributed_rows),
+        "attention": _attention(rows, unattributed, unattributed_rows,
+                                measurable, set_aside),
         "generated_on": frappe.utils.now(),
     }
 
@@ -160,6 +234,7 @@ def search_companies(txt=None, limit=25):
     Permission-scoped here as well as in ``get_dashboard`` — a whitelisted
     endpoint is reachable directly, whatever the picker offers.
     """
+    require_access()
     permitted = set(_permitted_companies())
     like = "%{0}%".format(txt or "")
 
@@ -222,6 +297,7 @@ def _gl_for_company(company, from_date, to_date):
         SELECT COALESCE(NULLIF(gle.project, ''), %(none)s) AS project,
                gle.account                                  AS account,
                SUM({cost})                                  AS cost,
+               SUM({loose})                                 AS loose_cost,
                SUM({paid})                                  AS paid,
                SUM(CASE WHEN gle.posting_date >= %(from_date)s
                         THEN {cost} ELSE 0 END)             AS period_cost,
@@ -235,7 +311,7 @@ def _gl_for_company(company, from_date, to_date):
           AND gle.is_cancelled = 0
           AND gle.posting_date <= %(to_date)s
         GROUP BY project, gle.account
-        """.format(cost=_COST_SQL, paid=_PAID_SQL),
+        """.format(cost=_COST_SQL, loose=_COST_LOOSE_SQL, paid=_PAID_SQL),
         {
             "company": company,
             "from_date": from_date,
@@ -393,7 +469,7 @@ def _assemble(projects, gl, committed):
     return rows
 
 
-def _kpis(rows, unattributed, unattributed_rows):
+def _kpis(rows, unattributed, unattributed_rows, measurable=True, set_aside=0.0):
     committed = sum(r["committed"] for r in rows)
     invoiced = sum(r["invoiced"] for r in rows)
     paid = sum(r["paid"] for r in rows)
@@ -407,6 +483,12 @@ def _kpis(rows, unattributed, unattributed_rows):
         "uninvoiced": flt(committed - invoiced),
         "unattributed": flt(unattributed),
         "unattributed_entries": unattributed_rows,
+        # False means "nothing is tagged yet, so there is nothing to measure
+        # untagged spend against" — NOT "no untagged spend". The two look
+        # identical as a zero and are opposite in meaning.
+        "unattributed_measurable": bool(measurable),
+        # Cost on untyped Asset ledgers that the whitelist excluded.
+        "set_aside": flt(set_aside),
         "active_projects": sum(1 for r in rows if r["status"] == "Open"),
         "total_projects": len(rows),
     }
@@ -426,7 +508,7 @@ def _by_company(rows):
     return out
 
 
-def _attention(rows, unattributed, unattributed_rows):
+def _attention(rows, unattributed, unattributed_rows, measurable=True, set_aside=0.0):
     """The exception list — what someone should actually act on."""
     today = getdate(nowdate())
     stale_before = add_months(today, -3)
@@ -461,6 +543,27 @@ def _attention(rows, unattributed, unattributed_rows):
                 "detail": _("{0} ordered, nothing invoiced yet").format(
                     _money(r["committed"])),
             })
+
+    if not measurable:
+        items.insert(0, {
+            "kind": "NOT MEASURED",
+            "project": None,
+            "title": _("Untagged spend cannot be measured yet"),
+            "detail": _("Nothing carries a project, so there is no basis to "
+                        "compare untagged spend against. This is not the same "
+                        "as having none."),
+        })
+
+    if set_aside and abs(set_aside) > 0.005:
+        items.insert(0, {
+            "kind": "SET ASIDE",
+            "project": None,
+            "title": _("{0} tagged to a project on an untyped asset ledger")
+                     .format(_money(set_aside)),
+            "detail": _("Excluded from Invoiced. Inter-company and branch "
+                        "accounts carry no account type, so this is usually a "
+                        "tagging mistake rather than project cost."),
+        })
 
     if unattributed > 0.005:
         items.insert(0, {
@@ -528,6 +631,7 @@ def _empty():
         "kpi": {"committed": 0, "invoiced": 0, "paid": 0, "outstanding": 0,
                 "period_invoiced": 0, "period_paid": 0,
                 "uninvoiced": 0, "unattributed": 0, "unattributed_entries": 0,
+                "unattributed_measurable": False, "set_aside": 0,
                 "active_projects": 0, "total_projects": 0},
         "projects": [], "by_company": [], "attention": [],
         "parties": [], "parties_total": 0,
@@ -551,6 +655,7 @@ def get_project_detail(project, from_date=None, to_date=None):
     clicked from — the same ``_COST_SQL`` / ``_PAID_SQL`` expressions and the
     same ``_commitments`` reader — so the two surfaces cannot disagree.
     """
+    require_access()
     p = frappe.db.get_value(
         "Project", project,
         ["name", "project_name", "company", "status", "project_type",
@@ -847,6 +952,7 @@ def _work_order_suppliers(company, project, limit=2, as_at=None):
 
 def _assert_can_link(invoice, work_order=None):
     """Everything that must hold before the column is written."""
+    require_access()
     frappe.has_permission("Purchase Invoice", "write", doc=invoice, throw=True)
 
     pi = frappe.db.get_value(

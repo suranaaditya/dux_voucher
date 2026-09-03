@@ -489,8 +489,18 @@ class DuxProjectDashboard {
 
 		html += `<div class="dpd-foot">
   Invoiced, Paid, Outstanding and Unattributed come from the ledger, so they tie to the books.
-  <b style="color:#6b7280">Committed</b> is derived from Purchase Orders, which post no ledger entries &mdash;
-  treat it as a forecast, not an accounting figure.
+  <b style="color:#6b7280">Committed</b> is derived from purchase and work orders, which post no ledger
+  entries &mdash; treat it as a forecast, not an accounting figure.
+  <br>
+  The two are on different tax bases and deliberately so: <b style="color:#6b7280">Committed</b> is the
+  order value <b>excluding</b> tax, while <b style="color:#6b7280">Invoiced</b> is cost as booked, which
+  <b>includes</b> any tax that could not be recovered as input credit. Where GST is irrecoverable it is a
+  real cost of the project, so Invoiced can exceed Committed without either being wrong.
+  ${k.set_aside && Math.abs(k.set_aside) > 0.5
+	? '<br><b style="color:#b45309">&#8377;' + _num(k.set_aside) + '</b> was tagged to a project on an ' +
+	  'untyped asset ledger &mdash; inter-company and branch accounts carry no account type &mdash; and is ' +
+	  'excluded from Invoiced as a probable tagging mistake.'
+	: ""}
 </div>`;
 
 		this.$.find("#dpd-body").html(html);
@@ -515,10 +525,24 @@ class DuxProjectDashboard {
 				k.period_paid && Math.round(k.period_paid) !== Math.round(k.paid)
 					? "&#8377;" + _short(k.period_paid) + " of it in this window"
 					: "Cash actually out") +
-			tile("dpd-warn", "Outstanding", _short(k.outstanding), "Invoiced, not yet paid") +
-			tile(k.unattributed > 0 ? "dpd-bad" : "", "Unattributed", _short(k.unattributed),
-				k.unattributed_entries ? _num(k.unattributed_entries) + " entries with no project"
-									   : "Spend with no project tagged") +
+			/* A negative Outstanding means cash has run ahead of billing, which
+			   is a real and common state on advance-heavy contracts. The
+			   drill-down already says "Paid ahead"; the portfolio must not
+			   contradict it with a minus sign. */
+			(k.outstanding < 0
+				? tile("", "Paid ahead", _short(Math.abs(k.outstanding)),
+					"Cash out beyond what has been invoiced")
+				: tile("dpd-warn", "Outstanding", _short(k.outstanding),
+					"Invoiced, not yet paid")) +
+			(k.unattributed_measurable === false
+				? tile("", "Unattributed", "&mdash;",
+					"Nothing is tagged yet, so there is no basis to measure " +
+					"untagged spend against")
+				: tile(k.unattributed > 0 ? "dpd-bad" : "", "Unattributed",
+					_short(k.unattributed),
+					k.unattributed_entries
+						? _num(k.unattributed_entries) + " entries with no project"
+						: "Spend with no project tagged")) +
 			"</div>" +
 			`<div class="dpd-basis">
   Every figure above is <b>project to date</b>, as at ${asAt} &mdash; not just the activity window.
@@ -611,6 +635,8 @@ class DuxProjectDashboard {
 			"UNTAGGED":   "background:#fee2e2;color:#b91c1c",
 			"STALLED":    "background:#f4f5f7;color:#4b5563",
 			"NOT BILLED": "background:#fef3c7;color:#b45309",
+			"NOT MEASURED": "background:#e0e7ff;color:#3730a3",
+			"SET ASIDE":    "background:#fef3c7;color:#b45309",
 		};
 		var rows = items.map(function (a) {
 			return `<div class="dpd-attn">
