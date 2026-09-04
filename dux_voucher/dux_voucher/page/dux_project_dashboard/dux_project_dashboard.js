@@ -1215,14 +1215,54 @@ class DuxProjectDashboard {
 
 		var journals = invoicedTotal - W.invoice_total;
 
+		/* Contractor mode. Nothing on this project names a work order — at this
+		   client contractor bills are Journal Entries, which have no field to
+		   name one — so the per-contract table would print "not billed yet"
+		   against sixteen contracts that have in fact been billed and paid.
+		   Show what the ledger does know instead, and say plainly that it
+		   cannot be split per contract rather than implying a zero. */
+		var byContractor = W.mode === "contractor";
+		var cbody = !byContractor ? "" : (W.contractors || []).map(function (r) {
+			var pct = r.pct == null ? 0 : Math.min(100, r.pct);
+			var over = r.pct != null && r.pct > 100;
+			return `<tr class="dpd-worow">
+  <td class="dpd-td">
+    <div style="font-size:12.5px;font-weight:600">${_esc(r.supplier_name)}</div>
+    <div class="dpd-sub">${r.work_orders.map(function (w) {
+		return '<span class="dpd-mono" style="font-size:10.5px;color:#0d9488">' +
+			_esc(w.name) + "</span>";
+	}).join('<span style="color:#c3c8d0"> &middot; </span>')}</div>
+  </td>
+  <td class="dpd-td dpd-mono" style="text-align:right">${r.contracts}</td>
+  <td class="dpd-td dpd-mono" style="text-align:right">${r.ordered ? _num(r.ordered) : "&mdash;"}</td>
+  <td class="dpd-td dpd-mono" style="text-align:right;font-weight:${r.billed ? 600 : 400};color:${r.billed ? "#111827" : "#c3c8d0"}">${r.billed ? _num(r.billed) : "&mdash;"}</td>
+  <td class="dpd-td dpd-mono" style="text-align:right;font-weight:${Math.abs(r.balance) > 0.5 ? 600 : 400};color:${r.balance > 0.5 ? "#92400e" : "#c3c8d0"}">${Math.abs(r.balance) > 0.5 ? _num(r.balance) : "&mdash;"}</td>
+  <td class="dpd-td">
+    <div class="dpd-wobar"><i style="width:${pct}%;background:${over ? "#dc2626" : (r.billed ? "#0d9488" : "#e2e6ea")}"></i></div>
+    <div class="dpd-mono" style="font-size:10.5px;color:${over ? "#b91c1c" : "#8b929e"};margin-top:3px">${
+		r.billed ? Math.round(r.pct) + "% billed" + (over ? " &mdash; over" : "")
+				 : "not billed yet"}</div>
+  </td>
+</tr>`;
+		}).join("");
+
 		return `<div class="dpd-card" style="overflow:hidden">
   ${this._cardHead("Work orders",
 		W.rows.length + " contract" + (W.rows.length === 1 ? "" : "s") +
-		" &nbsp;&middot;&nbsp; ordered against billed, from the invoices that name each one")}
+		(byContractor
+			? " across " + (W.contractors || []).length + " contractor" +
+			  ((W.contractors || []).length === 1 ? "" : "s") +
+			  " &nbsp;&middot;&nbsp; ordered against billed, per contractor"
+			: " &nbsp;&middot;&nbsp; ordered against billed, from the invoices that name each one"))}
   <div class="dpd-bridge" style="border-bottom:1px solid #eef0f2;padding-top:0">
-    <b>Billed</b> here counts only invoices that name a work order. A contractor&rsquo;s total billing
-    is in <b>Who the money is with</b> below &mdash; the difference is whatever sits in the two
-    unlinked blocks at the foot of this card.
+    ${byContractor
+		? "No bill on this project names a work order, so billing cannot be split between one " +
+		  "contractor&rsquo;s contracts. <b>Billed</b> below is what each contractor has been billed " +
+		  "in total on this project, taken from the ledger. Where a contractor holds several " +
+		  "contracts, treat the row as the sum of them, not as progress on any one."
+		: "<b>Billed</b> here counts only invoices that name a work order. A contractor&rsquo;s total " +
+		  "billing is in <b>Who the money is with</b> below &mdash; the difference is whatever sits " +
+		  "in the two unlinked blocks at the foot of this card."}
   </div>
   <div class="dpd-pstats" style="grid-template-columns:repeat(3,1fr)">
     ${stat("Ordered", t.ordered)}
@@ -1231,22 +1271,44 @@ class DuxProjectDashboard {
   </div>
   <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:760px">
     <thead><tr>
-      <th class="dpd-th">Work order</th>
-      <th class="dpd-th" style="width:180px">Contractor</th>
+      ${byContractor
+		? '<th class="dpd-th">Contractor</th><th class="dpd-th" style="text-align:right;width:90px">Contracts</th>'
+		: '<th class="dpd-th">Work order</th><th class="dpd-th" style="width:180px">Contractor</th>'}
       <th class="dpd-th" style="text-align:right;width:120px">Ordered</th>
       <th class="dpd-th" style="text-align:right;width:120px">Billed</th>
       <th class="dpd-th" style="text-align:right;width:120px">Left to bill</th>
       <th class="dpd-th" style="width:130px">Progress</th>
     </tr></thead>
-    <tbody>${body}</tbody>
+    <tbody>${byContractor ? cbody : body}</tbody>
   </table></div>
+  ${byContractor && W.unmatched_contractors && W.unmatched_contractors.value > 0.5
+		? `<div class="dpd-loose">
+  <div style="flex:1;min-width:0">
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline">
+      <div class="dpd-loose-l" style="color:#b45309">Billed to a contractor with no contract here</div>
+      <div class="dpd-mono dpd-loose-v" style="color:#b45309;white-space:nowrap">${_num(W.unmatched_contractors.value)}</div>
+    </div>
+    <div class="dpd-loose-s">Billed on this project by someone holding neither a work order nor a
+      purchase invoice. Usually one contractor kept as two supplier records &mdash; the contracts sit
+      on one name and the bills on the other, so the rows above understate them. Merging the supplier
+      records fixes this card automatically.</div>
+    <div style="margin-top:9px">${W.unmatched_contractors.parties.map(function (p) {
+		return '<div class="dpd-supline"><div class="dpd-supname">' + _esc(p.party) +
+			'</div><div class="dpd-mono dpd-supval">' + _num(p.billed) + "</div></div>";
+	}).join("")}</div>
+  </div>
+</div>` : ""}
   ${loose("po", W.on_purchase_orders, "#4b5563", "Billed against purchase orders",
 		"Material bought on a purchase order rather than a work order. Nothing to link.")}
   ${loose("loose", W.unattributed, "#b45309", "Not linked to anything",
 		"On this project but naming neither a work order nor a purchase order. Someone still has to place these.")}
   ${Math.abs(journals) > 0.005 ? `<div class="dpd-bridge" style="border-top:1px solid #f4f5f7">
-  A further <b class="dpd-mono">&#8377;${_num(journals)}</b> of cost reached this project through journals rather
-  than purchase invoices, so it appears in Invoiced above but in none of these rows.
+  ${byContractor
+		? 'Contractor bills here are journal entries, which is why they cannot name a work order. ' +
+		  '<b class="dpd-mono">&#8377;' + _num(journals) + '</b> of this project&rsquo;s cost came in that way ' +
+		  'and is counted in the rows above; only the per-contract split is unavailable.'
+		: 'A further <b class="dpd-mono">&#8377;' + _num(journals) + '</b> of cost reached this project through ' +
+		  'journals rather than purchase invoices, so it appears in Invoiced above but in none of these rows.'}
 </div>` : ""}
 </div>`;
 	}

@@ -1300,8 +1300,9 @@ def _work_order_billing(company, project, as_at=None):
     on_po = bucket([i for i in invoices if not i["wo"] and i["from_po"]])
     loose = bucket([i for i in invoices if not i["wo"] and not i["from_po"]])
 
-    return {
+    out = {
         "rows": rows,
+        "mode": "contract",
         "totals": {
             "ordered": flt(sum(r["ordered"] for r in rows)),
             "billed": flt(sum(r["billed"] for r in rows)),
@@ -1310,6 +1311,149 @@ def _work_order_billing(company, project, as_at=None):
         "on_purchase_orders": on_po,
         "unattributed": loose,
         "invoice_total": flt(sum(flt(i["value"]) for i in invoices)),
+    }
+    if rows and not out["totals"]["billed"]:
+        fallback = _work_order_billing_by_contractor(company, project, as_at, orders)
+        if fallback:
+            out.update(fallback)
+    return out
+
+
+def _work_order_billing_by_contractor(company, project, as_at, orders):
+    """Contractor-level fallback for sites where a bill cannot name a contract.
+
+    The per-contract view above reads ``Purchase Invoice.work_order_contract``.
+    That is the right source where contractors bill through purchase invoices —
+    but at Raisoni they do not. Their bills are entered as Journal Entries, and
+    a Journal Entry has no field in which to name a work order, so the card
+    finds nothing and prints "not billed yet" against every contract.
+
+    On the New Workshop Building that was 16 rows all reading zero while
+    1,39,24,491 had in fact been billed and Vetal Patil had been paid in full.
+    A card that says "not billed yet" about a settled contract is worse than a
+    card that admits it cannot see the detail.
+
+    So when NOTHING on the project names a work order, fall back to what the
+    ledger does know: what each contractor was ordered, against what they have
+    actually billed. It cannot attribute a bill to one contract out of a
+    contractor's four, and the page says so rather than guessing.
+
+    Ordered is GROSS here, unlike the per-contract rows, because it is being
+    compared against LEDGER billing which carries the irrecoverable GST. The
+    per-contract rows compare against invoice lines and stay net. Each pairing
+    is like-for-like within itself.
+
+    Returns None when there is no ledger billing either — in that case the
+    contracts really are unbilled and the ordinary view is telling the truth.
+    """
+    suppliers = sorted({o["supplier"] for o in orders if o["supplier"]})
+    if not suppliers:
+        return None
+
+    cutoff = "AND gle.posting_date <= %(as_at)s" if as_at else ""
+    ledger = {
+        r["party"]: flt(r["billed"])
+        for r in frappe.db.sql(
+            """
+            SELECT gle.party, SUM(gle.credit) AS billed
+            FROM `tabGL Entry` gle
+            INNER JOIN `tabAccount` acc ON acc.name = gle.account
+            WHERE gle.company = %(company)s AND gle.project = %(project)s
+              AND gle.is_cancelled = 0
+              AND COALESCE(acc.account_type, '') = 'Payable'
+              AND gle.party IN %(suppliers)s
+              {cutoff}
+            GROUP BY gle.party
+            """.format(cutoff=cutoff),
+            {"company": company, "project": project, "as_at": as_at,
+             "suppliers": tuple(suppliers)},
+            as_dict=True,
+        )
+    }
+    if not any(ledger.values()):
+        return None
+
+    gross = {
+        r["supplier"]: flt(r["ordered"])
+        for r in frappe.db.sql(
+            """
+            SELECT supplier,
+                   SUM(COALESCE(NULLIF(total_amount_with_tax, 0), total_amount))
+                       AS ordered
+            FROM `tabWork Order Contract`
+            WHERE docstatus = 1 AND company = %(company)s AND project = %(project)s
+            GROUP BY supplier
+            """,
+            {"company": company, "project": project},
+            as_dict=True,
+        )
+    }
+
+    rows = []
+    for supplier in suppliers:
+        mine = [o for o in orders if o["supplier"] == supplier]
+        ordered = flt(gross.get(supplier))
+        billed = flt(ledger.get(supplier))
+        rows.append({
+            "supplier": supplier,
+            "supplier_name": mine[0]["supplier_name"] or supplier,
+            "ordered": ordered,
+            "billed": billed,
+            "balance": flt(ordered - billed),
+            "contracts": len(mine),
+            "work_orders": [
+                {"name": o["name"], "title": o["work_title"],
+                 "ordered": flt(o["ordered"])} for o in mine
+            ],
+            "pct": flt(billed / ordered * 100) if ordered else None,
+        })
+    rows.sort(key=lambda r: -r["ordered"])
+
+    # Billing this card cannot absorb: a party billed on the project who holds
+    # no work order AND no purchase invoice. A material supplier is excluded by
+    # the invoice test, so what is left is contractor-shaped money with no
+    # contract to sit against — nearly always ONE contractor held as TWO
+    # supplier records.
+    #
+    # On the New Workshop Building that is exactly what it finds: all four
+    # contracts sit on "VETALPATIL & COMPANY" while five of the six bills went
+    # to "Vetal Patil & Company", so the first reads 16% billed and the second
+    # does not appear at all. Combined they are 99.3%. Without this block the
+    # card would quietly understate its largest contractor by 1,12,72,130.
+    orphans = frappe.db.sql(
+        """
+        SELECT gle.party, SUM(gle.credit) AS billed
+        FROM `tabGL Entry` gle
+        INNER JOIN `tabAccount` acc ON acc.name = gle.account
+        WHERE gle.company = %(company)s AND gle.project = %(project)s
+          AND gle.is_cancelled = 0 AND gle.credit > 0
+          AND COALESCE(acc.account_type, '') = 'Payable'
+          AND NOT EXISTS (SELECT 1 FROM `tabWork Order Contract` w
+                          WHERE w.project = %(project)s AND w.supplier = gle.party
+                            AND w.docstatus = 1)
+          AND NOT EXISTS (SELECT 1 FROM `tabPurchase Invoice` pi
+                          WHERE pi.project = %(project)s AND pi.supplier = gle.party
+                            AND pi.docstatus = 1)
+        GROUP BY gle.party
+        ORDER BY SUM(gle.credit) DESC
+        """,
+        {"company": company, "project": project},
+        as_dict=True,
+    )
+
+    return {
+        "mode": "contractor",
+        "contractors": rows,
+        "unmatched_contractors": {
+            "value": flt(sum(flt(o["billed"]) for o in orphans)),
+            "parties": [{"party": o["party"], "billed": flt(o["billed"])}
+                        for o in orphans],
+        },
+        "totals": {
+            "ordered": flt(sum(r["ordered"] for r in rows)),
+            "billed": flt(sum(r["billed"] for r in rows)),
+            "balance": flt(sum(r["balance"] for r in rows)),
+        },
     }
 
 
