@@ -86,12 +86,21 @@ _CAPITAL_ASSET_TYPES = (
     "Asset Received But Not Billed",
     "Expenses Included In Asset Valuation",
 )
+# No Bank/Cash/Receivable/Payable exclusion here, deliberately. It used to sit
+# on this expression, left over from before the Asset side became a whitelist.
+# Once _CAPITAL_ASSET_TYPES existed the exclusion could no longer bite on the
+# Asset branch — none of those five types is Bank, Cash, Receivable or Payable,
+# and this site has zero accounts in both sets — so the only rows it still
+# touched were EXPENSES whose account_type happened to read Bank or Cash.
+# There are 545 such accounts here holding 43.3 lakh, among them
+# 'Transportation And Other Charges', where 1,45,140 of real freight on the New
+# Workshop Building was being dropped across 14 lines while the same page
+# billed it and paid it. An expense is a cost whatever account_type someone
+# typed on it.
 _COST_SQL = """
-    CASE WHEN (acc.root_type = 'Expense'
-               OR (acc.root_type = 'Asset'
-                   AND acc.account_type IN {capital}))
-          AND COALESCE(acc.account_type, '') NOT IN
-              ('Bank', 'Cash', 'Receivable', 'Payable')
+    CASE WHEN acc.root_type = 'Expense'
+           OR (acc.root_type = 'Asset'
+               AND acc.account_type IN {capital})
          THEN gle.debit - gle.credit ELSE 0 END
 """.format(capital=str(_CAPITAL_ASSET_TYPES))
 
