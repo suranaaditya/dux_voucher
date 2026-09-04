@@ -492,10 +492,12 @@ class DuxProjectDashboard {
   <b style="color:#6b7280">Committed</b> is derived from purchase and work orders, which post no ledger
   entries &mdash; treat it as a forecast, not an accounting figure.
   <br>
-  The two are on different tax bases and deliberately so: <b style="color:#6b7280">Committed</b> is the
-  order value <b>excluding</b> tax, while <b style="color:#6b7280">Invoiced</b> is cost as booked, which
-  <b>includes</b> any tax that could not be recovered as input credit. Where GST is irrecoverable it is a
-  real cost of the project, so Invoiced can exceed Committed without either being wrong.
+  Each side of <b style="color:#6b7280">Committed</b> is measured on the same basis as the cost it will
+  become. Work orders are counted <b>including</b> GST, because a contractor's bill books to the ledger
+  gross &mdash; the tax on a building is not recoverable, so it is a real cost of the project. Purchase
+  orders are counted <b>excluding</b> GST, because material capitalises net and its input credit never
+  becomes cost. That is why the per-work-order table below, which compares orders against invoice lines
+  net of tax, will not add up to this figure.
   ${k.set_aside && Math.abs(k.set_aside) > 0.5
 	? '<br><b style="color:#b45309">&#8377;' + _num(k.set_aside) + '</b> was tagged to a project on an ' +
 	  'untyped asset ledger &mdash; inter-company and branch accounts carry no account type &mdash; and is ' +

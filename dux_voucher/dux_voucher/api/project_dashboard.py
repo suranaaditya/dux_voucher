@@ -391,16 +391,29 @@ def _commitments(companies, project_names, as_at=None):
     # they are 93 lakh against 10 lakh of purchase orders, so a Committed
     # figure built from POs alone understates it by an order of magnitude.
     #
-    # ``total_amount`` is the pre-tax line total — that app carries the taxed
-    # figure separately in ``total_amount_with_tax``. Kept consistent with
-    # their own document totals rather than quietly grossing it up here.
+    # GROSS, via ``total_amount_with_tax`` falling back to ``total_amount``.
+    # This read the pre-tax ``total_amount`` until it was measured against real
+    # data. Committed is compared with Invoiced on the same card, and a
+    # contractor's bill books to the ledger INCLUSIVE of GST — the tax on a
+    # building is not recoverable, so it is a real cost. Measuring the two on
+    # different bases invented an over-run that did not exist: on the New
+    # Workshop Building, Vetal Patil's ledger cost of 1,35,01,097 against a net
+    # commitment of 1,14,41,606 read as 118% of contract, while against the
+    # gross 1,35,01,095 it is 100.0% — the same contract, billed in full.
+    # Across that project the net basis understated Committed by 20,63,869.
+    #
+    # The PO leg above stays NET, and that is not an inconsistency: purchase
+    # material capitalises net, its input credit never becoming cost.
     #
     # Guarded on the doctype existing, so this app does not hard-depend on
     # dux_civil_works being installed.
     if frappe.db.exists("DocType", "Work Order Contract"):
         for r in frappe.db.sql(
             """
-            SELECT project, SUM(total_amount) AS value, COUNT(*) AS contracts
+            SELECT project,
+                   SUM(COALESCE(NULLIF(total_amount_with_tax, 0), total_amount))
+                       AS value,
+                   COUNT(*) AS contracts
             FROM `tabWork Order Contract`
             WHERE docstatus = 1
               AND company IN %(companies)s
@@ -1150,6 +1163,13 @@ def _note(invoice, text):
 # total. Comparing a taxed bill against an untaxed order would show every
 # work order over-billed by its GST.
 #
+# This card is therefore NET while the Committed tile and the party table are
+# GROSS, and the divergence is deliberate: those two compare an order against
+# LEDGER cost, which carries the irrecoverable GST, whereas this one compares an
+# order against invoice lines, where the net figure is the one available. Each
+# pair is like-for-like within itself. The "ordered" column here will not add up
+# to the Committed tile, and this is the reason.
+#
 # There is deliberately no "paid" column. A payment settles a supplier's
 # payable, not a particular contract — nothing in the ledger attributes cash
 # to one work order, and inventing a split would be a guess. Who has been
@@ -1370,7 +1390,9 @@ def _party_commitments(companies, project_names, as_at=None):
         for r in frappe.db.sql(
             """
             SELECT project, supplier AS party,
-                   SUM(total_amount) AS value, COUNT(*) AS contracts
+                   SUM(COALESCE(NULLIF(total_amount_with_tax, 0), total_amount))
+                       AS value,
+                   COUNT(*) AS contracts
             FROM `tabWork Order Contract`
             WHERE docstatus = 1
               AND company IN %(companies)s
