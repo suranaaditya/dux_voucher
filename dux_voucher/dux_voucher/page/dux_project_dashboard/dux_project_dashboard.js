@@ -584,7 +584,14 @@ class DuxProjectDashboard {
   <td class="dpd-td dpd-mono" style="text-align:right">${r.committed ? _num(r.committed) : "&mdash;"}</td>
   <td class="dpd-td dpd-mono" style="text-align:right">${r.invoiced ? _num(r.invoiced) : "&mdash;"}</td>
   <td class="dpd-td dpd-mono" style="text-align:right">${r.paid ? _num(r.paid) : "&mdash;"}</td>
-  <td class="dpd-td dpd-mono" style="text-align:right;font-weight:700;color:${r.outstanding > 0 ? "#92400e" : "#c3c8d0"}">${r.outstanding ? _num(r.outstanding) : "&mdash;"}</td>
+  <td class="dpd-td dpd-mono" style="text-align:right;font-weight:700;color:${
+		r.outstanding > 0 ? "#92400e" : (r.outstanding < 0 ? "#1d4ed8" : "#c3c8d0")}"${
+		r.outstanding < 0 ? ' title="Paid ahead of the cost booked so far"' : ""}>${
+		r.outstanding
+			? (r.outstanding < 0
+				? _num(Math.abs(r.outstanding)) + '<span style="font-size:10px;font-weight:400"> adv</span>'
+				: _num(r.outstanding))
+			: "&mdash;"}</td>
   <td class="dpd-td"><div class="dpd-prog"><i style="width:${barW}%;background:${barColor}"></i></div>
       <div style="font-size:10.5px;color:${pct > 100 ? "#b91c1c;font-weight:600" : "#8b929e"}" class="dpd-mono">${pctText}</div></td>
 </tr>`;
@@ -793,8 +800,25 @@ class DuxProjectDashboard {
 	   what has actually been committed — so a project that has run past
 	   its estimate still renders a full bar instead of overflowing. */
 	_estimateCard(t) {
+		/* Money paid can exceed cost booked — a contractor taking an advance
+		   against work not yet billed. GHRISTU's 3rd-floor renovation is paid
+		   30,00,000 against 8,72,500 of cost. Segmenting on t.outstanding
+		   (invoiced - paid) goes negative there, seg() drops the band, and the
+		   advance disappears from the picture entirely while "Paid" renders
+		   wider than the invoiced total it is meant to sit inside.
+
+		   Split the money four ways instead. It reads correctly in both
+		   directions and still totals invoiced + uninvoiced: paid against real
+		   cost, billed but unpaid, paid ahead of any bill, and on order with
+		   nothing paid. The advance is carved out of the not-yet-billed band
+		   because that is economically what it is — cash already out against
+		   work still to be invoiced. */
 		var uninvoiced = Math.max(0, t.uninvoiced);
-		var spent = t.paid + t.outstanding + uninvoiced;
+		var paidOnCost = Math.min(t.paid, t.invoiced);
+		var unpaid     = Math.max(0, t.invoiced - t.paid);
+		var advance    = Math.max(0, t.paid - t.invoiced);
+		var uninvRest  = Math.max(0, uninvoiced - advance);
+		var spent = paidOnCost + unpaid + advance + uninvRest;
 		var base = Math.max(t.estimated, spent, 1);
 		var remaining = Math.max(0, base - spent);
 
@@ -844,14 +868,16 @@ class DuxProjectDashboard {
     <div style="font-size:12px;color:#8b929e">${head}</div>
   </div>
   <div class="dpd-stack">
-    ${seg(t.paid, "#0d9488", "#fff", "Paid &nbsp;&#8377;" + _short(t.paid))}
-    ${seg(t.outstanding, "#2dd4bf", "#0f766e", "&#8377;" + _short(t.outstanding))}
-    ${seg(uninvoiced, "#ccfbf1", "#0f766e", "&#8377;" + _short(uninvoiced))}
+    ${seg(paidOnCost, "#0d9488", "#fff", "Paid &nbsp;&#8377;" + _short(paidOnCost))}
+    ${seg(unpaid, "#2dd4bf", "#0f766e", "&#8377;" + _short(unpaid))}
+    ${seg(advance, "#93c5fd", "#1e3a8a", "Advance &nbsp;&#8377;" + _short(advance))}
+    ${seg(uninvRest, "#ccfbf1", "#0f766e", "&#8377;" + _short(uninvRest))}
     ${seg(remaining, "#f1f2f4", "#8b929e", "")}
   </div>
   <div class="dpd-keys">
     ${key("#0d9488", "Paid")}
-    ${key("#2dd4bf", "Invoiced, unpaid")}
+    ${unpaid ? key("#2dd4bf", "Invoiced, unpaid") : ""}
+    ${advance ? key("#93c5fd", "Paid in advance") : ""}
     ${key("#ccfbf1", "Ordered, uninvoiced")}
     ${t.estimated ? key("#f1f2f4", "Estimate remaining") : ""}
   </div>
