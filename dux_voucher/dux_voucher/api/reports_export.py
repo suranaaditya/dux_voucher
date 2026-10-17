@@ -14,7 +14,7 @@ import io
 
 import frappe
 from frappe import _
-from frappe.utils import flt
+from frappe.utils import cint, flt
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
@@ -103,12 +103,16 @@ def export_student_ledger_xlsx(company, kind, student, from_date, to_date):
 
 
 @frappe.whitelist()
-def export_day_book_xlsx(company, from_date, to_date, voucher_type_filter=None):
+def export_day_book_xlsx(company, from_date, to_date, voucher_type_filter=None,
+                         show_details=0):
     from dux_voucher.dux_voucher.api.reports_api import get_day_book
     d = get_day_book(company, from_date, to_date,
                       voucher_type_filter=voucher_type_filter)
-    wb = _build_day_book_workbook(d, voucher_type_filter or "All")
-    fname = f"DayBook_{_safe(company)}_{from_date}_to_{to_date}.xlsx"
+    detailed = bool(cint(show_details))
+    wb = _build_day_book_workbook(d, voucher_type_filter or "All",
+                                   show_details=detailed)
+    kind = "DayBookDetailed" if detailed else "DayBook"
+    fname = f"{kind}_{_safe(company)}_{from_date}_to_{to_date}.xlsx"
     _stream(wb, fname)
 
 
@@ -264,7 +268,7 @@ def _build_ledger_workbook(d, title, debit_label, credit_label, accent_color):
     return wb
 
 
-def _build_day_book_workbook(d, vt_filter):
+def _build_day_book_workbook(d, vt_filter, show_details=False):
     wb = Workbook()
     ws = wb.active
     ws.title = "Day Book"
@@ -279,7 +283,7 @@ def _build_day_book_workbook(d, vt_filter):
     ]
     n_cols = len(cols)
 
-    sub = "Day Book"
+    sub = "Day Book  ·  Detailed" if show_details else "Day Book"
     if vt_filter and vt_filter != "All":
         sub += f"  ·  Filter: {vt_filter}"
     period = (f"{d['from_date']}   →   {d['to_date']}    ·    "
@@ -322,6 +326,32 @@ def _build_day_book_workbook(d, vt_filter):
         if cr:
             ws.cell(row=row, column=6).font = Font(name="Calibri", size=10, color=CR_GREEN)
         row += 1
+
+        # Detailed: the voucher's own Dr / Cr legs, indented under it, each
+        # on its side. Display rows only — the totals below are summed from
+        # the voucher rows, so these never count twice.
+        if show_details:
+            for ln in (r.get('lines') or []):
+                for col_idx in range(1, n_cols + 1):
+                    cell = ws.cell(row=row, column=col_idx)
+                    cell.border = Border(bottom=HAIR)
+                    if zebra:
+                        cell.fill = PatternFill("solid", fgColor=ZEBRA_BG)
+                label = f"↳  {ln.get('side')}   {ln.get('account') or ''}"
+                if ln.get('party'):
+                    label += f"  ·  {ln['party']}"
+                lc = ws.cell(row=row, column=4, value=label)
+                lc.font = Font(name="Calibri", size=9, italic=True, color=GRAY_TXT)
+                lc.alignment = Alignment(horizontal="left", vertical="top",
+                                           wrap_text=True, indent=2)
+                is_cr = (ln.get('side') == 'Cr')
+                ac = ws.cell(row=row, column=(6 if is_cr else 5),
+                              value=flt(ln.get('amount')))
+                ac.font = Font(name="Calibri", size=9,
+                                color=(CR_GREEN if is_cr else DR_RED))
+                ac.alignment = Alignment(horizontal="right", vertical="top")
+                ac.number_format = NUM_FMT
+                row += 1
 
         if r.get('remarks'):
             cell = ws.cell(row=row, column=4, value=r['remarks'])

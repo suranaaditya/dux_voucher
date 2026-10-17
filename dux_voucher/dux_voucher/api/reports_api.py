@@ -549,6 +549,11 @@ def get_day_book(company, from_date, to_date, voucher_type_filter=None):
 	# voucher_no so the loop below stays a constant number of queries.
 	particulars_map = _build_day_book_particulars_map(rows_raw)
 
+	# ── Voucher lines — every Dr and Cr leg of every voucher, for the
+	# "Show details" drill-down. The row itself stays Tally-style (one
+	# amount, on one side); the lines show what the voucher actually posted.
+	lines_map = _fetch_day_book_lines(company, from_date, to_date)
+
 	rows   = []
 	totals = dict(debit=0.0, credit=0.0, count=0)
 
@@ -594,6 +599,8 @@ def get_day_book(company, from_date, to_date, voucher_type_filter=None):
 			debit         = row_debit,
 			credit        = row_credit,
 			remarks       = (e.remarks or "").strip(),
+			lines         = lines_map.get(
+				(e.posting_date, e.voucher_type, e.voucher_no), []),
 		))
 
 	return dict(
@@ -747,6 +754,60 @@ def _build_day_book_particulars_map(rows_raw):
 			child_table  = "tabJournal Entry Account",
 		)
 
+	return out
+
+
+def _fetch_day_book_lines(company, from_date, to_date):
+	"""Every Dr and Cr leg of every voucher in the window.
+
+	Returns ``{(posting_date, voucher_type, voucher_no): [line, …]}``, the
+	same key the Day Book groups its rows by, where each line is
+	``{account, party, amount, side}``. Legs are summed per account + party,
+	which is how ERPNext stores them anyway, and laid out the way a journal
+	reads: debits first, then credits, each largest first.
+
+	One query over the same company + date window as the voucher query,
+	rather than an IN list of voucher numbers — a month at a busy company is
+	thousands of vouchers. Every leg of a voucher shares its posting date,
+	so the window always captures a voucher whole.
+
+	A leg carrying BOTH a debit and a credit — the same account and party on
+	both sides of one voucher — becomes two lines, not one netted line.
+	Netting would hide exactly what someone opens the detail to look at,
+	such as a bill and its settlement posted together on a single voucher.
+	"""
+	raw = frappe.db.sql("""
+		SELECT posting_date, voucher_type, voucher_no, account,
+		       party_type, party,
+		       SUM(debit_in_account_currency)  AS debit,
+		       SUM(credit_in_account_currency) AS credit
+		FROM `tabGL Entry`
+		WHERE company=%(company)s
+		  AND posting_date BETWEEN %(from_date)s AND %(to_date)s
+		  AND is_cancelled=0
+		GROUP BY posting_date, voucher_type, voucher_no, account,
+		         party_type, party
+	""", dict(company=company, from_date=from_date, to_date=to_date),
+		as_dict=True)
+
+	names = _resolve_party_names(
+		{(r.party_type, r.party) for r in raw if r.party})
+
+	out = {}
+	for r in raw:
+		party = (names.get((r.party_type, r.party)) or r.party) if r.party else ""
+		key = (r.posting_date, r.voucher_type, r.voucher_no)
+		for side, amt in (("Dr", flt(r.debit)), ("Cr", flt(r.credit))):
+			if abs(amt) < 0.005:
+				continue
+			out.setdefault(key, []).append(dict(
+				account = r.account,
+				party   = party,
+				amount  = amt,
+				side    = side,
+			))
+	for lines in out.values():
+		lines.sort(key=lambda l: (l["side"] != "Dr", -l["amount"], l["account"]))
 	return out
 
 

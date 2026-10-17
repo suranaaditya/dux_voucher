@@ -35,6 +35,8 @@ class DuxDayBook {
 		this.page      = page;
 		this._lastData = null;
 		this._companies = [];   // populated by _loadCompanies
+		this._showAllDetails = false;    // global "Show details" toggle
+		this._expandedRows = new Set();  // per-voucher drill-down state
 
 		this._injectStyles();
 		this._renderLayout();
@@ -129,6 +131,20 @@ class DuxDayBook {
 .db-pill-other{background:#f3f4f6;color:#4b5563;border:1px solid #e5e7eb}
 /* Particulars wraps so long names never force horizontal scroll */
 .db-c-part{word-break:break-word}
+/* Voucher detail — every Dr / Cr leg, under its voucher */
+.db-detail-btn{display:none;height:36px;padding:0 14px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid #e5e7eb;background:#fff;color:#374151;font-family:inherit;transition:all .15s;align-items:center;gap:6px}
+.db-detail-btn:hover{background:#f9fafb}
+.db-detail-btn.active{background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8}
+.db-chev{display:inline-block;width:13px;color:#9ca3af;font-size:10px;margin-right:3px;user-select:none}
+.db-expandable{cursor:pointer}
+.db-expandable:hover .db-chev{color:#2563eb}
+.db-ln-count{color:#9ca3af;font-size:11px;font-weight:400;margin-left:5px}
+.db-tr-ln td{padding:5px 16px;border-bottom:1px solid #f9fafb;background:#fcfcfd;font-size:11.5px;vertical-align:top}
+.db-ln-part{color:#475569;font-weight:400!important;font-size:11.5px!important;padding-left:34px!important}
+.db-ln-arrow{color:#9ca3af;margin-right:5px}
+.db-ln-side{display:inline-block;width:20px;font-size:10px;font-weight:700;color:#9ca3af}
+.db-ln-party{color:#94a3b8;margin-left:4px}
+.db-ln-amt{font-size:11.5px;font-weight:400}
 /* Responsive — shrink to fit narrow screens instead of overflowing */
 @media(max-width:900px){
   .db-tbl{font-size:11.5px}
@@ -140,6 +156,8 @@ class DuxDayBook {
   .db-c-amt{width:84px}
   .db-c-part{min-width:120px}
   .db-tr-r td{padding-left:16px}
+  .db-tr-ln td{padding:5px 9px}
+  .db-ln-part{padding-left:20px!important}
 }
 @media(max-width:600px){
   .db-tbl{font-size:11px}
@@ -190,6 +208,9 @@ class DuxDayBook {
       <button class="db-excel-btn" id="db-excel-btn">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/><path d="M8 13l3 3-3 3M14 13l-3 3 3 3"/></svg>Excel
       </button>
+      <button class="db-detail-btn" id="db-detail-btn" title="Show every voucher's debit and credit legs">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg><span class="db-detail-lbl">Show details</span>
+      </button>
       <div class="db-print-split" id="db-print-split">
         <div class="db-print-split-inner">
           <button class="db-print-main" id="db-print-p-btn">
@@ -226,6 +247,7 @@ class DuxDayBook {
 		});
 		_gel("db-show-btn").addEventListener("click", function(){ self.fetchReport(); });
 		_gel("db-excel-btn").addEventListener("click", function(){ self._exportExcel(); });
+		_gel("db-detail-btn").addEventListener("click", function(){ self._toggleAllDetails(); });
 		_gel("db-print-p-btn").addEventListener("click", function(){ _gel("db-print-menu").classList.remove("open"); self._printReport(false); });
 		_gel("db-print-caret").addEventListener("click", function(e){ e.stopPropagation(); _gel("db-print-menu").classList.toggle("open"); });
 		_gel("db-opt-p").addEventListener("click",  function(){ _gel("db-print-menu").classList.remove("open"); self._printReport(false); });
@@ -310,6 +332,7 @@ class DuxDayBook {
 		_gel("db-area").innerHTML='<div class="db-placeholder">Loading…</div>';
 		_gel("db-print-split").style.display="none";
 		_gel("db-excel-btn").style.display="none";
+		_gel("db-detail-btn").style.display="none";
 		this._lastData=null;
 
 		var self=this;
@@ -339,16 +362,35 @@ class DuxDayBook {
 		}
 
 		var rows="";
+		// Per-voucher expansions belong to these rows only. The global "Show
+		// details" choice deliberately survives a re-fetch, unlike the
+		// Ledger's: the Day Book is read by stepping day to day, and Tally's
+		// detailed view likewise stays on when the date changes.
+		this._expandedRows=new Set();
 
-		d.rows.forEach(function(row){
-			rows+=`<tr class="db-tr-e">
+		d.rows.forEach(function(row, i){
+			var lines=row.lines||[];
+			var has=lines.length>0;
+			rows+=`<tr class="db-tr-e${has?" db-expandable":""}" data-r="${i}">
 				<td class="db-c-date">${dbEsc(row.posting_date)}</td>
 				<td class="db-c-vt">${dbPill(row.voucher_type)}</td>
 				<td class="db-c-vno"><a class="db-vno" href="${dbEsc(row.voucher_url)}" target="_blank">${dbEsc(row.voucher_no)}</a></td>
-				<td class="db-c-part">${dbEsc(row.particulars)}</td>
+				<td class="db-c-part">${has?'<span class="db-chev">▸</span>':""}${dbEsc(row.particulars)}${has?`<span class="db-ln-count">(${lines.length})</span>`:""}</td>
 				<td class="db-c-amt">${row.debit>0?`<span class="db-deb">${dbFmt(row.debit)}</span>`:'<span class="db-nilamt">—</span>'}</td>
 				<td class="db-c-amt">${row.credit>0?`<span class="db-cred">${dbFmt(row.credit)}</span>`:'<span class="db-nilamt">—</span>'}</td>
 			</tr>`;
+
+			// The voucher's own legs, each on its side. Display only — the
+			// totals row below is built from the voucher rows, never these.
+			lines.forEach(function(l){
+				var amt=`<span class="db-ln-amt ${l.side==="Dr"?"db-deb":"db-cred"}">${dbFmt(l.amount)}</span>`;
+				rows+=`<tr class="db-tr-ln" data-ln="${i}" style="display:none">
+					<td></td><td></td><td></td>
+					<td class="db-c-part db-ln-part"><span class="db-ln-arrow">↳</span><span class="db-ln-side">${l.side}</span>${dbEsc(l.account)}${l.party?`<span class="db-ln-party">·&nbsp;${dbEsc(l.party)}</span>`:""}</td>
+					<td class="db-c-amt">${l.side==="Dr"?amt:""}</td>
+					<td class="db-c-amt">${l.side==="Cr"?amt:""}</td>
+				</tr>`;
+			});
 
 			if(row.remarks){
 				rows+=`<tr class="db-tr-r"><td colspan="6">${dbEsc(row.remarks)}</td></tr>`;
@@ -386,6 +428,66 @@ class DuxDayBook {
     </table>
   </div>
 </div>`;
+
+		var anyLines=d.rows.some(function(r){ return r.lines&&r.lines.length; });
+		_gel("db-detail-btn").style.display=anyLines?"inline-flex":"none";
+		this._syncDetailButton();
+		this._attachDetailHandlers();
+		if(this._showAllDetails) this._applyAllRows();
+	}
+
+	/* ── Voucher detail: per-row click + global toggle ─────────────── */
+	_attachDetailHandlers(){
+		var self=this, area=_gel("db-area");
+		if(!area) return;
+		area.querySelectorAll(".db-expandable").forEach(function(tr){
+			tr.addEventListener("click", function(ev){
+				if(ev.target.closest("a")) return;   // let the Vch No link open
+				self._toggleRow(parseInt(tr.dataset.r,10));
+			});
+		});
+	}
+
+	_toggleRow(i){
+		if(this._expandedRows.has(i)) this._expandedRows.delete(i);
+		else this._expandedRows.add(i);
+		this._applyRowVisibility(i);
+	}
+
+	_applyRowVisibility(i){
+		var area=_gel("db-area");
+		if(!area) return;
+		var open=this._showAllDetails||this._expandedRows.has(i);
+		area.querySelectorAll('.db-tr-ln[data-ln="'+i+'"]').forEach(function(tr){
+			tr.style.display=open?"":"none";
+		});
+		var chev=area.querySelector('.db-expandable[data-r="'+i+'"] .db-chev');
+		if(chev) chev.textContent=open?"▾":"▸";
+	}
+
+	_applyAllRows(){
+		var self=this, area=_gel("db-area");
+		if(!area) return;
+		area.querySelectorAll(".db-expandable").forEach(function(tr){
+			self._applyRowVisibility(parseInt(tr.dataset.r,10));
+		});
+	}
+
+	_toggleAllDetails(){
+		this._showAllDetails=!this._showAllDetails;
+		// Turning it off collapses everything, including rows opened one
+		// at a time — otherwise "Hide details" would leave some showing.
+		if(!this._showAllDetails) this._expandedRows=new Set();
+		this._applyAllRows();
+		this._syncDetailButton();
+	}
+
+	_syncDetailButton(){
+		var btn=_gel("db-detail-btn");
+		if(!btn) return;
+		btn.classList.toggle("active", this._showAllDetails);
+		var lbl=btn.querySelector(".db-detail-lbl");
+		if(lbl) lbl.textContent=this._showAllDetails?"Hide details":"Show details";
 	}
 
 	/* ── Excel Export ──────────────────────────────────────────────── */
@@ -397,6 +499,9 @@ class DuxDayBook {
 		    vt_filter=_gel("db-vt-sel").value;
 		var params=new URLSearchParams({company:company,from_date:from_date,to_date:to_date});
 		if(vt_filter) params.append("voucher_type_filter",vt_filter);
+		// The workbook carries every voucher's legs when "Show details" is
+		// on; per-row expansions are a screen convenience and stay there.
+		if(this._showAllDetails) params.append("show_details","1");
 		var url="/api/method/dux_voucher.dux_voucher.api.reports_export.export_day_book_xlsx?"+params.toString();
 		window.location.href=url;
 	}
@@ -414,10 +519,12 @@ class DuxDayBook {
 
 		var printedDate = new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"long",year:"numeric"});
 
+		var self  = this;
 		var tRows = "";
 
 		d.rows.forEach(function(row, idx){
-			tRows+=`<tr class="${idx%2===0?"p-even":"p-odd"}">
+			var zebra = idx%2===0?"p-even":"p-odd";
+			tRows+=`<tr class="${zebra}">
 				<td class="p-dt">${dbEsc(row.posting_date)}</td>
 				<td class="p-vt">${dbEsc(row.voucher_type)}</td>
 				<td class="p-vno">${dbEsc(row.voucher_no)}</td>
@@ -425,6 +532,20 @@ class DuxDayBook {
 				<td class="p-amt">${row.debit>0?`<span class="p-deb">${dbFmt(row.debit)}</span>`:'<span class="p-nil">—</span>'}</td>
 				<td class="p-amt">${row.credit>0?`<span class="p-cred">${dbFmt(row.credit)}</span>`:'<span class="p-nil">—</span>'}</td>
 			</tr>`;
+
+			// Print what is open on screen: every voucher under "Show
+			// details", otherwise only the ones expanded individually.
+			if(self._showAllDetails||self._expandedRows.has(idx)){
+				(row.lines||[]).forEach(function(l){
+					var amt=`<span class="${l.side==="Dr"?"p-deb":"p-cred"}">${dbFmt(l.amount)}</span>`;
+					tRows+=`<tr class="${zebra} p-ln">
+						<td></td><td></td><td></td>
+						<td class="p-part p-ln-part">↳ <b class="p-ln-side">${l.side}</b> ${dbEsc(l.account)}${l.party?` <span class="p-ln-party">· ${dbEsc(l.party)}</span>`:""}</td>
+						<td class="p-amt p-ln-amt">${l.side==="Dr"?amt:""}</td>
+						<td class="p-amt p-ln-amt">${l.side==="Cr"?amt:""}</td>
+					</tr>`;
+				});
+			}
 
 			if(row.remarks){
 				tRows+=`<tr class="p-rmk"><td colspan="6">${dbEsc(row.remarks)}</td></tr>`;
@@ -470,6 +591,11 @@ thead th.r{text-align:right}
 .p-cred{color:#16a34a}
 .p-nil{color:#cbd5e1}
 .p-fw{font-weight:700}
+.p-ln td{padding-top:2px;padding-bottom:3px}
+.p-ln-part{padding-left:20px!important;font-size:9.5px;color:#475569;font-weight:400}
+.p-ln-side{display:inline-block;width:15px;font-size:8.5px;color:#94a3b8}
+.p-ln-party{color:#94a3b8}
+.p-ln-amt{font-size:9.5px}
 .p-foot{margin-top:20px;padding-top:10px;border-top:1px solid #e2e8f0;text-align:right;font-size:9px;color:#94a3b8}
 @media print{thead{display:table-header-group}tr{page-break-inside:avoid}}
 </style></head><body>
