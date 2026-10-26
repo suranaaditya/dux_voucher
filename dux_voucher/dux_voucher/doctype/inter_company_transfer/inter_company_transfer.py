@@ -243,76 +243,80 @@ class InterCompanyTransfer(Document):
 			).format(other_company))
 
 	def _get_ic_account(self, company, other_company):
-		"""
-		Find the Branch & Division account in `company`'s COA that
-		represents `other_company`.
+		return get_branch_account(company, other_company)
 
-		Uses the Inter-Company Transfer Settings mapping table.
-		The mapping stores: other_company → branch_account_name.
-		We then look up that account name scoped to `company`.
 
-		Example:
-		  _get_ic_account("GHRCE", "GHRUA")
-		  → Settings says GHRUA maps to account name "GH Raisoni University Amravati"
-		  → Returns the account "GH Raisoni University Amravati - GHRCE"
-		"""
-		# Step 1 — Get the account label from settings mapping
-		account_label = frappe.db.get_value(
-			"IC Company Account Mapping",
-			{"parent": "Inter-Company Transfer Settings", "company": other_company},
-			"account_label",
-		)
+def get_branch_account(company, other_company):
+	"""
+	Find the Branch & Division account in `company`'s COA that
+	represents `other_company`.
 
-		if not account_label:
-			frappe.throw(_(
-				"No Branch & Division account mapping found for <b>{0}</b>.<br><br>"
-				"Please go to <b>Accounting → Inter-Company Transfer Settings</b> "
-				"and add a mapping for <b>{0}</b>."
-			).format(other_company))
+	Uses the Inter-Company Transfer Settings mapping table.
+	The mapping stores: other_company → branch_account_name.
+	We then look up that account name scoped to `company`.
 
-		# Step 2 — Resolve the Branch / Divisions group label (configurable per deployment)
-		branch_group_label = frappe.db.get_single_value(
-			"Inter-Company Transfer Settings", "branch_group_name"
-		) or "Branch / Divisions"
+	Example:
+	  _get_ic_account("GHRCE", "GHRUA")
+	  → Settings says GHRUA maps to account name "GH Raisoni University Amravati"
+	  → Returns the account "GH Raisoni University Amravati - GHRCE"
+	"""
+	# Step 1 — Get the account label from settings mapping
+	account_label = frappe.db.get_value(
+		"IC Company Account Mapping",
+		{"parent": "Inter-Company Transfer Settings", "company": other_company},
+		"account_label",
+	)
 
-		# Step 3 — Find the Branch / Divisions group account in `company`'s COA
-		branch_group = frappe.db.get_value(
-			"Account",
-			{
-				"account_name": branch_group_label,
-				"company": company,
-				"is_group": 1,
-			},
-			"name",
-		)
-
-		if not branch_group:
-			frappe.throw(_(
-				"Could not find <b>{0}</b> group account in <b>{1}</b>'s "
-				"Chart of Accounts.<br><br>"
-				"Please ensure a group account named '{0}' exists under "
-				"Current Assets in {1}'s COA, or update the group name in "
-				"<b>Inter-Company Transfer Settings</b>."
-			).format(branch_group_label, company))
-
-		# Step 4 — Find the account scoped to `company` under that group, matching account_label
-		match = frappe.db.get_value(
-			"Account",
-			{
-				"account_name": account_label,
-				"parent_account": branch_group,
-				"company": company,
-				"is_group": 0,
-				"disabled": 0,
-			},
-			"name",
-		)
-		if match:
-			return match
-
+	if not account_label:
 		frappe.throw(_(
-			"Could not find a Branch & Division account named <b>{0}</b> "
-			"under <b>{1}</b> in <b>{2}</b>'s Chart of Accounts.<br><br>"
-			"Please ensure this account exists, or update the mapping "
-			"in <b>Inter-Company Transfer Settings</b>."
-		).format(account_label, branch_group_label, company))
+			"No Branch & Division account mapping found for <b>{0}</b>.<br><br>"
+			"Please go to <b>Accounting → Inter-Company Transfer Settings</b> "
+			"and add a mapping for <b>{0}</b>."
+		).format(other_company))
+
+	# Step 2 — Resolve the Branch / Divisions group label (configurable per deployment)
+	branch_group_label = frappe.db.get_single_value(
+		"Inter-Company Transfer Settings", "branch_group_name"
+	) or "Branch / Divisions"
+
+	# Step 3 — Find the Branch / Divisions group account in `company`'s COA
+	branch_group = frappe.db.get_value(
+		"Account",
+		{
+			"account_name": branch_group_label,
+			"company": company,
+			"is_group": 1,
+		},
+		"name",
+	)
+
+	if not branch_group:
+		frappe.throw(_(
+			"Could not find <b>{0}</b> group account in <b>{1}</b>'s "
+			"Chart of Accounts.<br><br>"
+			"Please ensure a group account named '{0}' exists under "
+			"Current Assets in {1}'s COA, or update the group name in "
+			"<b>Inter-Company Transfer Settings</b>."
+		).format(branch_group_label, company))
+
+	# Step 4 — Find the account scoped to `company` under that group, matching account_label
+	match = frappe.db.get_value(
+		"Account",
+		{
+			"account_name": account_label,
+			"parent_account": branch_group,
+			"company": company,
+			"is_group": 0,
+			"disabled": 0,
+		},
+		"name",
+	)
+	if match:
+		return match
+
+	frappe.throw(_(
+		"Could not find a Branch & Division account named <b>{0}</b> "
+		"under <b>{1}</b> in <b>{2}</b>'s Chart of Accounts.<br><br>"
+		"Please ensure this account exists, or update the mapping "
+		"in <b>Inter-Company Transfer Settings</b>."
+	).format(account_label, branch_group_label, company))

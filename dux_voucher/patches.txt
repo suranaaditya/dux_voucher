@@ -10,3 +10,5 @@ dux_voucher.dux_voucher.patches.v1_2.seed_student_fee_receipt_rule
 dux_voucher.dux_voucher.patches.v1_3.seed_ex_student_refund_rule
 dux_voucher.dux_voucher.patches.v1_4.seed_student_fee_refund_rule
 dux_voucher.dux_voucher.patches.v1_5.seed_trial_balance_roles
+dux_voucher.dux_voucher.patches.v1_6.create_student_party_type
+dux_voucher.dux_voucher.patches.v1_7.seed_student_journal_voucher_rule

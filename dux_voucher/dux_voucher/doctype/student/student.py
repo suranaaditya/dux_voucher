@@ -39,6 +39,27 @@ class Student(Document):
         self._compute_display()
         self._normalise_and_validate_mobile()
         self._reject_duplicate()
+        self._lock_company_once_posted()
+
+    # ── Company lock ─────────────────────────────────────────────────
+    def _lock_company_once_posted(self):
+        """A student's money lives in their company's books. Moving the
+        record to another company after anything was posted would leave the
+        balance behind in the old books while every screen follows the
+        record — the money has to move with a Student Journal Voucher
+        (Transfer to Institute) instead."""
+        if self.is_new() or not self.has_value_changed("company"):
+            return
+        from dux_voucher.dux_voucher.api.student_ledger import student_has_postings
+        if student_has_postings(self.name):
+            frappe.throw(
+                _("{0} already has entries in {1}'s books, so the company "
+                  "cannot be changed. Register the student in the new company "
+                  "and move the money with a Student Journal Voucher "
+                  "(Transfer to Institute).")
+                .format(self.student_name or self.name,
+                        self.get_doc_before_save().company)
+            )
 
     # ── Display title ────────────────────────────────────────────────
     def _compute_display(self):

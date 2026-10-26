@@ -140,7 +140,21 @@ frappe.ui.form.on("Student Fee Refund", {
                 "This student has no Student Fee Receipt on file. "
                 + "Refunding without a prior receipt is unusual. Continue?"
             );
-        } else if (total > paid + 0.005) {
+        } else if (summary.balance !== undefined && summary.balance !== null
+                   && total > flt(summary.balance) + 0.005) {
+            // Ledger live: what can be refunded is what is held NOW — the
+            // fee may already have been transferred to the institute.
+            warning = __(
+                "Refund ({0}) exceeds what is held for this student ({1}) — "
+                + "the student ledger will go into debit by {2}. Continue?",
+                [
+                    format_currency(total),
+                    format_currency(flt(summary.balance)),
+                    format_currency(total - flt(summary.balance)),
+                ]
+            );
+        } else if ((summary.balance === undefined || summary.balance === null)
+                   && total > paid + 0.005) {
             const overpay = total - paid;
             warning = __(
                 "Refund ({0}) exceeds total paid to date ({1}). This "
@@ -255,6 +269,31 @@ function _show_paid_summary_headline(frm) {
         frm.dashboard.set_headline(
             __("No fee receipts on file for this student"),
             "orange"
+        );
+        return;
+    }
+
+    // Ledger live: compare with what is actually HELD for the student now
+    // (transfers / fees charged since the receipt reduce it).
+    if (summary.balance !== undefined && summary.balance !== null) {
+        const held = flt(summary.balance);
+        if (frm.doc.docstatus !== 0) {
+            // Submitted / cancelled: the ledger balance already reflects
+            // this refund — subtracting it again would read as an overdraw.
+            frm.dashboard.set_headline(
+                __("Paid to date: {0}. Held for the student now: {1}.",
+                   [format_currency(paid), format_currency(held)]),
+                held < -0.005 ? "red" : "green");
+            return;
+        }
+        const after = held - refund_total;
+        frm.dashboard.set_headline(
+            after < -0.005
+                ? __("Held for the student: {0} — this refund ({1}) exceeds it by {2}",
+                     [format_currency(held), format_currency(refund_total), format_currency(-after)])
+                : __("Paid to date: {0}. Held now: {1}. After this refund: {2}.",
+                     [format_currency(paid), format_currency(held), format_currency(after)]),
+            after < -0.005 ? "red" : "green"
         );
         return;
     }

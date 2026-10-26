@@ -247,9 +247,12 @@ class StudentFeeReceipt(Document):
         je.custom_source_voucher = self.name
 
         # Cr admission fee liability — fees collected on behalf of the
-        # university, owed forward.
+        # university, owed forward. The student is the party on the line,
+        # so the student's own ledger carries the receipt.
         je.append("accounts", {
             "account":                       admission_fee,
+            "party_type":                    "Student",
+            "party":                         self.student,
             "credit_in_account_currency":    flt(self.total_amount),
             "debit_in_account_currency":     0,
             "user_remark":                   _("From {0}").format(

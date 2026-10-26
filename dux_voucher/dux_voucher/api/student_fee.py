@@ -109,7 +109,18 @@ def get_student_paid_summary(student, admission_year=None):
         {"paid": <float>, "receipt_count": <int>}
     """
     paid, count = _total_paid_by_student(student, admission_year)
-    return {"paid": paid, "receipt_count": count}
+    out = {"paid": paid, "receipt_count": count}
+
+    # Once the student ledger is live, the headline should compare the
+    # refund with what is actually HELD for the student — a transfer to the
+    # institute or a fee charged since the receipt reduces that, and "paid"
+    # alone would overstate what can be refunded.
+    from dux_voucher.dux_voucher.api.student_ledger import (
+        get_student_balance, is_migrated)
+    if is_migrated() and student:
+        company = frappe.db.get_value("Student", student, "company")
+        out["balance"] = get_student_balance(student, company)
+    return out
 
 
 # =====================================================================
@@ -170,11 +181,22 @@ def _student_provisional_balance(student, company):
     paid          = flt(paid)
     refunded      = flt(refunded)
     income_booked = flt(income_booked)
+
+    # Once students are ledger parties the GL is the single answer — it also
+    # sees transfers to the institute, fees charged, fines and concessions,
+    # none of which the document formula knows about.
+    from dux_voucher.dux_voucher.api.student_ledger import (
+        get_student_balance, is_migrated)
+    if is_migrated():
+        remaining = get_student_balance(student, company)
+    else:
+        remaining = paid - refunded - income_booked
+
     return {
         "paid":          paid,
         "refunded":      refunded,
         "income_booked": income_booked,
-        "remaining":     flt(paid - refunded - income_booked),
+        "remaining":     flt(remaining),
     }
 
 
@@ -295,6 +317,8 @@ def book_income(refund, posting_date=None):
 
     je.append("accounts", {
         "account":                    admission_fee,
+        "party_type":                 "Student",
+        "party":                      doc.student,
         "debit_in_account_currency":  remaining,
         "credit_in_account_currency": 0,
         "user_remark":                _("Retained fee — {0}").format(

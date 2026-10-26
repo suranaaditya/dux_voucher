@@ -157,13 +157,22 @@ def _bulk_balances(students, company):
     booked   = _grouped_sum("Student Fee Refund", "income_amount",
                             extra="AND income_booked=1")
 
+    # Once students are ledger parties "remaining" is the ledger balance —
+    # same definition as student_fee._student_provisional_balance, so a
+    # student transferred to the institute (or charged a fee) does not show
+    # money left to book.
+    from dux_voucher.dux_voucher.api.student_ledger import (
+        get_student_balances, is_migrated)
+    ledger = get_student_balances(students, company) if is_migrated() else None
+
     out = {}
     for s in students:
         p  = flt(paid.get(s))
         rf = flt(refunded.get(s))
         bk = flt(booked.get(s))
+        remaining = flt(ledger.get(s)) if ledger is not None else flt(p - rf - bk)
         out[s] = {"paid": p, "refunded": rf, "income_booked": bk,
-                  "remaining": flt(p - rf - bk)}
+                  "remaining": remaining}
     return out
 
 

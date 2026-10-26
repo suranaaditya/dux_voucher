@@ -26,6 +26,7 @@ SUPPORTED_DOCTYPES = (
     "Ex Student Refund",
     "Student Fee Receipt",
     "Student Fee Refund",
+    "Student Journal Voucher",
     "Journal Entry",
     "Purchase Order",
     "Purchase Receipt",

@@ -29,18 +29,25 @@ fixtures = [
 # posting-date enforcement on the seven controlled doctypes (handler is
 # a no-op when Dux Backdating Settings.enabled = 0).
 _BACKDATING = "dux_voucher.dux_voucher.api.backdating.enforce"
+# Students are a Party Type: a Student on a JE line must belong to the JE's
+# company and sit on its student ledger account; Payment Entry never takes
+# a Student (receipts / refunds do). See api/student_ledger.py.
+_STUDENT_JE = "dux_voucher.dux_voucher.api.student_ledger.validate_journal_entry"
+_STUDENT_PE = "dux_voucher.dux_voucher.api.student_ledger.validate_payment_entry"
 doc_events = {
     "Payment Entry": {
-        "on_cancel": "dux_voucher.dux_voucher.utils.on_payment_entry_cancel"
+        "on_cancel": "dux_voucher.dux_voucher.utils.on_payment_entry_cancel",
+        "validate":  _STUDENT_PE,
     },
     "Journal Entry": {
         "on_cancel": "dux_voucher.dux_voucher.utils.on_journal_entry_cancel",
-        "validate":  _BACKDATING,
+        "validate":  [_BACKDATING, _STUDENT_JE],
     },
     "Payment Voucher":     {"validate": _BACKDATING},
     "Receipt Voucher":     {"validate": _BACKDATING},
     "Ex Student Receipt":  {"validate": _BACKDATING},
     "Student Fee Receipt": {"validate": _BACKDATING},
+    "Student Journal Voucher": {"validate": _BACKDATING},
     "Purchase Order":      {"validate": _BACKDATING},
     "Purchase Receipt":    {"validate": _BACKDATING},
     "Purchase Invoice":    {"validate": _BACKDATING},
@@ -110,7 +117,9 @@ app_include_js = ["formatted_tb_button.bundle.js"]
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
-# doctype_js = {"doctype" : "public/js/doctype.js"}
+# Journal Entry: scope the party picker to the JE's company when the
+# party type is Student (ERPNext sets no query on that field).
+doctype_js = {"Journal Entry": "public/js/journal_entry_student.js"}
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}

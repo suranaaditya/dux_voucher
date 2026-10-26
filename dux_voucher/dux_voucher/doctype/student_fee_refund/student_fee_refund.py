@@ -226,6 +226,8 @@ class StudentFeeRefund(Document):
         # receipt(s) credited. Drives the liability back toward zero.
         je.append("accounts", {
             "account":                       admission_fee,
+            "party_type":                    "Student",
+            "party":                         self.student,
             "debit_in_account_currency":     flt(self.total_amount),
             "credit_in_account_currency":    0,
             "user_remark":                   _("To {0}").format(

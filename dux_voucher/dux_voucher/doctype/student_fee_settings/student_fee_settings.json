@@ -6,7 +6,13 @@
  "field_order": [
   "intro_html",
   "income_section",
-  "retained_fee_income_account"
+  "retained_fee_income_account",
+  "ledger_section",
+  "ledger_html",
+  "student_ledger_migrated",
+  "student_ledger_migrated_on",
+  "transfer_section",
+  "transfer_accounts"
  ],
  "fields": [
   {
@@ -25,12 +31,47 @@
    "fieldtype": "Link",
    "label": "Retained Fee Income Account (override)",
    "options": "Account"
+  },
+  {
+   "fieldname": "ledger_section",
+   "fieldtype": "Section Break",
+   "label": "Student Ledger"
+  },
+  {
+   "fieldname": "ledger_html",
+   "fieldtype": "HTML",
+   "options": "<div style=\"padding:4px 0;color:#475569;font-size:13px;line-height:1.55\">\nEvery student is a party on the <strong>Admission/Registration Fee (Provisional)</strong> account, so a student's balance is read straight from the ledger. Entries made before this was switched on are linked to their students once, by the Student Ledger migration (run by a System Manager: dry run first, then the real run). Until that has run, Student Journal Vouchers cannot be posted.\n</div>"
+  },
+  {
+   "default": "0",
+   "fieldname": "student_ledger_migrated",
+   "fieldtype": "Check",
+   "label": "Student Ledger Migrated",
+   "read_only": 1
+  },
+  {
+   "fieldname": "student_ledger_migrated_on",
+   "fieldtype": "Datetime",
+   "label": "Migrated On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "transfer_section",
+   "fieldtype": "Section Break",
+   "label": "Fee Transfer to Institute"
+  },
+  {
+   "description": "For each institute that receives students' fees, the ledger credited in its books when a Student Journal Voucher transfers a fee to it (for example Student Receivable Cybervidya). Pre-fills the voucher; it can be changed there. An institute not listed here must be given a ledger on each voucher.",
+   "fieldname": "transfer_accounts",
+   "fieldtype": "Table",
+   "label": "Ledger Credited per Institute",
+   "options": "Student Transfer Account"
   }
  ],
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-06-13 00:00:00",
+ "modified": "2026-10-26 00:00:00",
  "modified_by": "Administrator",
  "module": "Dux Voucher",
  "name": "Student Fee Settings",
