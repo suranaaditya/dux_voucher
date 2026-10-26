@@ -58,15 +58,23 @@ def _cancel_parent_voucher(doctype, name):
     if frappe.db.get_value(doctype, name, "docstatus") != 1:
         return
 
+    # All or nothing. The parent's own cancel cancels its OTHER backend
+    # entries (a Student Journal Voucher's second company, a PV's sibling
+    # PEs); if any of that fails half-way, swallowing the error would commit
+    # a voucher or JE marked Cancelled whose ledger lines are still live.
+    # Roll the parent back and refuse the cancel the user started instead.
     frappe.flags.in_dux_voucher_cancel = True
+    frappe.db.savepoint("dux_parent_cancel")
     try:
         voucher = frappe.get_doc(doctype, name)
         voucher.flags.ignore_permissions = True
         voucher.cancel()
     except Exception as e:
-        frappe.log_error(
-            title=_("Error cancelling {0} {1}").format(doctype, name),
-            message=str(e)
+        frappe.db.rollback(save_point="dux_parent_cancel")
+        frappe.throw(
+            _("This entry belongs to {0} {1}, which could not be cancelled "
+              "with it, so nothing was cancelled. Reason: {2}")
+            .format(doctype, name, frappe.utils.strip_html(str(e)))
         )
     finally:
         frappe.flags.in_dux_voucher_cancel = False
