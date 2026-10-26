@@ -48,10 +48,22 @@ PARTY_NAME_FIELD = {
     "Customer": "customer_name",
     "Supplier": "supplier_name",
     "Employee": "employee_name",
+    "Student": "student_name",
 }
 
 # Account types that have a sub-ledger worth reconciling against.
 CONTROL_ACCOUNT_TYPES = ("Receivable", "Payable")
+
+# The student ledger keeps a blank account_type (so ERPNext never demands a
+# party on it) but carries one Student per line — it opens into its students
+# like any other control account. Matched by account name, which is how the
+# app resolves it per company (api/student_fee.py).
+STUDENT_CONTROL_ACCOUNT_NAME = "Admission/Registration Fee (Provisional)"
+
+
+def _is_control(account_type, account_name):
+    return (account_type in CONTROL_ACCOUNT_TYPES
+            or account_name == STUDENT_CONTROL_ACCOUNT_NAME)
 
 # Party type expected on a company's DEFAULT receivable / payable account.
 # Deliberately narrow: it is applied only to those two accounts, never to
@@ -648,6 +660,7 @@ def _build_by_account(filters, companies):
                 "parent_key": None,
                 "root_type": acc.root_type,
                 "account_type": acc.account_type,
+                "is_control": _is_control(acc.account_type, acc.account_name),
                 "is_group": acc.is_group,
                 "lft": acc.lft,
                 "members": [],
@@ -702,7 +715,7 @@ def _build_by_account(filters, companies):
         # behind it, so it carries the real account names it merges. Only
         # control accounts — attaching the member list to all 800 rows of a
         # 34-company trust would bloat the payload for no purpose.
-        if node["account_type"] in CONTROL_ACCOUNT_TYPES and not node["is_group"]:
+        if node["is_control"] and not node["is_group"]:
             row["is_control"] = 1
             row["members"] = node["members"]
 
@@ -998,7 +1011,7 @@ def _build_account_party(filters, companies):
         # Only control accounts are interesting here; a plain expense
         # account has no sub-ledger to reconcile against.
         if filters.get("control_accounts_only") and meta and \
-                meta.account_type not in CONTROL_ACCOUNT_TYPES:
+                not _is_control(meta.account_type, meta.account_name):
             continue
 
         children = per_account[account]

@@ -153,6 +153,7 @@ class DuxPartyTrialBalance {
         <option value="Customer">Customer</option>
         <option value="Supplier">Supplier</option>
         <option value="Employee">Employee</option>
+        <option value="Student">Student</option>
       </select>
     </div>
     <div class="ptb-fg"><label>From</label><input id="ptb-from" type="date"></div>
@@ -374,6 +375,17 @@ class DuxPartyTrialBalance {
 	/* Deep-link: open the Party Ledger page for this exact party + company */
 	_openPartyLedger(row){
 		if(!row) return;
+		if(this._partyType==="Student"){
+			// Students have their own statement page, open to the same
+			// roles that see students (Party Ledger is System Manager only).
+			frappe.route_options = {
+				company: this._company, kind: "new", student: row.party,
+				student_label: row.party_name || row.party,
+				from_date: _gel("ptb-from").value, to_date: _gel("ptb-to").value,
+			};
+			frappe.set_route("dux-student-ledger");
+			return;
+		}
 		frappe.route_options = {
 			company:     this._company,
 			party:       row.party,

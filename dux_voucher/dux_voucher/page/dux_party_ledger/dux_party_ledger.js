@@ -482,7 +482,7 @@ class DuxPartyLedger {
 		});
 		rows+=`<tr class="pl-tr-cb"><td colspan="4"><span class="pl-cb-label">Closing Balance</span></td><td class="pl-c-amt">${d.closing_balancing_debit>0?`<span class="pl-dr">${_fmt(d.closing_balancing_debit)}</span>`:'<span class="pl-nil">—</span>'}</td><td class="pl-c-amt">${d.closing_balancing_credit>0?`<span class="pl-cr">${_fmt(d.closing_balancing_credit)}</span>`:'<span class="pl-nil">—</span>'}</td><td class="pl-c-bal" style="font-size:13px">${_bal(d.closing_balance,d.closing_type)}</td></tr>`;
 		rows+=`<tr class="pl-tr-tot"><td colspan="4" class="pl-tot-label">Total</td><td class="pl-c-amt"><span class="pl-dr">${_fmt(d.grand_total_debit)}</span></td><td class="pl-c-amt"><span class="pl-cr">${_fmt(d.grand_total_credit)}</span></td><td class="pl-c-bal"></td></tr>`;
-		var isParty=["Customer","Supplier","Employee"].includes(d.account_type);
+		var isParty=["Customer","Supplier","Employee","Student"].includes(d.account_type);
 		var badge=d.account_type?`<span class="${isParty?"pl-party-badge":"pl-acc-type-badge"}">${_esc(d.account_type)}</span>`:"";
 		_gel("pl-area").innerHTML=`
 <div class="pl-report-card">
@@ -589,7 +589,7 @@ class DuxPartyLedger {
 			? "@page{size:A4 landscape;margin:12mm 14mm 14mm}"
 			: "@page{size:A4 portrait;margin:16mm 12mm 14mm}";
 
-		var isParty=["Customer","Supplier","Employee"].includes(d.account_type);
+		var isParty=["Customer","Supplier","Employee","Student"].includes(d.account_type);
 		var printedDate=new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"long",year:"numeric"});
 
 		/* Build table rows */

@@ -152,6 +152,11 @@ def get_ledger_statement(company, account, from_date, to_date,
 	no_party_keys = {(e.voucher_type, e.voucher_no) for e in entries if not e.party}
 	voucher_parties = _fetch_voucher_parties(company, no_party_keys)
 	name_pairs = {pp for sibs in voucher_parties.values() for pp in sibs}
+	# The row's own party reads by name too — a student is "STU-0042" as an
+	# id and means nothing on a statement.
+	name_pairs |= {(e.party_type, e.party) for e in entries if e.party}
+	if use_party:
+		name_pairs.add((party_type, party))
 	for items in breakdown_map.values():
 		for b in items:
 			if b.party:
@@ -175,6 +180,7 @@ def get_ledger_statement(company, account, from_date, to_date,
 		# elsewhere on the same voucher (TDS row → the supplier, etc.).
 		sib_label = "" if e.party else _sibling_party_label(
 			voucher_parties.get((e.voucher_type, e.voucher_no)), party_names)
+		own_party = (party_names.get((e.party_type, e.party)) or e.party) if e.party else ""
 		if use_party:
 			# Party ledger — RGI house convention (inverse of textbook):
 			# party debited (payment) -> "By", party credited (receipt) -> "To"
@@ -185,11 +191,11 @@ def get_ledger_statement(company, account, from_date, to_date,
 			# party ledger). Bank Dr (receipt) reads as "By <source>",
 			# Bank Cr (payment) reads as "To <destination>".
 			prefix = "By" if dr > 0 else "To"
-			contra = e.party or sib_label or _clean_against(e.against or "")
+			contra = own_party or sib_label or _clean_against(e.against or "")
 		else:
 			# Plain non-bank account view — standard textbook convention.
 			prefix = "To" if dr > 0 else "By"
-			contra = e.party or sib_label or _clean_against(e.against or "")
+			contra = own_party or sib_label or _clean_against(e.against or "")
 
 		# Drill-down rows — the opposite-side accounts that make up this
 		# row's amount. Attached whenever the counter side spans 2+
@@ -233,7 +239,7 @@ def get_ledger_statement(company, account, from_date, to_date,
 
 	closing = running
 	if use_party:
-		display_name = party
+		display_name = party_names.get((party_type, party)) or party
 		# Party ledger: surface the party type as the "account type"
 		# label so the front-end renders the right badge.
 		acc_type     = party_type
@@ -336,7 +342,25 @@ def search_ledger(company, search_txt="", parties_only=0):
 				meta="Employee  ·  " + acc,
 				party_type="Employee", account=acc))
 
-	return results[:35]
+	# 5. Students — company-scoped (a student belongs to one institute), on
+	#    the company's student ledger account.
+	if len(results) < 41:
+		from dux_voucher.dux_voucher.api.student_fee import ADMISSION_FEE_LEAF
+		abbr = frappe.get_cached_value("Company", company, "abbr")
+		stu_acc = f"{ADMISSION_FEE_LEAF} - {abbr}"
+		if frappe.db.exists("Account", stu_acc):
+			for st in frappe.db.sql("""
+				SELECT name, student_name, course FROM `tabStudent`
+				WHERE company=%(co)s AND COALESCE(is_disabled,0)=0
+				  AND (name LIKE %(l)s OR student_name LIKE %(l)s OR father_name LIKE %(l)s)
+				ORDER BY student_name LIMIT 6
+			""", dict(co=company, l=like), as_dict=True):
+				results.append(dict(type="party", value=st.name,
+					label=(st.student_name or st.name) + "  (Student)",
+					meta="Student  ·  " + (st.course or "") + "  ·  " + st.name,
+					party_type="Student", account=stu_acc))
+
+	return results[:41]
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -347,6 +371,7 @@ _PARTY_NAME_FIELD = {
 	"Customer": "customer_name",
 	"Supplier": "supplier_name",
 	"Employee": "employee_name",
+	"Student":  "student_name",
 }
 
 
@@ -549,6 +574,11 @@ def get_day_book(company, from_date, to_date, voucher_type_filter=None):
 	# voucher_no so the loop below stays a constant number of queries.
 	particulars_map = _build_day_book_particulars_map(rows_raw)
 
+	# Parties come through as ids; a student id (STU-0042) is meaningless on
+	# a day book, so swap in the name. Other party types are named by name.
+	student_names = _student_names_in(
+		{p for e in rows_raw for p in (e.parties or "").split("  ·  ") if p.strip()})
+
 	# ── Voucher lines — every Dr and Cr leg of every voucher, for the
 	# "Show details" drill-down. The row itself stays Tally-style (one
 	# amount, on one side); the lines show what the voucher actually posted.
@@ -581,7 +611,8 @@ def get_day_book(company, from_date, to_date, voucher_type_filter=None):
 		# label we resolved above; else fall back to "Various".
 		parties = (e.parties or "").strip()
 		if parties:
-			particulars = parties
+			particulars = "  ·  ".join(
+				student_names.get(p, p) for p in parties.split("  ·  "))
 		else:
 			particulars = particulars_map.get(e.voucher_no) or "Various"
 
@@ -869,6 +900,9 @@ def _resolve_voucher(e):
 	if src_dt == "Receipt Voucher" and src_vch:
 		return "Receipt Voucher", src_vch, "/desk/receipt-voucher/" + src_vch
 
+	if src_dt == "Student Journal Voucher" and src_vch:
+		return "Student Journal", src_vch, "/desk/student-journal-voucher/" + src_vch
+
 	# ── Native ERPNext vouchers ──────────────────────────────────────
 	if vt == "Journal Entry":
 		return "Journal Entry", vno, "/desk/journal-entry/" + vno
@@ -930,6 +964,17 @@ def _fetch_voucher_parties(company, voucher_keys):
 		out.setdefault((r.voucher_type, r.voucher_no), []).append(
 			(r.party_type, r.party))
 	return out
+
+
+def _student_names_in(tokens):
+	"""``{student id: student name}`` for whichever of ``tokens`` are Student
+	ids. One query; tokens that are not students are simply absent."""
+	tokens = tuple(t.strip() for t in tokens if t and t.strip())
+	if not tokens:
+		return {}
+	return {n: dn for n, dn in frappe.db.sql(
+		"SELECT name, student_name FROM `tabStudent` WHERE name IN %(t)s",
+		{"t": tokens}) if dn}
 
 
 def _resolve_party_names(pairs):
@@ -1102,6 +1147,7 @@ def get_student_ledger(company, kind, student, from_date, to_date):
 	"""
 	if not all([company, kind, student, from_date, to_date]):
 		frappe.throw(_("Company, Student Type, Student, From Date and To Date are all required"))
+	_require_student_access(company)
 
 	kind = (kind or "").strip().lower()
 	if kind not in ("ex", "new"):
@@ -1152,6 +1198,15 @@ def get_student_ledger(company, kind, student, from_date, to_date):
 		display_name = master.student_display or master.student_name or student
 		kind_label   = "New Student"
 
+		from dux_voucher.dux_voucher.api.student_ledger import is_migrated
+		if is_migrated():
+			# Students are ledger parties: read the ledger itself, so
+			# transfers, fees charged, fines, concessions and income
+			# bookings all appear — not just receipts and refunds.
+			entries = _new_student_gl_entries(company, student)
+			return _build_student_ledger(company, display_name, kind_label,
+										 from_date, to_date, entries)
+
 		# Receipts — money in → Credit on the Admission Fee liability.
 		for r in frappe.db.sql("""
 			SELECT name, posting_date, total_amount, remarks, reference_no,
@@ -1196,6 +1251,96 @@ def get_student_ledger(company, kind, student, from_date, to_date):
 
 	return _build_student_ledger(company, display_name, kind_label,
 								 from_date, to_date, entries)
+
+
+def _require_student_access(company):
+	"""Student statements are per-company money: the caller must be able to
+	read Students and be allowed the company (User Permission scoping, via
+	the same helper the other pages use)."""
+	frappe.has_permission("Student", "read", throw=True)
+	if company not in (get_permitted_companies() or []):
+		frappe.throw(_("You do not have access to {0}.").format(company),
+					 frappe.PermissionError)
+
+
+# Student Journal Voucher purpose → Particulars label on the statement.
+_SJV_LABEL = {
+	"Transfer to Institute":       "Transferred to {to_company}",
+	"Fee Charged":                 "Fee Charged",
+	"Fine / Penalty":              "Fine / Penalty",
+	"Concession":                  "Fee Concession",
+	"Transfer to Another Student": "Transfer",
+	"Other Debit to Student":      "Debit Note",
+	"Other Credit to Student":     "Credit Note",
+}
+
+
+def _new_student_gl_entries(company, student):
+	"""A new student's statement rows, straight from the GL (the student is
+	the party). Each row is labelled by the document that posted it."""
+	gl = frappe.db.sql("""
+		SELECT gle.posting_date, gle.debit, gle.credit, gle.voucher_type, gle.voucher_no,
+		       gle.remarks, gle.against, gle.creation,
+		       je.custom_source_voucher_doctype AS src_dt, je.custom_source_voucher AS src
+		FROM `tabGL Entry` gle
+		LEFT JOIN `tabJournal Entry` je ON je.name=gle.voucher_no AND gle.voucher_type='Journal Entry'
+		WHERE gle.company=%(co)s AND gle.party_type='Student' AND gle.party=%(s)s
+		  AND gle.is_cancelled=0 AND COALESCE(je.docstatus, 1) != 2
+	""", dict(co=company, s=student), as_dict=True)
+
+	jes = {g.voucher_no for g in gl if g.voucher_type == "Journal Entry"}
+	income_of = {}
+	if jes:
+		income_of = {je: rf for rf, je in frappe.db.sql(
+			"SELECT name, income_je FROM `tabStudent Fee Refund` WHERE income_je IN %(j)s",
+			{"j": tuple(jes)})}
+	sjv_names = {g.src for g in gl if g.src_dt == "Student Journal Voucher" and g.src}
+	sjv = {}
+	if sjv_names:
+		for r in frappe.db.sql("""
+			SELECT name, purpose, company, to_company, student, to_student, student_name,
+			       to_student_name
+			FROM `tabStudent Journal Voucher` WHERE name IN %(n)s""",
+			{"n": tuple(sjv_names)}, as_dict=True):
+			sjv[r.name] = r
+
+	entries = []
+	for g in gl:
+		dr, cr = flt(g.debit), flt(g.credit)
+		vno = g.voucher_no
+		url = "/desk/journal-entry/" + vno
+		if g.src_dt == "Student Fee Receipt" and g.src:
+			label, vt, vno, url = "Fee Receipt", "Fee Receipt", g.src, "/desk/student-fee-receipt/" + g.src
+		elif g.src_dt == "Student Fee Refund" and g.src:
+			label, vt, vno, url = "Fee Refund", "Fee Refund", g.src, "/desk/student-fee-refund/" + g.src
+		elif g.voucher_no in income_of:
+			label, vt = "Retained as Income", "Income Booking"
+		elif g.src_dt == "Student Journal Voucher" and g.src in sjv:
+			v = sjv[g.src]
+			label = _SJV_LABEL.get(v.purpose, v.purpose).format(to_company=v.to_company or "")
+			if v.purpose == "Transfer to Another Student":
+				label = ("Transferred to " + (v.to_student_name or v.to_student or "")
+						 if v.student == student else
+						 "Received from " + (v.student_name or v.student or ""))
+			elif v.purpose == "Transfer to Institute" and v.student != student:
+				# The receiving institute's side: this student is the one
+				# registered there, credited with the fee paid elsewhere.
+				label = "Fee received from " + (v.company or "")
+			vt, vno, url = "Student Journal", g.src, "/desk/student-journal-voucher/" + g.src
+		else:
+			label, vt = (_clean_against(g.against or "") or "Journal Entry"), "Journal Entry"
+		entries.append(dict(
+			posting_date = getdate(g.posting_date),
+			debit        = dr,
+			credit       = cr,
+			particulars  = label,
+			vtype        = vt,
+			vno          = vno,
+			vurl         = url,
+			remarks      = (g.remarks or "").strip(),
+			seq          = g.creation,
+		))
+	return entries
 
 
 def _build_student_ledger(company, display_name, kind_label,
@@ -1273,6 +1418,7 @@ def search_students(company, kind, search_txt=""):
 	25 (useful for small institutions). Returns {value, label, meta}."""
 	if not company or not kind:
 		return []
+	_require_student_access(company)
 	kind = (kind or "").strip().lower()
 	like = "%" + (search_txt or "") + "%"
 	doctype = "Ex Student" if kind == "ex" else "Student"

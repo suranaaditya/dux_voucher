@@ -398,7 +398,7 @@ class DuxStudentLedger {
 		if(opts.from_date) _gel("sl-from").value=opts.from_date;
 		if(opts.to_date)   _gel("sl-to").value=opts.to_date;
 		if(opts.company && opts.student){
-			this._selectStudent({value:opts.student, label:opts.student, meta:""});
+			this._selectStudent({value:opts.student, label:opts.student_label||opts.student, meta:""});
 			this.fetchReport();
 		}
 	}
