@@ -78,7 +78,9 @@ dux_voucher/                              repo root (pyproject, README, CLAUDE.m
         │   │                                  book_income, paid/remaining helpers
         │   ├── trial_balance.py               whitelisted API behind the TB page;
         │   │                                  every endpoint calls require_access()
-        │   └── tb_aggregate.py                monthly pre-aggregation + nightly job
+        │   ├── tb_aggregate.py                monthly pre-aggregation + nightly job
+        │   └── student_ledger.py              students as GL parties: balances,
+        │                                      JE/PE guards, one-time migrate()
         ├── doctype/
         │   ├── payment_voucher/  + child rows + backend ref
         │   ├── receipt_voucher/  + child rows + backend ref
@@ -99,6 +101,9 @@ dux_voucher/                              repo root (pyproject, README, CLAUDE.m
         │   ├── student_fee_refund/            submittable; SRF-.YYYY.- (+ income_* fields)
         │   ├── student_fee_refund_head/       child rows on refund
         │   ├── student_fee_settings/          Single; retained-income account override
+        │   ├── student_journal_voucher/       non-cash student entries (transfer to
+        │   │                                  institute, fee, fine, concession …) + head rows
+        │   ├── student_transfer_account/      settings row: ledger credited per institute
         │   └── dux_tb_period_balance/         pre-aggregated TB, one row per
         │                                      (period, company, account, party)
         ├── page/
@@ -289,15 +294,15 @@ on `frappe.query_reports["Trial Balance"]` to wrap the report's
 
 A System-Manager-only Single doctype `Dux Backdating Settings`
 controls whether back-dated and forward-dated postings are accepted on
-ten controlled doctypes. Each rule has independent `allow_*` flags
+eleven controlled doctypes. Each rule has independent `allow_*` flags
 plus day caps; **`max_days_* = 0` is treated as unlimited**, mirroring
 the natural "checked = open, integer = limit" semantics. A global
 bypass-roles list short-circuits the check for users holding any of
 those roles.
 
-The ten controlled doctypes:
+The eleven controlled doctypes:
 
-- Payment Voucher · Receipt Voucher · Ex Student Receipt · Ex Student Refund · Student Fee Receipt · Student Fee Refund · Journal Entry
+- Payment Voucher · Receipt Voucher · Ex Student Receipt · Ex Student Refund · Student Fee Receipt · Student Fee Refund · Student Journal Voucher · Journal Entry
 - Purchase Order (uses `transaction_date`, configured per-rule via the
   optional `date_field` override)
 - Purchase Receipt · Purchase Invoice
@@ -310,7 +315,7 @@ wired in `hooks.py`. Sub-millisecond no-op when the master switch is
 off, so the cost on every controlled-doctype save is negligible
 unless the policy is actively enforced.
 
-**Adding an 11th needs THREE edits, not one:**
+**Adding a 12th needs THREE edits, not one:**
 
 1. `SUPPORTED_DOCTYPES` in `doctype/dux_backdating_settings/dux_backdating_settings.py`
 2. the `target_doctype` **Select options string** in
@@ -490,6 +495,59 @@ Report and Page records only hides it from the menu, so every whitelisted
 endpoint calls `require_access()` and `tb_aggregate.rebuild` calls
 `require_manager()`. User-Permission company scoping applies on top.
 
+### 10. Students as ledger parties + Student Journal Voucher
+
+`Student` (the app's own doctype) is an ERPNext **Party Type** (patch
+`v1_6`, account_type Receivable). The per-company
+`Admission/Registration Fee (Provisional) - {abbr}` account is the
+**student ledger**: receipts, refunds, income bookings and Student
+Journal Vouchers all post `party_type='Student'` on it, and a student's
+balance is the GL sum by party (Cr = held for the student, Dr = owed).
+
+- **The account keeps its blank `account_type`.** ERPNext only *requires*
+  a party on Receivable/Payable accounts and only *forbids* one on
+  accounts typed Bank/Cash/Income/… (`party.validate_account_party_type`),
+  so a blank-typed liability takes a party without making it mandatory.
+  Do **not** retype it — every party-less line (RV head-wise PhD receipts,
+  manual JVs) would start failing. Upstream ERPNext has discussed closing
+  this allowance; re-test a student JE on every ERPNext upgrade.
+- **History is backfilled once**, by hand, not by a patch:
+  `student_ledger.migrate(dry_run=1)` → read the report → `dry_run=0`.
+  It only writes the party columns of existing lines (GL Entry + Journal
+  Entry Account), proves every student's ledger balance equals the old
+  document formula, and sets `Student Fee Settings.student_ledger_migrated`.
+  Until that flag is set balances come from documents and the Student
+  Journal Voucher refuses to post. `revert_migration()` undoes it until the
+  first voucher is submitted.
+- **Student Journal Voucher** — one voucher per student. Purposes:
+  Transfer to Institute (posts *both* companies' JEs in one submit:
+  Dr student / Cr Branch & Division here; Dr Branch & Division / Cr the
+  ledger chosen at the institute there — never an income ledger),
+  Fee Charged, Fine / Penalty, Concession (credits the student), Transfer
+  to Another Student, Other Debit / Credit. A transfer can only move money
+  actually held. Both JEs carry `custom_source_voucher`, so cancelling
+  either — including the institute's — cancels the voucher and the other.
+  Bulk Create (list view) makes one *draft* per student; submit from the
+  list (Frappe backgrounds large bulk submits).
+- **Branch & Division accounts** come from Inter-Company Transfer
+  Settings (`inter_company_transfer.get_branch_account`) — same resolver
+  ICT uses, so transfers net against the cash already moved by ICT.
+- **Guards**: a Student on any Journal Entry must belong to the JE's
+  company and sit on its student ledger (`validate_journal_entry` hook);
+  once migrated, **every** line on the student ledger must name a student
+  (head-wise PV/RV and manual JVs onto it are refused — they would move the
+  account without moving any student); Payment Entry never takes a Student
+  or the student ledger; a student's company is locked once anything is
+  posted.
+- **Cancel cascade is all-or-nothing** (`utils._cancel_parent_voucher`):
+  if the parent voucher cannot be cancelled with the entry (e.g. the other
+  company's period is closed), the whole cancel is refused and rolled back
+  instead of logging and leaving a half-cancelled voucher.
+- **Other side ledgers**: Receivable/Payable refused (need their own
+  party); Bank/Cash refused only when they are *Assets* — the RGI chart
+  types many income heads "Cash" (Student ID Card Fine …) and those must
+  stay usable.
+
 ---
 
 
@@ -622,6 +680,24 @@ pkill -HUP -f "gunicorn.*frappe"
 ```
 
 Browser hard-refresh (Ctrl+Shift+R) when a JS bundle hash changes.
+
+**One-time, after the deploy that introduced students as ledger parties**
+(§10) — attach students to historic lines, dry run first:
+
+```bash
+bench --site <site> execute dux_voucher.dux_voucher.api.student_ledger.migrate --kwargs "{'dry_run': 1}"
+bench --site <site> execute dux_voucher.dux_voucher.api.student_ledger.migrate --kwargs "{'dry_run': 0}"
+```
+
+Read the dry-run report before the real run: `off_account` lists receipts
+that credited a different ledger, `mismatches` should contain only those
+students, `student_moved_company` lists lines left alone because the
+student now belongs elsewhere, and `unattributed` is what stays on the
+account with no student (manual JVs). The real run refuses while
+`off_account` is non-empty — re-run with `'accept_off_account': 1` and
+immediately post one *Other Credit to Student* voucher per receipt
+(Dr the ledger it hit / Cr the student). It also rebuilds the Dux TB
+monthly aggregate for the companies it touched.
 
 Frappe **Pages** (`page/*.js`) load from disk per request — no build and
 no migrate needed, a hard refresh is enough.
