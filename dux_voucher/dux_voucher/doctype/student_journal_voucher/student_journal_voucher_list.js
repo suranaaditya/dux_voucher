@@ -22,6 +22,7 @@ frappe.listview_settings["Student Journal Voucher"] = {
 function sjv_bulk_dialog(listview) {
     let preview = null;
     let previewed_with = null;   // the inputs the shown preview was built from
+    let selected = new Set();    // students ticked in the preview
     const roots = { "Fee Charged": ["Income", "Liability"], "Fine / Penalty": ["Income"], "Concession": ["Income", "Expense"] };
     const is_transfer = () => d.get_value("purpose") === "Transfer to Institute";
 
@@ -93,6 +94,7 @@ function sjv_bulk_dialog(listview) {
 
     function reset() {
         preview = null;
+        selected = new Set();
         d.set_primary_action(__("Preview"), () => run_preview());
         d.fields_dict.preview_html.$wrapper.empty();
     }
@@ -126,27 +128,84 @@ function sjv_bulk_dialog(listview) {
             callback: (r) => {
                 preview = r.message;
                 previewed_with = JSON.stringify(v);
-                const fmt = (x) => format_currency(Math.abs(flt(x)), "INR");
-                const bal = (x) => Math.abs(flt(x)) < 0.005 ? "Nil" : fmt(x) + (flt(x) > 0 ? " Cr" : " Dr");
-                const rows = preview.rows.map(x => `<tr style="${x.ok ? "" : "color:#94a3b8"}">
-                    <td style="padding:3px 6px">${frappe.utils.escape_html(x.student_name || x.student)} <span style="color:#94a3b8">${x.student}</span></td>
-                    <td style="padding:3px 6px">${frappe.utils.escape_html(x.course || "")}</td>
-                    <td style="padding:3px 6px;text-align:right">${bal(x.balance)}</td>
-                    <td style="padding:3px 6px;text-align:right">${x.ok ? fmt(x.amount) : ""}</td>
-                    <td style="padding:3px 6px">${frappe.utils.escape_html(x.note || "")}</td></tr>`).join("");
-                d.fields_dict.preview_html.$wrapper.html(`
-                    <div style="margin-bottom:6px;font-size:12px"><b>${preview.eligible}</b> voucher(s) will be created as drafts —
-                      total <b>${fmt(preview.total)}</b>. Greyed rows are skipped.</div>
-                    <div style="max-height:320px;overflow:auto;border:1px solid #e2e8f0;border-radius:6px">
-                    <table style="width:100%;font-size:12px;border-collapse:collapse">
-                      <tr style="background:#f8fafc;color:#64748b"><th style="text-align:left;padding:4px 6px">Student</th>
-                        <th style="text-align:left;padding:4px 6px">Course</th><th style="text-align:right;padding:4px 6px">Balance</th>
-                        <th style="text-align:right;padding:4px 6px">Amount</th><th style="text-align:left;padding:4px 6px">Note</th></tr>
-                      ${rows || `<tr><td colspan="5" style="padding:8px">No students found.</td></tr>`}
-                    </table></div>`);
-                if (preview.eligible) d.set_primary_action(__("Create {0} Drafts", [preview.eligible]), () => create());
+                // Every eligible student starts ticked; the operator unticks
+                // whoever should be left out (or clears and picks a few).
+                selected = new Set(preview.rows.filter(x => x.ok).map(x => x.student));
+                render_preview();
             },
         });
+    }
+
+    function render_preview() {
+        const fmt = (x) => format_currency(Math.abs(flt(x)), "INR");
+        const bal = (x) => Math.abs(flt(x)) < 0.005 ? "Nil" : fmt(x) + (flt(x) > 0 ? " Cr" : " Dr");
+        const esc = frappe.utils.escape_html;
+        const rows = preview.rows.map(x => `<tr class="sjv-bk-row" data-student="${esc(x.student)}"
+                data-search="${esc(((x.student_name || "") + " " + x.student + " " + (x.course || "")).toLowerCase())}"
+                style="${x.ok ? "" : "color:#94a3b8"}">
+            <td style="padding:3px 6px;width:28px"><input type="checkbox" class="sjv-bk-tick" ${x.ok ? "" : "disabled"}
+                ${selected.has(x.student) ? "checked" : ""}></td>
+            <td style="padding:3px 6px">${esc(x.student_name || x.student)} <span style="color:#94a3b8">${esc(x.student)}</span></td>
+            <td style="padding:3px 6px">${esc(x.course || "")}</td>
+            <td style="padding:3px 6px;text-align:right">${bal(x.balance)}</td>
+            <td style="padding:3px 6px;text-align:right">${x.ok ? fmt(x.amount) : ""}</td>
+            <td style="padding:3px 6px">${esc(x.note || "")}</td></tr>`).join("");
+        const $w = d.fields_dict.preview_html.$wrapper;
+        $w.html(`
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+              <input type="text" class="form-control input-sm sjv-bk-search" style="max-width:260px"
+                     placeholder="${__("Search student, ID or course…")}">
+              <button class="btn btn-xs btn-default sjv-bk-all">${__("Select all")}</button>
+              <button class="btn btn-xs btn-default sjv-bk-none">${__("Clear")}</button>
+              <span class="sjv-bk-count" style="font-size:12px;margin-left:auto"></span>
+            </div>
+            <div class="sjv-bk-scroll" style="max-height:320px;overflow:auto;border:1px solid #e2e8f0;border-radius:6px">
+            <table style="width:100%;font-size:12px;border-collapse:collapse">
+              <tr style="background:#f8fafc;color:#64748b"><th style="padding:4px 6px"></th>
+                <th style="text-align:left;padding:4px 6px">Student</th>
+                <th style="text-align:left;padding:4px 6px">Course</th><th style="text-align:right;padding:4px 6px">Balance</th>
+                <th style="text-align:right;padding:4px 6px">Amount</th><th style="text-align:left;padding:4px 6px">Note</th></tr>
+              ${rows || `<tr><td colspan="6" style="padding:8px">No students found.</td></tr>`}
+            </table></div>
+            <div style="font-size:11px;color:#64748b;margin-top:6px">
+              ${__("Untick anyone to leave them out. Select all / Clear act on the students shown by the search. Greyed rows cannot be posted.")}</div>`);
+
+        const visible_ok = () => $w.find(".sjv-bk-row:visible .sjv-bk-tick:not(:disabled)");
+        $w.find(".sjv-bk-search").on("input", function () {
+            const q = (this.value || "").trim().toLowerCase();
+            $w.find(".sjv-bk-row").each(function () {
+                $(this).toggle(!q || this.dataset.search.includes(q));
+            });
+        });
+        $w.off("change.sjvbk").on("change.sjvbk", ".sjv-bk-tick", function () {
+            const s = $(this).closest(".sjv-bk-row").attr("data-student");
+            this.checked ? selected.add(s) : selected.delete(s);
+            update_count();
+        });
+        $w.find(".sjv-bk-all").on("click", () => {
+            visible_ok().each(function () { this.checked = true; selected.add($(this).closest(".sjv-bk-row").attr("data-student")); });
+            update_count();
+        });
+        $w.find(".sjv-bk-none").on("click", () => {
+            visible_ok().each(function () { this.checked = false; selected.delete($(this).closest(".sjv-bk-row").attr("data-student")); });
+            update_count();
+        });
+        update_count();
+    }
+
+    function update_count() {
+        const amount = preview.rows.filter(x => x.ok && selected.has(x.student))
+            .reduce((s, x) => s + flt(x.amount), 0);
+        d.fields_dict.preview_html.$wrapper.find(".sjv-bk-count").html(
+            __("<b>{0}</b> of {1} selected · total <b>{2}</b>",
+               [selected.size, preview.eligible, format_currency(amount, "INR")]));
+        if (selected.size) {
+            d.set_primary_action(__("Create {0} Drafts", [selected.size]), () => create());
+            d.get_primary_btn().prop("disabled", false);
+        } else {
+            d.set_primary_action(__("Create Drafts"), () => {});
+            d.get_primary_btn().prop("disabled", true);
+        }
     }
 
     function create() {
@@ -156,9 +215,10 @@ function sjv_bulk_dialog(listview) {
             run_preview();
             return;
         }
+        if (!selected.size) return;
         frappe.call({
             method: SJV_LIST_METHOD + "bulk_create",
-            args: { params: params() },
+            args: { params: Object.assign(params(), { students: [...selected] }) },
             freeze: true,
             freeze_message: __("Creating vouchers…"),
             callback: (r) => {

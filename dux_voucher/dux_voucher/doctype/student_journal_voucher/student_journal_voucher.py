@@ -487,7 +487,11 @@ def bulk_preview(params):
     filters = {"company": p.company, "is_disabled": 0}
     if p.course:
         filters["course"] = p.course
-    if p.students:
+    # An explicit selection (the ticks in the Bulk Create preview) restricts
+    # the run — and an empty selection means nobody, never "everybody".
+    if p.get("students") is not None:
+        if not p.students:
+            return {"rows": [], "eligible": 0, "total": 0.0}
         filters["name"] = ["in", list(p.students)]
     students = frappe.get_all("Student", filters=filters,
                               fields=["name", "student_name", "course"],
@@ -551,6 +555,8 @@ def bulk_create(params):
     if p.purpose == TRANSFER_TO_STUDENT:
         frappe.throw(_("Transfer to Another Student is one pair at a time — "
                        "create it from a single voucher."))
+    if p.get("students") is not None and not p.students:
+        frappe.throw(_("No students are selected."))
     preview = bulk_preview(params)
     created, failed = [], []
     for r in preview["rows"]:
