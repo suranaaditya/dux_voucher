@@ -68,7 +68,10 @@ dux_voucher/                              repo root (pyproject, README, CLAUDE.m
         ├── api/
         │   ├── utils.py                       shared helpers
         │   ├── payment_voucher_api.py
-        │   ├── ex_student_api.py
+        │   ├── ex_student_api.py              CSV import, opening helpers, adjustment
+        │   │                                  CSV import + matching
+        │   ├── ex_student_recon.py            Ex-Students Receivable vs the students'
+        │   │                                  ledgers; nightly gap alert
         │   ├── ic_transfer_api.py
         │   ├── reports_api.py                 ledger / daybook / cashbook / party TB /
         │   │                                  student ledger data + T-account helper
@@ -85,7 +88,8 @@ dux_voucher/                              repo root (pyproject, README, CLAUDE.m
         │   ├── payment_voucher/  + child rows + backend ref
         │   ├── receipt_voucher/  + child rows + backend ref
         │   ├── ex_student/       + opening_row / opening_batch / receipt /
-        │   │                       refund / writeoff / ledger_entry
+        │   │                       refund / writeoff / ledger_entry /
+        │   │                       opening_adjustment (+ _row)
         │   ├── inter_company_transfer/
         │   ├── ic_company_account_mapping/
         │   ├── inter_company_transfer_settings/
@@ -117,6 +121,7 @@ dux_voucher/                              repo root (pyproject, README, CLAUDE.m
         │   └── dux_trial_balance/             Trial Balance — the primary UI
         ├── report/
         │   ├── ex_student_outstanding/
+        │   ├── ex_student_reconciliation/     GL vs students per company, gap items
         │   ├── ict_pending_confirmation/
         │   ├── admission_fee_register/        flat list + KPI summary
         │   ├── student_fee_refund_income/     retained fee → income; KPI cards +
@@ -132,8 +137,10 @@ dux_voucher/                              repo root (pyproject, README, CLAUDE.m
         │   ├── test_student_fee_receipt.py    13 tests (validate + FY helper)
         │   ├── test_student_fee_refund_income.py   7 tests (income-account
         │   │                                  resolver guards + balance helper)
-        │   └── test_ledger_particulars.py     19 tests (purchase heads, invoice
-        │                                      make-up / drill-down tie, labels)
+        │   ├── test_ledger_particulars.py     19 tests (purchase heads, invoice
+        │   │                                  make-up / drill-down tie, labels)
+        │   └── test_ex_student_adjustment.py  17 tests (adjustment Dr/Cr, CSV cells
+        │                                      and matching, reconciliation items)
         └── utils.py                           cancel cascade for PE/JE + income JE
 ```
 
@@ -172,11 +179,64 @@ ledger). Submittable doctypes:
   Receivable, Cr Bank/Cash); mirror of Receipt with reversed legs,
   orange-accented print format, soft-warn on Dr balance and overpay
 - **Ex Student Writeoff** — partial / full writeoff → posts JE
+- **Ex Student Opening Adjustment** — corrects some students' openings
+  without cancelling their batch (a batch posts ONE netted JE for every
+  student in it, so cancelling it to fix one figure reversed everyone).
+  The user types the CORRECT opening; per student the voucher posts the
+  difference as a ledger row (Dr raises what is owed, Cr lowers it) and
+  one Opening Entry JE (`is_opening = Yes`, Ex-Students Receivable vs
+  Temporary Opening) for the net — a move between two students nets nil
+  and posts no JE. The difference is recomputed on save and re-checked on
+  submit under a `FOR UPDATE` lock on the students, read with locking reads
+  so a waiting submit sees what the other committed ("opening changed since
+  this was saved"). Refused: a blank Correct Opening (never read as nil —
+  the form prefills the current figure on its own side), a posting date
+  before the student's first opening row, a student with rows in another
+  company, a result that would turn a write-off into a Cr advance, and
+  cancelling a correction while a LATER one touches the same students
+  (corrections stack, like the batch guard). CSV import of correct
+  openings matches by Ex Student id, then Student ID, then name — only a
+  single enabled student of the company, never creating one — and keeps
+  the sheet on the voucher. Accounts User drafts; Accounts Manager /
+  System Manager submit and cancel. **Every Ex Student voucher** (batch,
+  adjustment, receipt, refund, write-off) refuses a cancel that arrives
+  through its journal entry from someone without cancel on the voucher
+  (`ex_student_ledger_entry.require_cancel_right`): the cascade runs with
+  `ignore_permissions`, and an Accounts User could otherwise reverse a
+  whole batch by cancelling its JE.
+  "Correct Opening" on the Ex Student form and "Correct Openings" on a
+  submitted batch start one. Batches and corrections are back-dated, so
+  each queues `tb_aggregate.refresh_month` for its company-month — the
+  nightly aggregate only rebuilds the last two months.
 - **Ex Student Ledger Entry** — denormalised running-balance rows for
-  the Outstanding report
+  the Outstanding report. **Read-only**: no role may write, create or
+  delete, and the controller refuses an edit, a delete, or an insert not
+  made by the voucher posting it right now (`posting_ledger_rows`, a
+  request-local `frappe.flags` marker no client can set) — even for
+  Administrator. A row edited by hand moved a student without moving the
+  GL (it happened on production). Vouchers flag their rows cancelled with
+  SQL from `on_cancel`, which the lock does not touch, and a deleted
+  (cancelled) voucher takes its cancelled rows with it in `on_trash`.
 
-`Ex Student Outstanding` (Script Report) shows current Dr balance per
-student.
+**"Opening" = live Opening Batch + Opening Adjustment rows**
+(`ex_student_api.OPENING_VOUCHER_TYPES`). `Ex Student.opening_balance` is
+labelled *Current Balance*: it has always been the net of every live row,
+receipts included. An Opening Batch cannot be cancelled while a live
+adjustment touches its students (the adjustment's difference would stand
+alone as the opening). Amending a cancelled Batch, Receipt, Writeoff or
+Adjustment works: each clears the inherited `backend_je` in `insert()`.
+
+`Ex Student Outstanding` (Script Report) shows each student's opening
+(netted onto one side), Received, Refunded, Written Off and Outstanding,
+and warns when the GL disagrees. **`Ex Student Reconciliation`** compares
+Ex-Students Receivable with the students' rows per company and lists the
+entries behind any gap: postings on the account from outside the module
+(manual JVs, migration opening entries) and vouchers whose JE and rows
+disagree; the items always add up to the gap. `ex_student_recon.daily_check`
+(nightly) sends Accounts Managers an in-app alert — never email — when the
+gaps change, remembering the last state in DefaultValue parent
+`__dux_ex_student_recon`. Report, banner and alert show only the companies
+a user's Company User Permissions allow (`ex_student_recon.permitted_companies`).
 
 ### 3. Inter-Company Transfer
 
@@ -665,6 +725,13 @@ form and the list.
 
 ## Recently Completed
 
+- [x] **Ex Student opening corrections** — Opening Adjustment voucher
+      (posts only the per-student difference; CSV of correct openings),
+      read-only student ledger rows, Amend fixed on Batch / Receipt /
+      Writeoff, batch cancel refused under a live correction, and the Ex
+      Student Reconciliation report with a nightly in-app gap alert.
+      Production had 23 of 59 batches cancelled and re-entered to fix
+      single figures, and five companies' GL out of step with the students
 - [x] **Purchases in ledger Particulars** — supplier invoices read as the
       head bought (with a drill-down that ties to the bill), GRNs as
       their supplier with the items as narration, instead of "Stock /
@@ -864,6 +931,8 @@ Notable cross-cutting files when you need to find something fast:
 | TB Excel export | `reports_export.py` → `export_trial_balance_xlsx` |
 | Voucher controllers | `dux_voucher/dux_voucher/doctype/{payment,receipt}_voucher/` |
 | Ex-student lifecycle | `dux_voucher/dux_voucher/doctype/ex_student*/` |
+| Ex-student opening corrections + CSV matching | `doctype/ex_student_opening_adjustment/`, `api/ex_student_api.py` |
+| Ex-student GL reconciliation + nightly alert | `api/ex_student_recon.py`, `report/ex_student_reconciliation/` |
 | Set Project on a PO and everything made from it | `dux_voucher/dux_voucher/api/project_tagging.py` + `public/js/purchase_order_project.js` |
 
 For exact source, browse on GitHub or `git ls-files` on the server.
