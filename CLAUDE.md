@@ -130,8 +130,10 @@ dux_voucher/                              repo root (pyproject, README, CLAUDE.m
         │   ├── test_backdating.py             27 tests
         │   ├── test_student_masters.py        19 tests (Course/Fee Head/Student)
         │   ├── test_student_fee_receipt.py    13 tests (validate + FY helper)
-        │   └── test_student_fee_refund_income.py   7 tests (income-account
-        │                                      resolver guards + balance helper)
+        │   ├── test_student_fee_refund_income.py   7 tests (income-account
+        │   │                                  resolver guards + balance helper)
+        │   └── test_ledger_particulars.py     19 tests (purchase heads, invoice
+        │                                      make-up / drill-down tie, labels)
         └── utils.py                           cancel cascade for PE/JE + income JE
 ```
 
@@ -249,6 +251,31 @@ retroactive for existing entries.
   against/account text when there is none. Ledger Statement and Cash &
   Bank Book inherit it; Party Ledger, Day Book and Party TB are
   unchanged.
+- **Purchases read as what was bought and who it came from** — the
+  two-step purchase parks goods on "Stock / Asset Received But Not
+  Billed" between GRN and invoice, and a statement naming that clearing
+  account told the reader nothing. Two rules, both in
+  `get_ledger_statement`:
+  - *Party Ledger, Purchase Invoice bill row* → the **head** it bought,
+    without the company suffix ("Computer & Accessories", "X & 2 more").
+    Per line: the invoice line's own account unless it is a clearing
+    account, else the GRN line's, else asset category → item default →
+    item group default. The company default expense account ("Cost of
+    Goods Sold", stamped on a GRN line when the item had no head) yields
+    to a real item head. The drill-down splits each clearing line over
+    the heads behind *that* clearing account and adds GST / TDS /
+    round-off as posted, so it ties to the bill. The invoice's own
+    settlement legs (`is_paid` bank, write-off) are taken out **by
+    amount**, not by account type — banks can be overdrafts. For goods
+    received on a GRN the head is what they were bought *for*: the
+    invoice posted to the clearing account, and a stock item's head is
+    only charged on issue. Payment / write-off rows of the same invoice
+    are unchanged.
+  - *Any account ledger, Purchase Receipt row* → the GRN's **supplier**,
+    and the items received ("Interactive Flat Panel × 15") replace
+    ERPNext's "Accounting Entry for Stock/Asset" narration — a narration
+    someone typed is kept. Landed Cost Voucher charge lines (freight …)
+    posted under the GRN keep their old text: another vendor's charge.
 - **RGI house convention (inverted To/By)** — applies to the party
   ledger and to Bank/Cash accounts (Cash & Bank Book): Dr → "By",
   Cr → "To". Plain non-bank account views keep the textbook rule.
@@ -638,6 +665,12 @@ form and the list.
 
 ## Recently Completed
 
+- [x] **Purchases in ledger Particulars** — supplier invoices read as the
+      head bought (with a drill-down that ties to the bill), GRNs as
+      their supplier with the items as narration, instead of "Stock /
+      Asset Received But Not Billed". Display-time only, retroactive.
+      Checked read-only against production: 57 ledgers, 12,495 rows,
+      money identical, only PI/PR rows change, every drill-down ties
 - [x] **Dux Trial Balance** — one engine, four groupings, replacing
       ERPNext's two disconnected trial balances. Free date range,
       native trust roll-up, monthly aggregate for wide multi-company
