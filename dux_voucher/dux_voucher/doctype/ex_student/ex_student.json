@@ -93,11 +93,11 @@
    "label": "Balance"
   },
   {
-   "description": "Auto-computed from posted Ex Student Opening Batch entries",
+   "description": "What the student owes (Dr) or holds as an advance (Cr) today: openings and opening adjustments, less receipts and write-offs, plus refunds. The opening alone is shown at the top of the form.",
    "fieldname": "opening_balance",
    "fieldtype": "Currency",
    "in_list_view": 1,
-   "label": "Opening Balance",
+   "label": "Current Balance",
    "read_only": 1
   },
   {
@@ -133,7 +133,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-04-18 10:11:23.565970",
+ "modified": "2026-10-29 23:00:00.000000",
  "modified_by": "Administrator",
  "module": "Dux Voucher",
  "name": "Ex Student",

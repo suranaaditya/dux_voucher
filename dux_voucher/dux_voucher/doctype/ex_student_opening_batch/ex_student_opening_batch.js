@@ -12,6 +12,18 @@ frappe.ui.form.on('Ex Student Opening Batch', {
                 () => frappe.set_route('Form', 'Journal Entry', frm.doc.backend_je)
             );
         }
+        if (frm.doc.docstatus === 1 && frappe.model.can_create('Ex Student Opening Adjustment')) {
+            // Correct a few students without cancelling the whole batch:
+            // same company, dated on this batch's own date.
+            frm.add_custom_button(__('Correct Openings'), () => {
+                frappe.model.with_doctype('Ex Student Opening Adjustment', () => {
+                    const doc = frappe.model.get_new_doc('Ex Student Opening Adjustment');
+                    doc.company = frm.doc.company;
+                    doc.posting_date = frm.doc.posting_date;
+                    frappe.set_route('Form', doc.doctype, doc.name);
+                });
+            });
+        }
         _show_totals_headline(frm);
     },
 
@@ -67,8 +79,9 @@ function _show_totals_headline(frm) {
     const td = flt(frm.doc.total_debit);
     const tc = flt(frm.doc.total_credit);
     const net = td - tc;
+    // Frappe 16 appends a new bar on every set_headline: clear first.
+    frm.dashboard.clear_headline();
     if (td === 0 && tc === 0) {
-        frm.dashboard.clear_headline();
         return;
     }
     const parts = [];
@@ -82,7 +95,7 @@ function _show_totals_headline(frm) {
     } else {
         net_label = __('Net {0} Cr', [format_currency(Math.abs(net))]);
     }
-    frm.dashboard.set_headline(parts.join('  &bull;  ') + '  &raquo;  ' + net_label, 'blue');
+    frm.dashboard.set_headline(parts.join('  ·  ') + '  →  ' + net_label, 'blue');
 }
 
 function _open_csv_import(frm) {

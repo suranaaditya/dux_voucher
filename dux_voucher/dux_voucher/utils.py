@@ -71,10 +71,16 @@ def _cancel_parent_voucher(doctype, name):
         voucher.cancel()
     except Exception as e:
         frappe.db.rollback(save_point="dux_parent_cancel")
+        reason = frappe.utils.strip_html(str(e))
+        # The parent's own refusal is already queued for the user; this
+        # message repeats it as the reason, so show it once.
+        log = getattr(frappe.local, "message_log", None) or []
+        if log and reason and reason in frappe.utils.strip_html(str((log[-1] or {}).get("message", ""))):
+            log.pop()
         frappe.throw(
             _("This entry belongs to {0} {1}, which could not be cancelled "
               "with it, so nothing was cancelled. Reason: {2}")
-            .format(doctype, name, frappe.utils.strip_html(str(e)))
+            .format(doctype, name, reason)
         )
     finally:
         frappe.flags.in_dux_voucher_cancel = False

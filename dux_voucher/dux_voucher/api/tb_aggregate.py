@@ -73,7 +73,11 @@ def rebuild(companies=None, from_period=None, to_period=None, commit=True):
     if not companies:
         return {"companies": 0, "rows": 0,
                 "note": "no company sits under a group company"}
+    return _rebuild(companies, from_period, to_period, commit)
 
+
+def _rebuild(companies, from_period=None, to_period=None, commit=True, stamp=True):
+    """The rebuild itself, without the role check — callers vouch for it."""
     started = now_datetime()
 
     # Built one company at a time, deliberately.
@@ -151,7 +155,8 @@ def rebuild(companies=None, from_period=None, to_period=None, commit=True):
         if commit:
             frappe.db.commit()
 
-    _set_stamp(started)
+    if stamp:
+        _set_stamp(started)
     return {
         "companies": len(companies),
         "rows": total_rows,
@@ -184,6 +189,31 @@ def rebuild_nightly(months_back=2):
     today = getdate(frappe.utils.nowdate())
     frm = month_key(add_months(today, -abs(months_back)))
     return rebuild(from_period=frm, to_period=month_key(today))
+
+
+def queue_month_refresh(company, posting_date):
+    """Refresh one company-month after a back-dated posting the nightly
+    window will never reach. Ex Student opening batches and opening
+    corrections post on the opening date — April, rebuilt in October — so
+    without this the aggregate (and every wide Trial Balance it serves)
+    would miss them. Queued to run after the commit; a company the
+    aggregate does not hold costs nothing."""
+    if frappe.db.exists(AGG_DOCTYPE, {"company": company}):
+        frappe.enqueue("dux_voucher.dux_voucher.api.tb_aggregate.refresh_month", queue="short",
+                       enqueue_after_commit=True, company=company, period=month_key(getdate(posting_date)))
+
+
+def refresh_month(company, period):
+    """Background job behind :func:`queue_month_refresh`. Leaves the
+    "built at" stamp alone: one month is not a build of the whole.
+
+    Two postings seconds apart queue two jobs; run side by side, the one
+    holding the older snapshot could delete the newer one's rows. So one
+    at a time per company: start a fresh transaction, take the Company row
+    lock, and only then read — the read sees everything committed before."""
+    frappe.db.commit()
+    frappe.db.sql("SELECT name FROM `tabCompany` WHERE name = %s FOR UPDATE", (company,))
+    _rebuild([company], from_period=period, to_period=period, stamp=False)
 
 
 # ══════════════════════════════════════════════════════════════════════

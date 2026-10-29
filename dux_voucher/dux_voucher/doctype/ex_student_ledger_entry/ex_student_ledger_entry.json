@@ -2,6 +2,7 @@
  "actions": [],
  "autoname": "hash",
  "creation": "2026-04-17 22:37:12.916903",
+ "description": "Posted by Ex Student Opening Batch, Opening Adjustment, Receipt, Refund and Write-off. Read-only: to change a balance, cancel or adjust the voucher that posted it.",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
@@ -27,6 +28,7 @@
    "in_standard_filter": 1,
    "label": "Ex Student",
    "options": "Ex Student",
+   "read_only": 1,
    "reqd": 1,
    "search_index": 1
   },
@@ -45,6 +47,7 @@
    "in_standard_filter": 1,
    "label": "Company",
    "options": "Company",
+   "read_only": 1,
    "reqd": 1,
    "search_index": 1
   },
@@ -54,6 +57,7 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Posting Date",
+   "read_only": 1,
    "reqd": 1,
    "search_index": 1
   },
@@ -65,13 +69,15 @@
    "fieldname": "debit",
    "fieldtype": "Currency",
    "in_list_view": 1,
-   "label": "Debit"
+   "label": "Debit",
+   "read_only": 1
   },
   {
    "fieldname": "credit",
    "fieldtype": "Currency",
    "in_list_view": 1,
-   "label": "Credit"
+   "label": "Credit",
+   "read_only": 1
   },
   {
    "fieldname": "source_section",
@@ -84,6 +90,7 @@
    "in_standard_filter": 1,
    "label": "Voucher Type",
    "options": "DocType",
+   "read_only": 1,
    "reqd": 1,
    "search_index": 1
   },
@@ -93,6 +100,7 @@
    "in_standard_filter": 1,
    "label": "Voucher No",
    "options": "voucher_type",
+   "read_only": 1,
    "reqd": 1,
    "search_index": 1
   },
@@ -103,13 +111,15 @@
   {
    "fieldname": "remarks",
    "fieldtype": "Small Text",
-   "label": "Remarks"
+   "label": "Remarks",
+   "read_only": 1
   },
   {
    "default": "0",
    "fieldname": "is_cancelled",
    "fieldtype": "Check",
    "label": "Is Cancelled",
+   "read_only": 1,
    "search_index": 1
   }
  ],
@@ -117,47 +127,38 @@
  "in_create": 1,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-04-17 22:37:12.916903",
+ "modified": "2026-10-29 23:00:00.000000",
  "modified_by": "Administrator",
  "module": "Dux Voucher",
  "name": "Ex Student Ledger Entry",
  "owner": "Administrator",
  "permissions": [
   {
-   "create": 1,
-   "delete": 1,
    "email": 1,
    "export": 1,
    "print": 1,
    "read": 1,
    "report": 1,
    "role": "System Manager",
-   "share": 1,
-   "write": 1
+   "share": 1
   },
   {
-   "create": 1,
-   "delete": 1,
    "email": 1,
    "export": 1,
    "print": 1,
    "read": 1,
    "report": 1,
    "role": "Accounts Manager",
-   "share": 1,
-   "write": 1
+   "share": 1
   },
   {
-   "create": 1,
-   "delete": 1,
    "email": 1,
    "export": 1,
    "print": 1,
    "read": 1,
    "report": 1,
    "role": "Accounts User",
-   "share": 1,
-   "write": 1
+   "share": 1
   }
  ],
  "row_format": "Dynamic",

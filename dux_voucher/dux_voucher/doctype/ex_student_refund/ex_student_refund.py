@@ -23,6 +23,11 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import flt
 
+from dux_voucher.dux_voucher.doctype.ex_student_ledger_entry.ex_student_ledger_entry import (
+    delete_cancelled_ledger_rows,
+    posting_ledger_rows,
+    require_cancel_right,
+)
 from dux_voucher.dux_voucher.api.utils import (
     _get_ex_student_accounts,
     _get_account_currency,
@@ -169,6 +174,10 @@ class ExStudentRefund(Document):
         _submit_doc(je)
         return je.name
 
+    def on_trash(self):
+        # Frappe deletes only a cancelled voucher; its cancelled rows go with it.
+        delete_cancelled_ledger_rows(self)
+
     def _insert_ledger_entry(self, je_name):
         """One row in the denormalised Ex Student Ledger Entry register.
 
@@ -189,11 +198,16 @@ class ExStudentRefund(Document):
             'Refund ({0})'
         ).format(self.mode_of_payment)
         ledger.is_cancelled = 0
-        ledger.insert(ignore_permissions=True)
+        with posting_ledger_rows(self):
+            ledger.insert(ignore_permissions=True)
 
     # ------------------------------------------------------------------
     # On Cancel
     # ------------------------------------------------------------------
+    def before_cancel(self):
+        # also when the cancel starts from its journal entry
+        require_cancel_right(self)
+
     def on_cancel(self):
         if self.backend_je:
             _safe_cancel('Journal Entry', self.backend_je)

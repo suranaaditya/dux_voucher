@@ -3,6 +3,11 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import flt
 
+from dux_voucher.dux_voucher.doctype.ex_student_ledger_entry.ex_student_ledger_entry import (
+    delete_cancelled_ledger_rows,
+    posting_ledger_rows,
+    require_cancel_right,
+)
 from dux_voucher.dux_voucher.api.utils import (
     _get_ex_student_accounts,
     _get_account_currency,
@@ -12,6 +17,14 @@ from dux_voucher.dux_voucher.api.utils import (
 
 
 class ExStudentWriteoff(Document):
+
+    def insert(self, *args, **kwargs):
+        """Clear the cancelled journal an amendment inherits before
+        Frappe's link check refuses it (same as Ex Student Refund)."""
+        if self.amended_from:
+            self.backend_je = None
+            self.is_posted = 0
+        return super().insert(*args, **kwargs)
 
     # ------------------------------------------------------------------
     # Validate
@@ -120,6 +133,10 @@ class ExStudentWriteoff(Document):
         _submit_doc(je)
         return je.name
 
+    def on_trash(self):
+        # Frappe deletes only a cancelled voucher; its cancelled rows go with it.
+        delete_cancelled_ledger_rows(self)
+
     def _insert_ledger_entry(self):
         ledger = frappe.new_doc('Ex Student Ledger Entry')
         ledger.ex_student = self.ex_student
@@ -131,11 +148,16 @@ class ExStudentWriteoff(Document):
         ledger.voucher_no = self.name
         ledger.remarks = self.reason
         ledger.is_cancelled = 0
-        ledger.insert(ignore_permissions=True)
+        with posting_ledger_rows(self):
+            ledger.insert(ignore_permissions=True)
 
     # ------------------------------------------------------------------
     # On Cancel
     # ------------------------------------------------------------------
+    def before_cancel(self):
+        # also when the cancel starts from its journal entry
+        require_cancel_right(self)
+
     def on_cancel(self):
         if self.backend_je:
             _safe_cancel('Journal Entry', self.backend_je)

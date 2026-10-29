@@ -1,0 +1,199 @@
+{
+ "actions": [],
+ "autoname": "naming_series:",
+ "creation": "2026-10-29 23:00:00.000000",
+ "description": "Corrects the opening balance of one or more ex-students without touching anyone else in their Opening Batch. Posts only the difference.",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "basic_section",
+  "company",
+  "posting_date",
+  "col_basic",
+  "total_debit",
+  "total_credit",
+  "net_amount",
+  "students_section",
+  "adjustments",
+  "reason_section",
+  "reason",
+  "tracking_section",
+  "is_posted",
+  "backend_je",
+  "amended_from"
+ ],
+ "fields": [
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Naming Series",
+   "no_copy": 1,
+   "options": "EOA-.YYYY.-",
+   "reqd": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "basic_section",
+   "fieldtype": "Section Break",
+   "label": "Details"
+  },
+  {
+   "bold": 1,
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "description": "The date of the opening being corrected (the students' Opening Batch date). The correction posts as an opening entry on this date.",
+   "fieldname": "posting_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Posting Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "col_basic",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "total_debit",
+   "fieldtype": "Currency",
+   "label": "Total Adjust Dr",
+   "read_only": 1
+  },
+  {
+   "fieldname": "total_credit",
+   "fieldtype": "Currency",
+   "label": "Total Adjust Cr",
+   "read_only": 1
+  },
+  {
+   "description": "Total Adjust Dr minus Total Adjust Cr. This is what posts to Ex-Students Receivable.",
+   "fieldname": "net_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Net Change",
+   "read_only": 1
+  },
+  {
+   "fieldname": "students_section",
+   "fieldtype": "Section Break",
+   "label": "Students"
+  },
+  {
+   "fieldname": "adjustments",
+   "fieldtype": "Table",
+   "label": "Students",
+   "options": "Ex Student Opening Adjustment Row"
+  },
+  {
+   "fieldname": "reason_section",
+   "fieldtype": "Section Break",
+   "label": "Reason"
+  },
+  {
+   "description": "Why these openings are being corrected. Kept on the voucher, its journal entry and every student's ledger.",
+   "fieldname": "reason",
+   "fieldtype": "Small Text",
+   "label": "Reason",
+   "reqd": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "tracking_section",
+   "fieldtype": "Section Break",
+   "label": "Posting Status"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_posted",
+   "fieldtype": "Check",
+   "label": "Is Posted",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "backend_je",
+   "fieldtype": "Link",
+   "label": "Backend Journal Entry",
+   "no_copy": 1,
+   "options": "Journal Entry",
+   "read_only": 1
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Ex Student Opening Adjustment",
+   "print_hide": 1,
+   "read_only": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2026-10-29 23:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Dux Voucher",
+ "name": "Ex Student Opening Adjustment",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts User",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "search_fields": "company,reason",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

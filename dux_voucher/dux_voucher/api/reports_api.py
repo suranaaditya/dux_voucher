@@ -1428,6 +1428,7 @@ def get_permitted_companies():
 # Ex Student ledger voucher_type → (Particulars label, short pill label)
 _EX_VT_LABEL = {
 	"Ex Student Opening Batch": ("Opening Balance", "Opening Batch"),
+	"Ex Student Opening Adjustment": ("Opening Balance Correction", "Opening Adj."),
 	"Ex Student Receipt":       ("Fee Receipt",     "Receipt"),
 	"Ex Student Refund":        ("Fee Refund",      "Refund"),
 	"Ex Student Writeoff":      ("Write-off",       "Write-off"),

@@ -68,6 +68,9 @@ has_permission = {
 scheduler_events = {
     "daily": [
         "dux_voucher.dux_voucher.api.tb_aggregate.rebuild_nightly",
+        # Ex-Students Receivable vs the students' ledgers; in-app alert to
+        # Accounts Managers when a gap appears or changes.
+        "dux_voucher.dux_voucher.api.ex_student_recon.daily_check",
     ],
 }
 

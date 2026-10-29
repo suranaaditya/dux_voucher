@@ -1,0 +1,118 @@
+{
+ "actions": [],
+ "creation": "2026-10-29 23:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "ex_student",
+  "student_name",
+  "current_amount",
+  "current_type",
+  "correct_amount",
+  "correct_type",
+  "change",
+  "debit",
+  "credit",
+  "remarks"
+ ],
+ "fields": [
+  {
+   "columns": 2,
+   "fieldname": "ex_student",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Ex Student",
+   "options": "Ex Student",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "ex_student.student_name",
+   "fieldname": "student_name",
+   "fieldtype": "Data",
+   "label": "Student Name",
+   "read_only": 1
+  },
+  {
+   "columns": 2,
+   "description": "The student's opening as it stands: every live Opening Batch and Opening Adjustment row. Receipts, refunds and write-offs are not part of it.",
+   "fieldname": "current_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Current Opening",
+   "read_only": 1
+  },
+  {
+   "columns": 1,
+   "fieldname": "current_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Dr/Cr",
+   "options": "\nDr\nCr\nNil",
+   "read_only": 1
+  },
+  {
+   "columns": 2,
+   "description": "What the opening should have been. 0 makes it nil.",
+   "fieldname": "correct_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Correct Opening",
+   "non_negative": 1
+  },
+  {
+   "columns": 1,
+   "default": "Dr",
+   "description": "Dr: the student owes. Cr: an advance held for the student.",
+   "fieldname": "correct_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Dr/Cr",
+   "options": "Dr\nCr",
+   "reqd": 1
+  },
+  {
+   "columns": 2,
+   "description": "Dr raises what the student owes; Cr lowers it (or raises the advance).",
+   "fieldname": "change",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Change",
+   "read_only": 1
+  },
+  {
+   "description": "Raises what the student owes by this much.",
+   "fieldname": "debit",
+   "fieldtype": "Currency",
+   "label": "Adjust Dr",
+   "read_only": 1
+  },
+  {
+   "description": "Lowers what the student owes (or raises the advance) by this much.",
+   "fieldname": "credit",
+   "fieldtype": "Currency",
+   "label": "Adjust Cr",
+   "read_only": 1
+  },
+  {
+   "fieldname": "remarks",
+   "fieldtype": "Small Text",
+   "label": "Reason for this student"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-10-30 01:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Dux Voucher",
+ "name": "Ex Student Opening Adjustment Row",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
