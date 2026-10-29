@@ -548,6 +548,53 @@ balance is the GL sum by party (Cr = held for the student, Dr = owed).
   types many income heads "Cash" (Student ID Card Fine …) and those must
   stay usable.
 
+### 11. Set Project on a Purchase Order (late project tagging)
+
+A PO is often raised, received and billed before anyone notices it never
+named its project. ERPNext offers no way back: PO and GRN lock `project`
+on submit, and on invoices and payments, where the field may be edited,
+the save triggers a repost that `Repost Accounting Ledger Settings` must
+whitelist (empty on both sites, so the save is refused). The Capital
+Projects dashboard reads Committed from PO lines and Invoiced / Paid from
+`GL Entry.project`, so a late tag has to reach the ledger.
+
+`api/project_tagging.py` (`preview` / `apply` / `read_sheet`), driven from a
+**Set Project** button on a submitted PO, a **Set Project** list action on
+ticked POs, and **Set Project from Excel** in the PO list menu (the site
+teams' sheet layout — PO Number / Vendor / Amount / Project Name, found by
+header). One script, `public/js/purchase_order_project.js`, serves both the
+form and the list.
+
+- **Each PO line moves as one CHAIN with what was made from it**: PO line →
+  GRN line (`purchase_order_item`) → invoice line (`po_detail` /
+  `pr_detail`). ERPNext re-checks on every later document that a GRN /
+  invoice line's project equals the line it came from, so a half-moved chain
+  makes the next invoice or return unsaveable. Any link on a different
+  project (unless *Replace* is ticked), in a frozen / closed period, or not
+  readable holds the whole chain back, reported with the reason.
+- **"On a project" means the effective project** — the line's own, else its
+  header's — which is what the dashboard (`COALESCE`) and the posted ledger
+  already treat it as. A blank line under a header on another project is
+  NOT free to take.
+- **Ledger, per document.** A GRN's GL rows carry its *header* project only
+  (`add_gl_entry` never passes the line's); its stock rows point at their
+  line and are tagged per line. An invoice wholly on one project gets every
+  row tagged; a mixed one is re-derived in memory with `get_gl_entries` +
+  `process_gl_map(merge_entries=False)` (how ERPNext posts an invoice) and
+  paired row-for-row, since invoice / GRN ledger rows carry no
+  `voucher_detail_no` (0 of 960 / 791 on production). Unpaired → left and
+  reported; the preview already says so. Payments whose *every* reference
+  belongs to the project, and journal rows whose own GL row can be
+  identified, follow.
+- **A blank line on a touched document inherits its own PO line's project.**
+  Production GRNs receive two POs at once; without this, one tagged earlier
+  left them "mixed" for no reason. **Only the project column ever changes.**
+  Each changed document gets a timeline comment naming the POs that reached it.
+- Roles: System Manager / Accounts Manager — it rewrites ledger rows.
+  `read_sheet` only reads (and then deletes) an unattached file the caller
+  uploaded in the last hour — anything looser lets a caller delete another
+  file by URL. Sheet values are untrusted: the dialog escapes everything.
+
 ---
 
 
@@ -784,5 +831,6 @@ Notable cross-cutting files when you need to find something fast:
 | TB Excel export | `reports_export.py` → `export_trial_balance_xlsx` |
 | Voucher controllers | `dux_voucher/dux_voucher/doctype/{payment,receipt}_voucher/` |
 | Ex-student lifecycle | `dux_voucher/dux_voucher/doctype/ex_student*/` |
+| Set Project on a PO and everything made from it | `dux_voucher/dux_voucher/api/project_tagging.py` + `public/js/purchase_order_project.js` |
 
 For exact source, browse on GitHub or `git ls-files` on the server.
