@@ -1,6 +1,8 @@
+from collections import defaultdict
+
 import frappe
 from frappe import _
-from frappe.utils import flt, getdate, formatdate
+from frappe.utils import flt, fmt_money, getdate, formatdate
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -163,6 +165,19 @@ def get_ledger_statement(company, account, from_date, to_date,
 				name_pairs.add((b.party_type, b.party))
 	party_names = _resolve_party_names(name_pairs)
 
+	# ── Purchases read as WHAT was bought and WHO it came from ────────
+	# ERPNext's two-step purchase parks the goods on a clearing account
+	# ("Stock / Asset Received But Not Billed") between the GRN and the
+	# invoice, and a statement naming that account tells the reader
+	# nothing. A supplier's invoice now reads as the heads it bought, and a
+	# GRN — whose ledger lines carry no party at all — as its supplier,
+	# with the items received in place of ERPNext's boilerplate narration.
+	invoice_heads = _purchase_invoice_heads(
+		company, {e.voucher_no for e in entries if e.voucher_type == "Purchase Invoice"},
+		party_type, party) if use_party else {}
+	receipts = _purchase_receipt_facts(
+		{e.voucher_no for e in entries if e.voucher_type == "Purchase Receipt"})
+
 	running  = ob_net
 	total_dr = 0.0
 	total_cr = 0.0
@@ -181,28 +196,47 @@ def get_ledger_statement(company, account, from_date, to_date,
 		sib_label = "" if e.party else _sibling_party_label(
 			voucher_parties.get((e.voucher_type, e.voucher_no)), party_names)
 		own_party = (party_names.get((e.party_type, e.party)) or e.party) if e.party else ""
+		receipt = receipts.get(e.voucher_no) if e.voucher_type == "Purchase Receipt" else None
+		if receipt and e.account in receipt["charges"]:
+			receipt = None   # a landed cost (freight …) — not the goods supplier's
+		bought = None
 		if use_party:
 			# Party ledger — RGI house convention (inverse of textbook):
 			# party debited (payment) -> "By", party credited (receipt) -> "To"
 			prefix = "By" if dr > 0 else "To"
 			contra = _clean_against(e.against or "") or e.account
+			inv = invoice_heads.get(e.voucher_no) if e.voucher_type == "Purchase Invoice" else None
+			# Only the invoice's own side — a bill (or a debit note's
+			# reversal) — reads as what was bought; the payment half of a
+			# paid-on-the-spot invoice keeps naming its bank.
+			if inv and inv["label"] and (cr > 0) != inv["is_return"]:
+				contra, bought = inv["label"], inv["components"]
 		elif invert_to_by:
 			# Cash & Bank Book — RGI house convention (same inversion as
 			# party ledger). Bank Dr (receipt) reads as "By <source>",
 			# Bank Cr (payment) reads as "To <destination>".
 			prefix = "By" if dr > 0 else "To"
-			contra = own_party or sib_label or _clean_against(e.against or "")
+			contra = own_party or sib_label or (receipt or {}).get("supplier") \
+				or _clean_against(e.against or "")
 		else:
 			# Plain non-bank account view — standard textbook convention.
 			prefix = "To" if dr > 0 else "By"
-			contra = own_party or sib_label or _clean_against(e.against or "")
+			contra = own_party or sib_label or (receipt or {}).get("supplier") \
+				or _clean_against(e.against or "")
+
+		remarks = (e.remarks or "").strip()
+		if receipt and (not remarks or remarks in _GRN_BOILERPLATE):
+			remarks = receipt["items"]
 
 		# Drill-down rows — the opposite-side accounts that make up this
 		# row's amount. Attached whenever the counter side spans 2+
 		# accounts (what used to render as "Various"), independent of the
-		# label now that sibling parties can take its place.
+		# label now that sibling parties can take its place. A purchase
+		# invoice's own make-up (heads bought, GST, TDS …) takes its place.
 		breakdown = []
-		if (e.voucher_type, e.voucher_no) in various_keys and len(
+		if bought is not None:
+			breakdown = bought if len(bought) >= 2 else []
+		elif (e.voucher_type, e.voucher_no) in various_keys and len(
 				[p for p in (e.against or "").split(",") if p.strip()]) >= 2:
 			want_credit = dr > 0   # viewed account debited → counter is credit side
 			for b in breakdown_map.get((e.voucher_type, e.voucher_no), []):
@@ -233,7 +267,7 @@ def get_ledger_statement(company, account, from_date, to_date,
 			credit        = cr,
 			balance       = abs(running),
 			balance_type  = "Dr" if running >= 0 else "Cr",
-			remarks       = (e.remarks or "").strip(),
+			remarks       = remarks,
 			breakdown     = breakdown,
 		))
 
@@ -1037,6 +1071,268 @@ def _fetch_against_breakdowns(company, voucher_keys):
 	for r in rows:
 		out.setdefault((r.voucher_type, r.voucher_no), []).append(r)
 	return out
+
+
+# ── Purchases: what was bought, who it came from ──────────────────────
+
+# ERPNext's own narration on every GRN ledger line. It says nothing, so the
+# items received take its place; a note someone actually typed is kept.
+_GRN_BOILERPLATE = ("Accounting Entry for Stock", "Accounting Entry for Asset")
+
+
+def _clearing_accounts(company):
+	"""The company's "… Received But Not Billed" accounts — where goods sit
+	between the GRN and the invoice."""
+	fields = ["stock_received_but_not_billed", "asset_received_but_not_billed"]
+	if frappe.db.has_column("Company", "service_received_but_not_billed"):
+		fields.append("service_received_but_not_billed")
+	return {v for v in (frappe.db.get_value("Company", company, fields) or ()) if v}
+
+
+def _resolve_line_head(line, clearing, category_accounts, item_defaults, group_defaults, weak=()):
+	"""The head a purchase-invoice line actually bought into (pure).
+
+	The line's own account, unless it is a clearing account — that one was
+	POSTED, so it is the truth. Otherwise the GRN line's, which ERPNext
+	fills with the item's expense head (stock) or the asset account (fixed
+	assets). Measured on production: the GRN line answers 7,738 of 7,783
+	lines and the invoice line the rest bar five. Then the asset category's
+	account, the item's default head and its group's — NOT the item default
+	first: asset items carry "Repairs & Maintenance Computers" there, which
+	is wrong for a capital purchase.
+
+	``weak``: the company's default expense account ("Cost of Goods Sold"),
+	which ERPNext writes on a GRN line when the item had no head — 173 of
+	9,121 GRN lines on production. A GRN line's head is a record, not a
+	posting, so an item head set since takes its place; it is shown only
+	when nothing better is known."""
+	own = line.get("expense_account")
+	if own and own not in clearing:
+		return own
+	grn = line.get("grn_account")
+	if grn and grn not in clearing and grn not in weak:
+		return grn
+	if line.get("is_fixed_asset") and category_accounts.get(line.get("asset_category")):
+		return category_accounts[line["asset_category"]]
+	for acc in (item_defaults.get(line.get("item_code")), group_defaults.get(line.get("item_group"))):
+		if acc and acc not in clearing and acc not in weak:
+			return acc
+	if grn and grn not in clearing:
+		return grn
+	return own or ""
+
+
+def _invoice_makeup(gl_rows, lines, clearing, skip_party, settled=()):
+	"""``(heads, components)`` of one purchase invoice (pure).
+
+	``heads``      [(account, amount)], what was bought, largest first — the
+	               item's head, which for goods received on a GRN is what
+	               they were bought FOR: the invoice itself posted to the
+	               clearing account, and a stock item's head is only
+	               charged when the stock is issued.
+	``components`` [(account, signed amount)], the bill's other side, adding
+	               up to exactly what the supplier was credited: a clearing
+	               line split across the heads behind THAT clearing account
+	               in proportion to the invoice lines (so the parts add up
+	               to what was posted, even where the invoice rate differs
+	               from the GRN's), everything else (GST, TDS, round-off)
+	               as it stands. Heads first, then the rest, each largest
+	               first.
+
+	``settled`` [(account, amount)]: legs the invoice posted to SETTLE the
+	bill rather than to make it up — paid on the spot from a bank, a
+	write-off. Each went in as a credit of ``amount`` against a debit to
+	the supplier (a debit note's amounts are negative, so the sign holds),
+	and is taken back out by amount, not by account type: the bank can be
+	an overdraft, and the write-off account a head the bill also uses.
+	The party's own rows are left out."""
+	heads, cleared = defaultdict(float), defaultdict(lambda: defaultdict(float))
+	for ln in lines:
+		amt = abs(flt(ln.get("amount")))
+		heads[ln["head"]] += amt
+		if ln.get("expense_account") in clearing:
+			cleared[ln["expense_account"]][ln["head"]] += amt
+
+	net = defaultdict(float)
+	for g in gl_rows:
+		if (g.get("party_type") or "", g.get("party") or "") != skip_party:
+			net[g["account"]] += flt(g.get("debit")) - flt(g.get("credit"))
+	for account, amount in settled:
+		net[account] += flt(amount)
+
+	all_cleared = defaultdict(float)
+	for by_head in cleared.values():
+		for head, w in by_head.items():
+			all_cleared[head] += w
+
+	parts = defaultdict(float)
+	for account, amt in net.items():
+		if abs(amt) < 0.005:
+			continue
+		# The heads behind this clearing account; any cleared head when the
+		# account was posted without a line of its own (valuation tax).
+		weights = (cleared.get(account) or all_cleared) if account in clearing else None
+		if weights:
+			total, left = sum(weights.values()), amt
+			ordered = sorted(weights.items(), key=lambda x: -x[1])
+			for k, (head, w) in enumerate(ordered):
+				share = left if k == len(ordered) - 1 else flt(amt * w / total, 2)
+				parts[head] += share
+				left -= share
+		else:
+			parts[account] += amt
+
+	ordered = sorted(heads.items(), key=lambda x: -x[1])
+	components = sorted(((a, v) for a, v in parts.items() if abs(v) >= 0.005),
+	                    key=lambda x: (x[0] not in heads, -abs(x[1])))
+	return ordered, components
+
+
+def _heads_label(heads, names):
+	"""'Computer & Accessories', or 'Printing & Stationary & 2 more' (pure)."""
+	if not heads:
+		return ""
+	first = names.get(heads[0][0]) or heads[0][0]
+	return first if len(heads) == 1 else f"{first} & {len(heads) - 1} more"
+
+
+def _purchase_invoice_heads(company, invoices, party_type, party):
+	"""What each purchase invoice bought, for the party ledger.
+
+	``{invoice: {label, is_return, components}}`` — ``label`` the head(s)
+	by name (the account name, without the company suffix), ``components``
+	the drill-down rows (heads, GST, TDS …) shaped like the "Various"
+	breakdown. Batched: one query each for lines, fallbacks, GL, names and
+	the invoices' own settlement (paid on the spot, written off)."""
+	if not invoices:
+		return {}
+	inv = tuple(invoices)
+	clearing = _clearing_accounts(company)
+	lines = frappe.db.sql("""
+		SELECT pii.parent, pii.base_net_amount AS amount,
+		       IFNULL(pii.expense_account, '') AS expense_account,
+		       IFNULL(pri.expense_account, '') AS grn_account,
+		       pii.is_fixed_asset, IFNULL(pii.asset_category, '') AS asset_category,
+		       pii.item_code, IFNULL(i.item_group, '') AS item_group
+		FROM `tabPurchase Invoice Item` pii
+		LEFT JOIN `tabPurchase Receipt Item` pri ON pri.name = pii.pr_detail
+		LEFT JOIN `tabItem` i ON i.name = pii.item_code
+		WHERE pii.parenttype = 'Purchase Invoice' AND pii.parent IN %(inv)s
+		ORDER BY pii.parent, pii.idx
+	""", dict(inv=inv), as_dict=True)
+
+	# Fallback heads, fetched only for lines the invoice and GRN cannot answer.
+	weak = {frappe.get_cached_value("Company", company, "default_expense_account")} - {None, ""}
+	need = [ln for ln in lines if not (ln.expense_account and ln.expense_account not in clearing)
+	        and not (ln.grn_account and ln.grn_account not in clearing and ln.grn_account not in weak)]
+	category_accounts = item_defaults = group_defaults = {}
+	if need:
+		cats = tuple({ln.asset_category for ln in need if ln.asset_category}) or ("",)
+		category_accounts = dict(frappe.db.sql(
+			"""SELECT parent, fixed_asset_account FROM `tabAsset Category Account`
+			   WHERE company_name=%s AND parent IN %s""", (company, cats)))
+		codes = tuple({ln.item_code for ln in need if ln.item_code}) or ("",)
+		item_defaults = dict(frappe.db.sql(
+			"""SELECT parent, expense_account FROM `tabItem Default`
+			   WHERE parenttype='Item' AND company=%s AND parent IN %s
+			     AND IFNULL(expense_account, '')!=''""", (company, codes)))
+		groups = tuple({ln.item_group for ln in need if ln.item_group}) or ("",)
+		group_defaults = dict(frappe.db.sql(
+			"""SELECT parent, expense_account FROM `tabItem Default`
+			   WHERE parenttype='Item Group' AND company=%s AND parent IN %s
+			     AND IFNULL(expense_account, '')!=''""", (company, groups)))
+
+	by_invoice = defaultdict(list)
+	for ln in lines:
+		ln["head"] = _resolve_line_head(ln, clearing, category_accounts, item_defaults, group_defaults, weak)
+		by_invoice[ln.parent].append(ln)
+
+	gl_by_invoice = defaultdict(list)
+	for g in frappe.db.sql("""
+		SELECT voucher_no, account, IFNULL(party_type, '') AS party_type, IFNULL(party, '') AS party,
+		       SUM(debit) AS debit, SUM(credit) AS credit
+		FROM `tabGL Entry`
+		WHERE company=%(co)s AND voucher_type='Purchase Invoice' AND voucher_no IN %(inv)s
+		  AND is_cancelled=0
+		GROUP BY voucher_no, account, party_type, party
+	""", dict(co=company, inv=inv), as_dict=True):
+		gl_by_invoice[g.voucher_no].append(g)
+
+	accounts = {ln.head for ln in lines if ln.head} | {g["account"] for gs in gl_by_invoice.values() for g in gs}
+	names = dict(frappe.db.sql(
+		"SELECT name, IFNULL(NULLIF(account_name, ''), name) FROM `tabAccount` WHERE name IN %s",
+		(tuple(accounts) or ("",),)))
+	docs = {d.name: d for d in frappe.db.sql("""
+		SELECT name, is_return, is_paid, IFNULL(cash_bank_account, '') AS cash_bank_account, base_paid_amount,
+		       IFNULL(write_off_account, '') AS write_off_account, base_write_off_amount
+		FROM `tabPurchase Invoice` WHERE name IN %s""", (inv,), as_dict=True)}
+
+	out = {}
+	for name in inv:
+		doc = docs.get(name) or frappe._dict()
+		settled = []
+		if doc.is_paid and doc.cash_bank_account and flt(doc.base_paid_amount):
+			settled.append((doc.cash_bank_account, doc.base_paid_amount))
+		if doc.write_off_account and flt(doc.base_write_off_amount):
+			settled.append((doc.write_off_account, doc.base_write_off_amount))
+		heads, parts = _invoice_makeup(gl_by_invoice.get(name, []), by_invoice.get(name, []),
+		                               clearing, (party_type or "", party or ""), settled)
+		out[name] = dict(
+			label=_heads_label(heads, names),
+			is_return=bool(doc.is_return),
+			components=[dict(label=names.get(a, a), party="", amount=abs(v),
+			                 side="Dr" if v > 0 else "Cr") for a, v in parts],
+		)
+	return out
+
+
+def _fmt_qty(qty):
+	qty = abs(flt(qty))
+	return fmt_money(qty, precision=0 if qty == int(qty) else 2)
+
+
+def _items_summary(items):
+	"""'Interactive Flat Panel × 15', or 'Cello Tape × 10 & 12 more items' —
+	the largest line by value first (pure but for number formatting)."""
+	if not items:
+		return ""
+	top = max(items, key=lambda i: abs(flt(i.get("amount"))))
+	text = f"{top['name']} × {_fmt_qty(top['qty'])}"
+	more = len(items) - 1
+	if more:
+		text += f" & {more} more item{'s' if more > 1 else ''}"
+	return text
+
+
+def _purchase_receipt_facts(receipts):
+	"""``{grn: {supplier, items, charges}}`` — a GRN's ledger lines carry no
+	party, so the supplier comes from the document itself (as the Day
+	Book's does), and its items replace ERPNext's boilerplate narration.
+
+	``charges``: the accounts a Landed Cost Voucher credits on the GRN —
+	freight, cartage, customs. Those lines are another vendor's charge,
+	posted under the GRN's name, so they keep their old Particulars."""
+	if not receipts:
+		return {}
+	rec = tuple(receipts)
+	supplier = {n: (sn or s) for n, sn, s in frappe.db.sql(
+		"SELECT name, supplier_name, supplier FROM `tabPurchase Receipt` WHERE name IN %s", (rec,))}
+	items = defaultdict(list)
+	for parent, item_name, item_code, qty, amount in frappe.db.sql("""
+			SELECT parent, item_name, item_code, qty, base_net_amount
+			FROM `tabPurchase Receipt Item`
+			WHERE parenttype='Purchase Receipt' AND parent IN %s ORDER BY parent, idx""", (rec,)):
+		items[parent].append(dict(name=(item_name or item_code or "").strip(), qty=qty, amount=amount))
+	charges = defaultdict(set)
+	for grn, acc in frappe.db.sql("""
+			SELECT lpr.receipt_document, ltc.expense_account
+			FROM `tabLanded Cost Purchase Receipt` lpr
+			JOIN `tabLanded Cost Voucher` lcv ON lcv.name = lpr.parent AND lcv.docstatus = 1
+			JOIN `tabLanded Cost Taxes and Charges` ltc ON ltc.parent = lcv.name
+			WHERE lpr.receipt_document_type = 'Purchase Receipt' AND lpr.receipt_document IN %s""", (rec,)):
+		charges[grn].add(acc)
+	return {n: dict(supplier=supplier.get(n, ""), items=_items_summary(items.get(n, [])),
+	                charges=charges.get(n, set())) for n in rec}
 
 
 def _taccount_summary(ob_net, period_dr, period_cr):
