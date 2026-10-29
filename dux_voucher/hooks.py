@@ -119,8 +119,13 @@ app_include_js = ["formatted_tb_button.bundle.js"]
 # include js in doctype views
 # Journal Entry: scope the party picker to the JE's company when the
 # party type is Student (ERPNext sets no query on that field).
-doctype_js = {"Journal Entry": "public/js/journal_entry_student.js"}
-# doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
+doctype_js = {
+    "Journal Entry": "public/js/journal_entry_student.js",
+    # Purchase Order: "Set Project" on a submitted PO and everything made
+    # from it (api/project_tagging.py). The same file serves the list view.
+    "Purchase Order": "public/js/purchase_order_project.js",
+}
+doctype_list_js = {"Purchase Order": "public/js/purchase_order_project.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
 
