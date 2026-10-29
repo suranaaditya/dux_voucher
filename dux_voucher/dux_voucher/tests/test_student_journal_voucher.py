@@ -14,7 +14,7 @@ Covers the DB-cheap rules that decide what may post:
 The full post → cancel-cascade → amend → bulk → migration flow posts real
 Journal Entries in two companies and needs a set-up chart of accounts and
 inter-company mappings; it is exercised by the scenario run on
-``erp.jewonline.in`` (same policy as ``test_student_fee_receipt.py``).
+the dev site (same policy as ``test_student_fee_receipt.py``).
 """
 
 import unittest
