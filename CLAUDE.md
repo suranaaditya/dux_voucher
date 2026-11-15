@@ -139,6 +139,13 @@ dux_voucher/                              repo root (pyproject, README, CLAUDE.m
         │   │                                  resolver guards + balance helper)
         │   ├── test_ledger_particulars.py     19 tests (purchase heads, invoice
         │   │                                  make-up / drill-down tie, labels)
+        │   ├── test_ledger_voucher_makeup.py  38 tests (party JV / payment "as per
+        │   │                                  details": bill TDS shows and ties;
+        │   │                                  parties opposite are named; receipts,
+        │   │                                  refunds and payments beside other
+        │   │                                  heads, another party on the row's
+        │   │                                  side or in a money journal, and
+        │   │                                  sheets as before; "Various" order kept)
         │   └── test_ex_student_adjustment.py  17 tests (adjustment Dr/Cr, CSV cells
         │                                      and matching, reconciliation items)
         └── utils.py                           cancel cascade for PE/JE + income JE
@@ -298,10 +305,70 @@ retroactive for existing entries.
 - **"Various" drill-down** — a row whose counter side spans 2+ accounts
   renders as "Various". `get_ledger_statement` attaches a per-row
   `breakdown` list (counter account + amount on the opposite side),
-  fetched in one batched GL query keyed by `voucher_no`, only for those
-  rows. Pages get a "Show details" toolbar toggle plus a per-row
-  chevron; print renders whatever is currently expanded; Excel writes
-  indented sub-rows.
+  fetched in one batched GL query keyed by `voucher_no`, for those rows
+  and, in party mode, for every Journal / Payment Entry row too (next
+  bullet), plus one `Account` lookup for the bank ledgers on those
+  vouchers (`_bank_accounts`). Pages get a "Show details" toolbar
+  toggle plus a per-row chevron; print renders whatever is currently
+  expanded; Excel writes indented sub-rows — always, whatever the
+  screen shows. `against` is a comma-joined list, so ONE account whose
+  own name holds a comma also reads "Various" (and opens to that one
+  line).
+- **Journal and payment rows read "as per details"** — on a bill booked
+  as a Journal Entry net of TDS (Dr expense gross, Cr TDS, Cr supplier
+  net) the TDS sits on the supplier's OWN side, so `against` never
+  carried it: the party ledger read "To <expense>" at the net with
+  nothing to open, while TDS taken on a payment (the opposite side)
+  showed. In party mode a Journal / Payment Entry row now opens to its
+  whole voucher, both sides, each line on its own Dr/Cr, adding up
+  exactly to the row (`reports_api._voucher_makeup`) — Tally's "as per
+  details". A row alone on its side names the parties opposite it, with
+  their amounts: a contra between creditors names the creditors it went
+  to, a claim that also pays a vendor names the vendor (the old
+  drill-down skipped every line on the party's own control account).
+  Only where the voucher is the party's own, since the statement goes
+  to the party and Excel always writes the drill-down:
+  - Accounts beside the party (no party of their own, on its side)
+    count as its own only on a **bill**, where they are what was taken
+    off it (TDS, a recovery, a discount): the row must sit on the side
+    the party's bills post (Cr for a Payable party type, i.e. supplier
+    or employee; Dr for a Receivable one, i.e. customer or student; read
+    from `Party Type.account_type` by `_party_bill_side`), in a journal
+    that moves no money. That side is only where the party's balance
+    grows, and a supplier's or a customer's refund posts there too, so
+    a journal made by a Payment / Receipt Voucher, or one with an
+    account typed **Bank** on it (overdrafts are typed Bank under
+    Liabilities here, `_bank_accounts`), does not count: its bank line
+    is the voucher's whole total. "Cash" typing is not read (this chart
+    types income, expense, tax and capital-work heads Cash), so a
+    hand-made cash journal of that shape still opens. Production had
+    none in FY 26-27: the 32 journals that open with accounts beside the
+    party and no TDS line are all bills (an advance or a staff imprest
+    set off, cash from a self cheque, a recovery, a discount, a
+    round-off, a reclass), and of the 1,565 that also carry TDS only one
+    has an asset ledger typed Cash or named like money on it: a
+    capital-work head typed Cash, on a bill. A Payment Entry is one
+    party's payment, so all its lines count.
+  - The helper returns `None`, and the row keeps the "Various"
+    drill-down above exactly as before, in these cases:
+    - another party shares the row's side (one transfer paying several
+      suppliers, a bill for two, payroll);
+    - another party is on a journal that moves money (as above: made by
+      a Payment / Receipt Voucher, or with a Bank-typed account on it),
+      even with nothing beside the party: the bank line is the
+      voucher's whole total, and the other party's lines are its own
+      payment or receipt;
+    - accounts sit beside the party and the rule above fails;
+    - accounts sit beside it and another party appears anywhere on the
+      voucher, judged by its gross lines, so one billed and paid in the
+      same journal (lines that cancel out) counts;
+    - more than five accounts sit beside it (a salary sheet, an opening
+      entry; staff loans are accounts by name here);
+    - there is nothing to add.
+  - Within each side the lines keep the query's account order, opposite
+    side first, so a row that already opened under "Various" with the
+    same lines reads byte-for-byte as before.
+  Particulars text unchanged; account ledgers untouched.
 - **Party surfaced in Particulars** — GL `against` only reflects the
   OPPOSITE Dr/Cr side, so a party on the SAME side as the viewed row
   (the supplier credit next to a TDS credit) never reaches it, and the
@@ -725,6 +792,23 @@ form and the list.
 
 ## Recently Completed
 
+- [x] **TDS on bills in the party ledger** — a party's journal / payment
+      row opens to its whole voucher ("as per details"), so the TDS and
+      other deductions taken on the supplier's own side of a bill JV show
+      beside the gross head, and a row alone on its side names the
+      parties opposite it (a contra between creditors, a claim that also
+      pays a vendor). Receipts, refunds and payments made beside other
+      heads, vouchers with another party on the row's side or on a
+      journal that moves money, salary sheets and opening entries read
+      as before. Display-time only, retroactive.
+      Checked read-only against production:
+      - 568 party ledgers, 9,247 rows, of which 1,328 changed, all on a
+        supplier's credit (bill) side; TDS newly visible on 1,310 of them
+      - none removed, no other field changed, no row's existing lines
+        reordered, every new drill-down ties to its row
+      - 1,988 of the 14,905 party journal / payment rows of FY 26-27
+        open "as per details", 1,736 of them with TDS
+      - 48 account ledgers identical
 - [x] **Ex Student opening corrections** — Opening Adjustment voucher
       (posts only the per-student difference; CSV of correct openings),
       read-only student ledger rows, Amend fixed on Batch / Receipt /
@@ -912,6 +996,7 @@ Notable cross-cutting files when you need to find something fast:
 | Admission-fee + retained-income account resolvers, `book_income` | `dux_voucher/dux_voucher/api/student_fee.py` |
 | Page reports + xlsx exports | `dux_voucher/dux_voucher/api/reports_api.py`, `reports_export.py` |
 | T-account opening/closing maths (all ledger surfaces) | `reports_api.py` → `_taccount_summary` |
+| Party ledger journal / payment drill-down ("as per details") | `reports_api.py` → `_voucher_makeup` |
 | Day Book particulars resolution | `reports_api.py` → `_build_day_book_particulars_map` |
 | Party Trial Balance page | `dux_voucher/dux_voucher/page/dux_party_trial_balance/` |
 | Party Trial Balance backend | `reports_api.py` → `get_party_trial_balance` |
