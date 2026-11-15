@@ -145,7 +145,15 @@ def get_ledger_statement(company, account, from_date, to_date,
 	for e in entries:
 		if len([p for p in (e.against or "").split(",") if p.strip()]) >= 2:
 			various_keys.add((e.voucher_type, e.voucher_no))
-	breakdown_map = _fetch_against_breakdowns(company, various_keys)
+	# A party's journal and payment rows can open to their whole voucher
+	# ("as per details", _voucher_makeup), so those vouchers' lines come
+	# back in the same batched query.
+	details_keys = {(e.voucher_type, e.voucher_no) for e in entries
+	                if e.voucher_type in _AS_PER_DETAILS_TYPES} if use_party else set()
+	breakdown_map = _fetch_against_breakdowns(company, various_keys | details_keys)
+	bill_side = _party_bill_side(party_type) if use_party else None
+	bank_accounts = _bank_accounts({ln.account for key in details_keys
+	                                for ln in breakdown_map.get(key, ())})
 
 	# ── Sibling-party enrichment ─────────────────────────────────────
 	# Rows with no party of their own (TDS, expense, bank legs) surface
@@ -228,14 +236,29 @@ def get_ledger_statement(company, account, from_date, to_date,
 		if receipt and (not remarks or remarks in _GRN_BOILERPLATE):
 			remarks = receipt["items"]
 
-		# Drill-down rows — the opposite-side accounts that make up this
-		# row's amount. Attached whenever the counter side spans 2+
-		# accounts (what used to render as "Various"), independent of the
-		# label now that sibling parties can take its place. A purchase
-		# invoice's own make-up (heads bought, GST, TDS …) takes its place.
+		# Drill-down rows — what makes up this row's amount. A purchase
+		# invoice reads as its own make-up (heads bought, GST, TDS …); a
+		# party's journal or payment row, where the voucher is the party's
+		# own, as its whole voucher, both sides, so a deduction booked on the
+		# party's own side (the TDS on a bill) shows too (_voucher_makeup).
+		# Anything else, such as a voucher with another party on the row's
+		# own side or another party on a journal that moves money
+		# (_voucher_makeup lists every case), keeps the opposite-side
+		# accounts, attached whenever the counter side spans 2+ accounts
+		# (what used to render as "Various"), independent of the label now
+		# that sibling parties can take its place.
 		breakdown = []
+		makeup = _voucher_makeup(
+			breakdown_map.get((e.voucher_type, e.voucher_no), []),
+			e.account, (e.party_type, e.party), dr, cr, party_names,
+			bill_side, payment_entry=e.voucher_type == "Payment Entry",
+			bank_accounts=bank_accounts,
+			money_voucher=e.source_doctype in _MONEY_VOUCHERS,
+		) if use_party and e.voucher_type in _AS_PER_DETAILS_TYPES else None
 		if bought is not None:
 			breakdown = bought if len(bought) >= 2 else []
+		elif makeup:
+			breakdown = makeup
 		elif (e.voucher_type, e.voucher_no) in various_keys and len(
 				[p for p in (e.against or "").split(",") if p.strip()]) >= 2:
 			want_credit = dr > 0   # viewed account debited → counter is credit side
@@ -1043,13 +1066,14 @@ def _sibling_party_label(sibs, names):
 
 
 def _fetch_against_breakdowns(company, voucher_keys):
-	"""Make-up of every "Various" voucher, for the ledger drill-down.
+	"""Every line of the given vouchers, for the ledger drill-downs.
 
 	``voucher_keys`` is a set of ``(voucher_type, voucher_no)``. Returns
 	``{(voucher_type, voucher_no): [ {account, party_type, party, debit,
 	credit}, … ]}`` — every GL account line of those vouchers, summed per
-	account+party. The caller subtracts the viewed account and keeps the
-	opposite side to show what the "Various" actually consists of.
+	account+party. The "Various" drill-down subtracts the viewed account and
+	keeps the opposite side; a party's journal / payment row reads the whole
+	voucher, both sides (_voucher_makeup).
 
 	One batched query (keyed on voucher_no, since the type is carried in
 	the row and re-keyed in Python).
@@ -1071,6 +1095,152 @@ def _fetch_against_breakdowns(company, voucher_keys):
 	for r in rows:
 		out.setdefault((r.voucher_type, r.voucher_no), []).append(r)
 	return out
+
+
+# A party's journal and payment rows read as their whole voucher, Tally's
+# "as per details" (_voucher_makeup), where the voucher is the party's own. A
+# purchase invoice has its own make-up (what was bought,
+# _purchase_invoice_heads); everything else keeps the opposite-side "Various"
+# drill-down.
+_AS_PER_DETAILS_TYPES = ("Journal Entry", "Payment Entry")
+
+# More accounts than this beside a party on its own side of a voucher make it
+# a sheet (a salary sheet, an opening entry) in which the party is one line of
+# many, and the row keeps the "Various" drill-down. Measured on production,
+# FY 26-27: every bill booked net of TDS carried one or two accounts beside
+# its supplier; salary sheets and opening entries six and more, most of them
+# ten and more, staff loans by name among them.
+_MAX_OWN_SIDE_ACCOUNTS = 5
+
+# The app's vouchers whose journals move money: a Party + Head Payment or
+# Receipt Voucher posts one bank / cash line for the voucher's whole net.
+_MONEY_VOUCHERS = ("Payment Voucher", "Receipt Voucher")
+
+
+def _party_bill_side(party_type):
+	"""The side a party's own bills post on: Cr for a Payable party type
+	(supplier, employee: what is owed to it grows), Dr for a Receivable one
+	(customer, student: what it owes grows). None when the Party Type says
+	neither; then no account beside the party counts as its own on a
+	journal (a payment entry takes no side check)."""
+	account_type = frappe.get_cached_value(
+		"Party Type", party_type, "account_type") if party_type else None
+	return {"Payable": "Cr", "Receivable": "Dr"}.get(account_type)
+
+
+def _bank_accounts(accounts):
+	"""Which of ``accounts`` are bank ledgers: account type Bank, whatever the
+	root type (overdrafts, typed Bank, sit under Liabilities here). "Cash" is
+	not read: this chart types income, expense, tax and even capital-work
+	heads Cash."""
+	if not accounts:
+		return set()
+	return set(frappe.get_all("Account", filters={
+		"name": ["in", sorted(accounts)], "account_type": "Bank"}, pluck="name"))
+
+
+def _voucher_makeup(lines, row_account, row_party, row_dr, row_cr, names,
+                    bill_side, payment_entry=False, bank_accounts=(),
+                    money_voucher=False):
+	"""Tally's "as per details" for one row of a party ledger (pure).
+
+	``lines`` is the row's voucher summed per account+party, as
+	``_fetch_against_breakdowns`` returns it. GL ``against`` lists only the
+	OPPOSITE side, so a bill booked net of TDS (Dr expense, Cr TDS, Cr the
+	supplier's net) read "To <expense>" with nothing to open: the TDS sits
+	on the supplier's own side. The drill-down is every OTHER line of the
+	voucher instead, on both sides, each on its own Dr/Cr, so the lines add
+	up to exactly the row's amount. The row's own amount comes out of its
+	own line; whatever the party still has on the voucher (a second line, a
+	second account) stays, by name, and so do counter-parties opposite: a
+	contra between creditors names the creditors it went to, a claim that
+	also pays a vendor names the vendor.
+
+	Only where the voucher is this party's. A statement gets sent to the
+	party (Excel always writes the drill-down), so ``None`` — the caller
+	keeps the "Various" drill-down and the row reads exactly as before — when
+
+	* another party sits on the row's own side: one transfer paying several
+	  suppliers, one bill for two. Nothing there can be told apart as this
+	  party's, and listing it would put one supplier's TDS and figures on
+	  another's statement;
+	* another party appears on a journal that moves money (below), even
+	  with nothing beside this party: the bank line is the voucher's whole
+	  total, so the other party's lines are its own payment or receipt;
+	* it would show nothing the Particulars do not: no account beside the
+	  party and fewer than two lines opposite.
+
+	Accounts beside the party (no party of their own, on the row's side)
+	count as its own only on a bill: what was taken off it, such as TDS, a
+	recovery or a discount. Anything else beside it is what else the same
+	voucher paid or received, so ``None`` when accounts sit beside it and
+
+	* the row is not on the side the party's bills post (``bill_side``,
+	  _party_bill_side): a supplier debited, a customer credited;
+	* the journal moves money: made by a Payment or Receipt Voucher
+	  (``money_voucher``), or carrying a bank account (``bank_accounts``).
+	  The bank line is the voucher's whole total, and Party Type gives only
+	  the side that grows the party's balance, where a supplier's refund or
+	  a customer's refund posts as well as a bill;
+	* another party appears anywhere on the voucher, judged by its gross
+	  lines, so one billed and paid in the same journal (its lines cancel)
+	  counts too: what sits beside this party may be that party's;
+	* more than ``_MAX_OWN_SIDE_ACCOUNTS`` accounts sit beside the party: a
+	  salary sheet or an opening entry.
+
+	A payment entry is one party's payment, so every line of it is that
+	party's own (``payment_entry``): neither money check applies, nor the
+	side check.
+
+	Otherwise ``[{label, party, amount, side}]``, shaped like the "Various"
+	drill-down: the opposite side first, then the row's own side, each in
+	the order the lines come (by account, as "Various" always listed them).
+	"""
+	row_net = flt(row_dr) - flt(row_cr)
+	if abs(row_net) < 0.005:
+		return None
+	own = "Dr" if row_net > 0 else "Cr"
+	row_party = (row_party[0] or "", row_party[1] or "")
+
+	shown, own_accounts = [], 0
+	other_party = moves_money = False
+	for ln in lines:
+		account = ln.get("account") or ""
+		pt, p = ln.get("party_type") or "", ln.get("party") or ""
+		debit, credit = flt(ln.get("debit")), flt(ln.get("credit"))
+		posted = abs(debit) >= 0.005 or abs(credit) >= 0.005
+		# Judged before lines are netted: a party billed and paid on one
+		# account in this voucher sums to nothing, yet what its lines paired
+		# with (the bank that paid it, its share of the TDS) is still here.
+		if posted and p and (pt, p) != row_party:
+			other_party = True
+		if posted and account in bank_accounts:
+			moves_money = True
+		net = debit - credit
+		if account == row_account and (pt, p) == row_party:
+			net -= row_net
+		if abs(net) < 0.005:
+			continue
+		side = "Dr" if net > 0 else "Cr"
+		if side == own:
+			if p and (pt, p) != row_party:
+				return None
+			if not p:
+				own_accounts += 1
+		label = account + ("  ·  " + (names.get((pt, p)) or p) if p else "")
+		shown.append(dict(label=label, party=p, amount=flt(abs(net), 2), side=side))
+
+	if own_accounts:
+		if not payment_entry and (own != bill_side or money_voucher or moves_money):
+			return None
+		if other_party or own_accounts > _MAX_OWN_SIDE_ACCOUNTS:
+			return None
+	elif sum(1 for b in shown if b["side"] != own) < 2:
+		return None
+	elif other_party and not payment_entry and (money_voucher or moves_money):
+		return None
+	shown.sort(key=lambda b: b["side"] == own)   # stable: keeps the account order
+	return shown
 
 
 # ── Purchases: what was bought, who it came from ──────────────────────

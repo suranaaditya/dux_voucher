@@ -222,7 +222,7 @@ class DuxLedger {
       <button class="dl-excel-btn" id="dl-excel-btn">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/><path d="M8 13l3 3-3 3M14 13l-3 3 3 3"/></svg>Excel
       </button>
-      <button class="dl-detail-btn" id="dl-detail-btn" title="Expand every 'Various' row into its individual heads">
+      <button class="dl-detail-btn" id="dl-detail-btn" title="Show the lines that make up each row: heads, TDS and other deductions">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg><span class="dl-detail-lbl">Show details</span>
       </button>
       <div class="dl-print-split" id="dl-print-split">

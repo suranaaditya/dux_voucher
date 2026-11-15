@@ -213,8 +213,9 @@ def _build_ledger_workbook(d, title, debit_label, credit_label, accent_color):
 
         row += 1
 
-        # Drill-down sub-rows for a "Various" particular — the individual
-        # heads that make it up, indented under the row, each on its side.
+        # Drill-down sub-rows (a "Various", a bill's make-up, a party's
+        # journal with its TDS) — the lines that make the row up, indented
+        # under it, each on its own side.
         for b in (r.get('breakdown') or []):
             for col_idx in range(1, n_cols + 1):
                 cell = ws.cell(row=row, column=col_idx)
