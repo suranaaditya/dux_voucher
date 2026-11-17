@@ -6,7 +6,6 @@ import re
 import frappe
 from frappe import _
 from frappe.utils import add_to_date, flt, get_datetime, now_datetime, today
-from frappe.utils.file_manager import get_file
 
 # Ledger rows that make up a student's OPENING (as against receipts,
 # refunds and write-offs, which move the balance after it).
@@ -20,6 +19,10 @@ def import_from_csv(batch_name, file_url):
     populate its students_table. Auto-creates Ex Student masters for
     any student_name not found in the batch's company.
 
+    The caller needs write on the batch, and create on Ex Student for
+    each student the sheet adds. The file must be one they have just
+    uploaded for this batch (``_read_own_upload``).
+
     Expected columns (header row, case-insensitive, order-flexible):
         student_name (required), amount (required),
         father_name, course, batch_year, mobile, email, remarks
@@ -30,16 +33,13 @@ def import_from_csv(batch_name, file_url):
         frappe.throw(_('batch_name and file_url are required'))
 
     batch = frappe.get_doc('Ex Student Opening Batch', batch_name)
+    batch.check_permission('write')
     if batch.docstatus != 0:
         frappe.throw(_('Cannot import into a submitted batch'))
     if not batch.company:
         frappe.throw(_('Set Company on the batch before importing'))
 
-    _, content = get_file(file_url)
-    if isinstance(content, bytes):
-        content = content.decode('utf-8-sig', errors='replace')
-
-    rows = _parse_csv(content)
+    rows = _parse_csv(_read_own_upload(file_url, batch))
     if not rows:
         frappe.throw(_('CSV has no data rows'))
 
@@ -92,7 +92,7 @@ def import_from_csv(batch_name, file_url):
         except Exception as e:
             errors.append(_('Row {0}: {1}').format(idx, str(e)))
 
-    batch.save(ignore_permissions=True)
+    batch.save()
     frappe.db.commit()
 
     return {
@@ -139,7 +139,12 @@ def _get_or_create_ex_student(student_name, company, **extra):
     for k, v in extra.items():
         if v:
             doc.set(k, v)
-    doc.insert(ignore_permissions=True)
+    if not doc.has_permission('create'):
+        # Raised, not thrown: the importer lists it as this row's error,
+        # without a pop-up per row.
+        raise frappe.PermissionError(
+            _('no Ex Student "{0}" in {1}, and you may not create one').format(student_name, company))
+    doc.insert()
     return {'name': doc.name, 'created': True}
 
 
@@ -359,8 +364,8 @@ def _match_student(row, index):
 
 
 def _read_own_upload(file_url, doc):
-    """The CSV the caller just uploaded for this adjustment — never another
-    user's file, an old one, or one attached elsewhere."""
+    """The CSV the caller just uploaded for this batch or adjustment — never
+    another user's file, an old one, or one attached elsewhere."""
     files = frappe.get_all('File', filters={'file_url': file_url, 'owner': frappe.session.user},
                            fields=['name', 'creation', 'attached_to_doctype', 'attached_to_name'],
                            order_by='creation desc', limit=1)
