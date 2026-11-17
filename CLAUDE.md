@@ -146,8 +146,11 @@ dux_voucher/                              repo root (pyproject, README, CLAUDE.m
         │   │                                  heads, another party on the row's
         │   │                                  side or in a money journal, and
         │   │                                  sheets as before; "Various" order kept)
-        │   └── test_ex_student_adjustment.py  17 tests (adjustment Dr/Cr, CSV cells
-        │                                      and matching, reconciliation items)
+        │   ├── test_ex_student_adjustment.py  17 tests (adjustment Dr/Cr, CSV cells
+        │   │                                  and matching, reconciliation items)
+        │   └── test_ex_student_batch_import.py  7 tests (batch CSV importer guards:
+        │                                      write on the batch, create on Ex
+        │                                      Student, the caller's own fresh upload)
         └── utils.py                           cancel cascade for PE/JE + income JE
 ```
 
@@ -179,7 +182,13 @@ ledger). Submittable doctypes:
 
 - **Ex Student** — per-student master with mixed Dr/Cr opening balance
 - **Ex Student Opening Batch** — bulk-upload opening balances with CSV
-  import
+  import. The importer (`ex_student_api.import_from_csv`) needs write on
+  the batch, and create on Ex Student for each student it adds. It reads
+  only the caller's own upload of the last hour, through the same
+  `_read_own_upload` as the adjustment importer, and keeps that sheet on
+  the batch. It matches existing students by exact name and company
+  only, never Student ID, so a re-spelt name creates a duplicate master.
+  Correct openings with an adjustment, not by re-batching.
 - **Ex Student Receipt** — fee collection → posts JE (Dr Bank/Cash, Cr
   Receivable)
 - **Ex Student Refund** — pay a credit balance back → posts JE (Dr
