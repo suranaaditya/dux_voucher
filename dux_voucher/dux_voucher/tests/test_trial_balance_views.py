@@ -1,0 +1,162 @@
+"""Unit tests for the Dux Trial Balance (report/dux_trial_balance, its Excel export).
+
+By Account resets Income and Expense opening at the fiscal-year boundary and
+adds the prior-year result back as one computed "Accumulated Loss/Profit b/f"
+row, so it ties. By Company and Account -> Party read the same reset slice
+but never added it back: on a trust with prior-year P&L every company read
+"out" by its own result while By Account tied. By Company now folds each
+company's share into its own row; Account -> Party adds the computed row.
+
+Ledger queries are mocked: these cover the arithmetic.
+"""
+
+import unittest
+from unittest import mock
+
+import frappe
+
+from dux_voucher.dux_voucher.api import reports_export
+from dux_voucher.dux_voucher.report.dux_trial_balance import dux_trial_balance as tb
+
+F = ('{"company": ["College A"], "view": "By Account", '
+     '"from_date": "2026-04-01", "to_date": "2027-03-31"}')
+ENGINE = "dux_voucher.dux_voucher.report.dux_trial_balance.dux_trial_balance.execute"
+RESET = "2026-04-01"
+
+
+def _v(od=0.0, oc=0.0, d=0.0, c=0.0):
+    """One slice entry: opening, period and closing on both sides."""
+    return {"opening_debit": od, "opening_credit": oc, "debit": d, "credit": c,
+            "closing_debit": od + d, "closing_credit": oc + c}
+
+
+def _filters(view, **kw):
+    f = frappe._dict(view=view, from_date="2026-04-01", to_date="2027-03-31",
+                     show_net_values=1, show_group_accounts=1,
+                     _pl_reset_date=RESET, _source="live")
+    f.update(kw)
+    return f
+
+
+def _acc(name, account_name, account_type, root_type):
+    return frappe._dict(name=name, account_name=account_name, account_type=account_type,
+                        root_type=root_type, company="A")
+
+
+def _total(rows):
+    return next(r for r in rows if r.get("is_total"))
+
+
+def _ties(total):
+    return (abs(total["opening_debit"] - total["opening_credit"]) < 0.005
+            and abs(total["closing_debit"] - total["closing_credit"]) < 0.005)
+
+
+class TestByCompany(unittest.TestCase):
+    """Each company carries its own prior-year result, so the view ties."""
+
+    def _build(self, values, carry, **kw):
+        with mock.patch.object(tb, "_slice", return_value=values), \
+                mock.patch.object(tb, "_company_currency", return_value="INR"), \
+                mock.patch.object(tb, "_unclosed_pl_net",
+                                  side_effect=lambda cos, f: carry.get(cos[0], 0.0)):
+            return tb._build_by_company(_filters("By Company", **kw), list(carry) or ["A"])
+
+    def _row(self, rows, company):
+        return next(r for r in rows if r.get("company") == company)
+
+    def test_each_company_nets_to_nil_when_its_books_tie(self):
+        # A: a prior-year loss of 100 left its balance sheet 100 Cr once the
+        # reset dropped it; B: a prior-year profit of 40 left B 40 Dr.
+        rows = self._build({("A",): _v(oc=100, d=500, c=500), ("B",): _v(od=40, d=10, c=10)},
+                           {"A": 100.0, "B": -40.0})
+        for co in ("A", "B"):
+            r = self._row(rows, co)
+            for f in ("opening_debit", "opening_credit", "closing_debit", "closing_credit"):
+                self.assertAlmostEqual(r[f], 0, msg=f"{co} {f}")
+        a = self._row(rows, "A")
+        self.assertEqual((a["debit"], a["credit"]), (500, 500))   # the period is untouched
+        self.assertEqual(a["carry_forward"], 100.0)
+        self.assertEqual(self._row(rows, "B")["carry_forward"], -40.0)
+        self.assertTrue(_ties(_total(rows)))
+
+    def test_a_company_whose_books_do_not_tie_shows_its_difference(self):
+        rows = self._build({("A",): _v(oc=100, d=500, c=499)}, {"A": 100.0})
+        a = self._row(rows, "A")
+        self.assertAlmostEqual(a["closing_debit"], 1.0)
+        self.assertAlmostEqual(a["closing_credit"], 0)
+
+    def test_the_gross_view_adds_the_carry_on_its_own_side(self):
+        rows = self._build({("A",): _v(oc=100, d=500, c=500)}, {"A": 100.0}, show_net_values=0)
+        a = self._row(rows, "A")
+        self.assertEqual((a["opening_debit"], a["opening_credit"]), (100, 100))
+        self.assertEqual((a["closing_debit"], a["closing_credit"]), (600, 600))
+
+    def test_nothing_is_added_when_the_reset_is_off(self):
+        f = _filters("By Company", _pl_reset_date=None)
+        self.assertEqual(tb._unclosed_pl_net(["A"], f), 0.0)
+        with mock.patch.object(tb, "_slice", return_value={("A",): _v(od=5)}), \
+                mock.patch.object(tb, "_company_currency", return_value="INR"):
+            rows = tb._build_by_company(f, ["A"])
+        a = self._row(rows, "A")
+        self.assertNotIn("carry_forward", a)
+        self.assertEqual((a["opening_debit"], a["closing_debit"]), (5, 5))
+
+    def test_the_message_says_a_carry_forward_is_included(self):
+        rows = self._build({("A",): _v(oc=100, d=500, c=500)}, {"A": 100.0})
+        msg = tb._build_message(_filters("By Company"), ["A"], rows)
+        self.assertIn("computed carry-forward", msg)
+        self.assertIn("for this company", msg)
+        msg = tb._build_message(_filters("By Company"), ["A", "B"], rows)
+        self.assertIn("for these companies", msg)
+
+
+class TestAccountParty(unittest.TestCase):
+    """Account -> Party adds the carry-forward row, so it ties like By Account."""
+
+    MASTER = [
+        _acc("Debtors - A", "Debtors", "Receivable", "Asset"),
+        _acc("Capital - A", "Capital", "", "Equity"),
+        _acc("Salary - A", "Salary", "", "Expense"),
+        _acc("Bank - A", "Bank", "Bank", "Asset"),
+        _acc("Earnest Money - A", "Earnest Money", "", "Asset"),
+    ]
+    # Once the reset drops the prior-year loss of 100, the balance-sheet
+    # opening nets 100 Cr: Debtors 100 Dr and Earnest Money 10 Dr against
+    # Capital 210 Cr.
+    VALUES = {
+        ("Debtors - A", "Customer", "C1"): _v(od=70),
+        ("Debtors - A", None, None): _v(od=30),
+        ("Capital - A", None, None): _v(oc=210),
+        ("Salary - A", None, None): _v(d=50),
+        ("Bank - A", None, None): _v(c=50),
+        ("Earnest Money - A", "Supplier", "S1"): _v(od=6),
+        ("Earnest Money - A", None, None): _v(od=4),
+    }
+
+    def _build(self, **kw):
+        with mock.patch.object(tb, "_slice", return_value=dict(self.VALUES)), \
+                mock.patch.object(tb, "_account_master", return_value=self.MASTER), \
+                mock.patch.object(tb, "_default_party_accounts", return_value={}), \
+                mock.patch.object(tb, "_resolve_party_names", return_value={}), \
+                mock.patch.object(tb, "_company_currency", return_value="INR"), \
+                mock.patch.object(tb, "_unclosed_pl_net", return_value=100.0):
+            return tb._build_account_party(_filters("Account -> Party", **kw), ["A"])
+
+    def test_the_view_ties_with_the_carry_forward_row(self):
+        rows = self._build()
+        carry = [r for r in rows if r.get("is_computed")]
+        self.assertEqual(len(carry), 1)
+        self.assertAlmostEqual(carry[0]["opening_debit"], 100)
+        self.assertIsNone(carry[0]["parent_account"])
+        self.assertTrue(_ties(_total(rows)))
+
+    def test_control_accounts_only_adds_no_carry_row(self):
+        rows = self._build(control_accounts_only=1)
+        self.assertFalse([r for r in rows if r.get("is_computed")])
+        top = {r["account"] for r in rows if not r.get("parent_account") and not r.get("is_total")}
+        self.assertEqual(top, {"Debtors - A"})
+
+
+if __name__ == "__main__":
+    unittest.main()

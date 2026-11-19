@@ -710,7 +710,8 @@ tr.party:hover > td{background:var(--tb-line-2);}
 		if (mism) pills.push(`<span class="tb-pill warn">${mism} ${__("mismatch")}</span>`);
 		const unatt = rows.filter((r) => r.is_unattributed).length;
 		if (unatt) pills.push(`<span class="tb-pill warn">${unatt} ${__("unattributed")}</span>`);
-		if (rows.find((r) => r.is_computed))
+		// By Company folds each company's carry-forward into its own row.
+		if (rows.find((r) => r.is_computed || r.carry_forward))
 			pills.push(`<span class="tb-pill warn">${__("computed carry-forward")}</span>`);
 		$w.find("#tb-pills").html(pills.join(""));
 

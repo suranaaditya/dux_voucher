@@ -759,9 +759,17 @@ def _unclosed_pl_row(companies, filters, currency):
 
     Returns None when the reset is off or there is nothing to carry.
     """
+    return _carry_row(_unclosed_pl_net(companies, filters), currency)
+
+
+def _unclosed_pl_net(companies, filters):
+    """The prior-year P&L the reset removed, signed Dr-positive (a loss is
+    positive). 0.0 when the reset is off.
+
+    Must run after _slice(): it reads the tier _slice() chose."""
     reset = filters.get("_pl_reset_date")
-    if not reset:
-        return None
+    if not reset or not companies:
+        return 0.0
 
     # Take it from whichever tier served the rest of the report. Querying
     # live here while the balances came from the aggregate was measurably
@@ -769,9 +777,8 @@ def _unclosed_pl_row(companies, filters, currency):
     # milliseconds and then this held the request open for ~40s.
     if filters.get("_source") == "aggregate":
         from dux_voucher.dux_voucher.api import tb_aggregate
-        net = flt(tb_aggregate.unclosed_pl(
+        return flt(tb_aggregate.unclosed_pl(
             companies, filters.from_date, filters.to_date, reset))
-        return _carry_row(net, currency)
 
     # Per company, for the same reason as _gl_aggregate: one IN-list
     # group-by across a trust is what blew the worker timeout.
@@ -794,7 +801,7 @@ def _unclosed_pl_row(companies, filters, currency):
         if row:
             net += flt(row[0].debit) - flt(row[0].credit)
 
-    return _carry_row(net, currency)
+    return net
 
 
 def _carry_row(net, currency):
@@ -1062,6 +1069,15 @@ def _build_account_party(filters, companies):
             if child["has_value"] or filters.get("show_zero_values"):
                 rows.append(child)
 
+    # The same balancing line By Account carries: P&L accounts' opening is
+    # reset at the fiscal-year boundary, so without it this view read "out"
+    # by the whole prior-year result. Not when only control accounts are
+    # listed — a subset of the ledger was never going to tie.
+    if not filters.get("control_accounts_only"):
+        carry = _unclosed_pl_row(companies, filters, currency)
+        if carry:
+            rows.append(carry)
+
     rows.append(_total_row(rows, _("Total"), only_top_level=True))
     return rows
 
@@ -1076,6 +1092,20 @@ def _build_by_company(filters, companies):
     rows = []
     for (company,), v in values.items():
         row = dict(v)
+        # By Account balances the fiscal-year P&L reset with one computed
+        # "Accumulated Loss/Profit b/f" row. A company row is that company's
+        # whole ledger, so its own share of that line belongs inside it.
+        # Without it every company read "out" by its own unclosed prior-year
+        # result: hundreds of crores on a seven-company trust in testing,
+        # where By Account showed only the ledger's real difference. Folded
+        # into opening and closing on its own side, a company whose books tie
+        # nets to nil and one that does not shows its real difference.
+        carry = _unclosed_pl_net([company], filters)
+        if abs(carry) >= 0.005:
+            side = "debit" if carry > 0 else "credit"
+            row[f"opening_{side}"] = flt(row.get(f"opening_{side}")) + abs(carry)
+            row[f"closing_{side}"] = flt(row.get(f"closing_{side}")) + abs(carry)
+            row["carry_forward"] = carry
         if show_net:
             # A whole company nets to whichever side it lands on; treat
             # debit as natural so the sign convention stays predictable.
@@ -1165,11 +1195,13 @@ def _build_message(filters, companies, data):
                           "by {0}</span>").format(frappe.format_value(
                               diff, {"fieldtype": "Currency"})))
 
-    carry = next((r for r in data if r.get("is_computed")), None)
+    # By Company folds each company's share into its own row instead.
+    carry = next((r for r in data if r.get("is_computed") or r.get("carry_forward")), None)
     if carry:
         bits.append(_("<span style='color:#A65A00'>includes a computed "
                       "carry-forward — no Period Closing Voucher has been "
-                      "run for this company</span>"))
+                      "run for {0}</span>").format(
+                          _("this company") if len(companies) == 1 else _("these companies")))
 
     mism = [r for r in data if r.get("mismatch")]
     if mism:
