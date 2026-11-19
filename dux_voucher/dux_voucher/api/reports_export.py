@@ -716,6 +716,14 @@ def export_trial_balance_xlsx(filters=None):
             ws["A3"].font = Font(size=10, bold=True,
                                  color=CR_GREEN if tied else DR_RED)
 
+    # By Company folds each company's prior-year P&L into its own opening and
+    # closing. The page and the classic report say so; the file must too, or
+    # those figures read as ledger balances.
+    if any(r.get("carry_forward") for r in rows):
+        ws["A4"] = _("Opening and closing include each company's prior-year "
+                     "profit or loss, never closed to reserves (computed).")
+        ws["A4"].font = Font(size=9, italic=True, color=GRAY_TXT)
+
     HEAD_ROW = 5
     headers = [label_first, _("Opening (Dr)"), _("Opening (Cr)"), _("Debit"),
                _("Credit"), _("Closing (Dr)"), _("Closing (Cr)")]

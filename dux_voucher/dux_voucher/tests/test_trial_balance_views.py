@@ -114,6 +114,25 @@ class TestByCompany(unittest.TestCase):
         t = _total(rows)
         self.assertAlmostEqual(t["closing_debit"] - t["closing_credit"], 500.0)
 
+    def test_the_excel_says_the_carry_is_inside_the_company_figures(self):
+        import io
+        from openpyxl import load_workbook
+        rows = self._build({("A",): _v(oc=100, d=500, c=500)}, {"A": 100.0})
+        f = F.replace('"By Account"', '"By Company"')
+        cols = tb._columns_for(frappe._dict(view="By Company"), ["A"])
+        with mock.patch("frappe.desk.query_report.get_report_doc"), \
+                mock.patch(ENGINE, return_value=(cols, rows, "", None, None)):
+            reports_export.export_trial_balance_xlsx(filters=f)
+        ws = load_workbook(io.BytesIO(frappe.local.response.filecontent)).active
+        self.assertIn("prior-year", ws["A4"].value or "")
+        # no carry, no note
+        plain = self._build({("A",): _v(od=5, oc=5)}, {"A": 0.0})
+        with mock.patch("frappe.desk.query_report.get_report_doc"), \
+                mock.patch(ENGINE, return_value=(cols, plain, "", None, None)):
+            reports_export.export_trial_balance_xlsx(filters=f)
+        ws = load_workbook(io.BytesIO(frappe.local.response.filecontent)).active
+        self.assertIsNone(ws["A4"].value)
+
     def test_the_message_says_a_carry_forward_is_included(self):
         rows = self._build({("A",): _v(oc=100, d=500, c=500)}, {"A": 100.0})
         msg = tb._build_message(_filters("By Company"), ["A"], rows)
