@@ -244,6 +244,22 @@ class TestByPartyNet(unittest.TestCase):
         self.assertTrue(a3.startswith("Net of all parties:"), a3)
         self.assertTrue(a3.endswith(" Dr"), a3)
 
+    def test_the_excel_names_its_party_column_party(self):
+        # The engine's own By Party columns start with Party Type, but column A
+        # holds the party's name.
+        import io
+        from openpyxl import load_workbook
+        rows = self._data(10.0, 0.0)
+        rows[0].update(party_name="Party One", opening_debit=0, opening_credit=0, debit=0, credit=0)
+        f = F.replace('"By Account"', '"By Party"')
+        cols = tb._columns_for(frappe._dict(view="By Party"), ["A"])
+        self.assertEqual(cols[0]["label"], "Party Type")
+        with mock.patch("frappe.desk.query_report.get_report_doc"), \
+                mock.patch(ENGINE, return_value=(cols, rows, "", None, None)):
+            reports_export.export_trial_balance_xlsx(filters=f)
+        ws = load_workbook(io.BytesIO(frappe.local.response.filecontent)).active
+        self.assertEqual((ws["A5"].value, ws["A6"].value), ("Party", "Party One"))
+
 
 class TestPeriodComparison(unittest.TestCase):
     """Each range of a comparison resets income and expense at its own year.

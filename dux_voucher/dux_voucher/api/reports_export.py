@@ -683,7 +683,10 @@ def export_trial_balance_xlsx(filters=None):
     if isinstance(companies, str):
         companies = [companies]
     view = f.get("view") or "By Account"
-    label_first = columns[0]["label"] if columns else _("Account")
+    # By Party's first engine column is Party Type, but column A holds the
+    # party's name.
+    label_first = (_("Party") if view == "By Party"
+                   else columns[0]["label"] if columns else _("Account"))
 
     # ── title block ──────────────────────────────────────────────────
     ws["A1"] = (companies[0] if len(companies) == 1
