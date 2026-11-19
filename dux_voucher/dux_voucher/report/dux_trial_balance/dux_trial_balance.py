@@ -1171,7 +1171,18 @@ def _build_by_company(filters, companies):
     values = _slice(companies, ["company"], filters)
     show_net = filters.get("show_net_values")
     rows = []
-    for (company,), v in values.items():
+    # Every company, not only the ones the slice returned. Under a Cost Center
+    # or Project filter a college can have nothing in the period and nothing in
+    # its opening (the reset took out last year's income and expense) and still
+    # carry last year's result for that cost centre. By Account counts it, so
+    # it needs a row here too, or the two views disagree by that amount.
+    for company in companies:
+        v = values.get((company,))
+        carry = _unclosed_pl_net([company], filters)
+        if v is None:
+            if abs(carry) < 0.005:
+                continue
+            v = _blank_row()
         row = dict(v)
         # By Account balances the fiscal-year P&L reset with one computed
         # "Accumulated Loss/Profit b/f" row. A company row is that company's
@@ -1181,7 +1192,6 @@ def _build_by_company(filters, companies):
         # where By Account showed only the ledger's real difference. Folded
         # into opening and closing on its own side, a company whose books tie
         # nets to nil and one that does not shows its real difference.
-        carry = _unclosed_pl_net([company], filters)
         if abs(carry) >= 0.005:
             side = "debit" if carry > 0 else "credit"
             row[f"opening_{side}"] = flt(row.get(f"opening_{side}")) + abs(carry)

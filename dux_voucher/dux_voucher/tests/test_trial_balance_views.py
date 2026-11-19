@@ -102,6 +102,18 @@ class TestByCompany(unittest.TestCase):
         self.assertNotIn("carry_forward", a)
         self.assertEqual((a["opening_debit"], a["closing_debit"]), (5, 5))
 
+    def test_a_company_with_nothing_this_period_still_carries_last_years_result(self):
+        # Under a Cost Center filter A has no line this period and nothing in its
+        # opening once the reset drops last year's expense, yet that cost centre
+        # booked 500 of it. By Account counts the 500, so this view must too.
+        rows = self._build({("B",): _v(od=40, d=10, c=10)}, {"A": 500.0, "B": -40.0, "C": 0.0})
+        a = self._row(rows, "A")
+        self.assertEqual((a["opening_debit"], a["closing_debit"]), (500.0, 500.0))
+        self.assertEqual(a["carry_forward"], 500.0)
+        self.assertFalse([r for r in rows if r.get("company") == "C"])   # nothing at all: no row
+        t = _total(rows)
+        self.assertAlmostEqual(t["closing_debit"] - t["closing_credit"], 500.0)
+
     def test_the_message_says_a_carry_forward_is_included(self):
         rows = self._build({("A",): _v(oc=100, d=500, c=500)}, {"A": 100.0})
         msg = tb._build_message(_filters("By Company"), ["A"], rows)
