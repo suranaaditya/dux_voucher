@@ -163,6 +163,20 @@ class TestAccountParty(unittest.TestCase):
         self.assertIsNone(carry[0]["parent_account"])
         self.assertTrue(_ties(_total(rows)))
 
+    def test_an_empty_slice_still_shows_last_years_carry(self):
+        # A Project seen only on last year's expense lines: nothing in the
+        # period or the opening, yet By Account shows a carry of 100.
+        with mock.patch.object(tb, "_slice", return_value={}), \
+                mock.patch.object(tb, "_company_currency", return_value="INR"), \
+                mock.patch.object(tb, "_unclosed_pl_net", return_value=100.0):
+            rows = tb._build_account_party(_filters("Account -> Party"), ["A"])
+            only_ctl = tb._build_account_party(
+                _filters("Account -> Party", control_accounts_only=1), ["A"])
+        self.assertEqual([bool(r.get("is_computed")) for r in rows], [True, False])
+        t = _total(rows)
+        self.assertAlmostEqual(t["closing_debit"] - t["closing_credit"], 100.0)
+        self.assertEqual(only_ctl, [])
+
     def test_control_accounts_only_adds_no_carry_row(self):
         rows = self._build(control_accounts_only=1)
         self.assertFalse([r for r in rows if r.get("is_computed")])

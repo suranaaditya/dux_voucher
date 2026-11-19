@@ -1069,7 +1069,12 @@ def _build_account_party(filters, companies):
     """
     values = _slice(companies, ["account", "party_type", "party"], filters)
     if not values:
-        return []
+        # Nothing in the period or the opening can still leave last year's
+        # result to carry: a Project seen only on last year's expense lines.
+        # By Account shows that carry, so this view must too.
+        carry = (None if filters.get("control_accounts_only") else
+                 _unclosed_pl_row(companies, filters, _company_currency(companies[0])))
+        return [carry, _total_row([carry], _("Total"), only_top_level=True)] if carry else []
 
     acc_meta = {a.name: a for a in _account_master(companies)}
     currency = _company_currency(companies[0])
