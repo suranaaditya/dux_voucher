@@ -31,7 +31,7 @@ Design notes that are load-bearing
 
 import frappe
 from frappe import _
-from frappe.utils import flt, getdate
+from frappe.utils import flt, formatdate, getdate
 
 VIEW_ACCOUNT = "By Account"
 VIEW_PARTY = "By Party"
@@ -153,10 +153,11 @@ def _build_comparison(filters, companies):
         if not filters.get("compare_from") or not filters.get("compare_to"):
             frappe.throw(_("Comparison From and To dates are required for a "
                            "period comparison."))
+        # Labelled in the site's date format, like every other date on screen.
         series = [
-            (_("{0} to {1}").format(filters.from_date, filters.to_date),
+            (_("{0} to {1}").format(formatdate(filters.from_date), formatdate(filters.to_date)),
              companies, filters.from_date, filters.to_date),
-            (_("{0} to {1}").format(filters.compare_from, filters.compare_to),
+            (_("{0} to {1}").format(formatdate(filters.compare_from), formatdate(filters.compare_to)),
              companies, getdate(filters.compare_from), getdate(filters.compare_to)),
         ]
     else:
@@ -241,17 +242,19 @@ def _compare_key(row, view):
 
 
 def _comparison_columns(series, view):
+    # Wide enough for "01-04-2026 to 31-03-2027" and for a crore figure: at
+    # 150 both were cut off, and the datatable cuts without an ellipsis.
     label = _("Party") if view == VIEW_PARTY else _("Account")
     cols = [{"fieldname": "label", "label": label, "fieldtype": "Data",
              "width": 300}]
     for idx, (name, _cos, _f, _t) in enumerate(series):
         cols.append({"fieldname": f"s{idx}", "label": name,
                      "fieldtype": "Currency", "options": "currency",
-                     "width": 150})
+                     "width": 215})
     if len(series) == 2:
         cols.append({"fieldname": "variance", "label": _("Variance"),
                      "fieldtype": "Currency", "options": "currency",
-                     "width": 150})
+                     "width": 215})
     cols.append({"fieldname": "currency", "label": _("Currency"),
                  "fieldtype": "Link", "options": "Currency", "hidden": 1})
     return cols
@@ -1224,7 +1227,11 @@ def _build_by_company(filters, companies):
 # COLUMNS
 # ══════════════════════════════════════════════════════════════════════
 
-def _money(fieldname, label, width=130):
+def _money(fieldname, label, width=165):
+    # The datatable cuts a figure off without an ellipsis, so a short column
+    # shows a different number. 130 lost the last digit of a college's crore
+    # figures (135 px) and of most of a trust's (149 px); 165 holds anything
+    # under 10,000 crore.
     return {"fieldname": fieldname, "label": label, "fieldtype": "Currency",
             "options": "currency", "width": width}
 
