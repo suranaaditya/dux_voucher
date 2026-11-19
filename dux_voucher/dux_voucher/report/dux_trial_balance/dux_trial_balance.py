@@ -1251,7 +1251,11 @@ def _build_message(filters, companies, data):
 
     if total:
         diff = flt(total["closing_debit"]) - flt(total["closing_credit"])
-        if abs(diff) < 0.005:
+        if filters.get("view") == VIEW_PARTY:
+            # Most of a ledger has no party, so a list of parties never ties:
+            # its total is where the parties stand on balance, not an error.
+            bits.append(_("net of parties {0}").format(_dr_cr(diff)))
+        elif abs(diff) < 0.005:
             bits.append(_("<span style='color:#146B4A'>&#10003; tied</span>"))
         else:
             bits.append(_("<span style='color:#B3261E'>&#9888; out of balance "
@@ -1278,17 +1282,30 @@ def _build_message(filters, companies, data):
     return "  &nbsp;·&nbsp;  ".join(bits)
 
 
+def _dr_cr(net):
+    """A signed Dr-positive figure as "₹ 1,234.00 Dr" / "Cr", or nil."""
+    if abs(flt(net)) < 0.005:
+        return _("nil")
+    return "{0} {1}".format(frappe.format_value(abs(net), {"fieldtype": "Currency"}),
+                            "Dr" if net > 0 else "Cr")
+
+
 def _summary(data, filters):
     total = next((r for r in data if r.get("is_total")), None)
     if not total:
         return None
     diff = flt(total["closing_debit"]) - flt(total["closing_credit"])
     tied = abs(diff) < 0.005
+    if filters.get("view") == VIEW_PARTY:
+        last = {"label": _("Net of parties"), "value": diff, "datatype": "Currency",
+                "indicator": "blue"}
+    else:
+        last = {"label": _("Difference"), "value": diff, "datatype": "Currency",
+                "indicator": "green" if tied else "red"}
     return [
         {"label": _("Closing (Dr)"), "value": flt(total["closing_debit"]),
          "datatype": "Currency", "indicator": "blue"},
         {"label": _("Closing (Cr)"), "value": flt(total["closing_credit"]),
          "datatype": "Currency", "indicator": "blue"},
-        {"label": _("Difference"), "value": diff, "datatype": "Currency",
-         "indicator": "green" if tied else "red"},
+        last,
     ]

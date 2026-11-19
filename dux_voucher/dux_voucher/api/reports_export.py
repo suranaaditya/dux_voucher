@@ -698,11 +698,20 @@ def export_trial_balance_xlsx(filters=None):
     if total:
         diff = flt(total.get("closing_debit")) - flt(total.get("closing_credit"))
         tied = abs(diff) < 0.005
-        ws["A3"] = (_("Balanced — debit equals credit") if tied
-                    else _("Out of balance by {0}").format(
-                        frappe.format_value(diff, {"fieldtype": "Currency"})))
-        ws["A3"].font = Font(size=10, bold=True,
-                             color=CR_GREEN if tied else DR_RED)
+        if view == "By Party":
+            # Most of a ledger has no party, so a list of parties never ties:
+            # its total is where the parties stand on balance, not an error.
+            ws["A3"] = _("Net of all parties: {0}").format(
+                _("nil") if tied else "{0} {1}".format(
+                    frappe.format_value(abs(diff), {"fieldtype": "Currency"}),
+                    "Dr" if diff > 0 else "Cr"))
+            ws["A3"].font = Font(size=10, bold=True, color=GRAY_TXT)
+        else:
+            ws["A3"] = (_("Balanced — debit equals credit") if tied
+                        else _("Out of balance by {0}").format(
+                            frappe.format_value(diff, {"fieldtype": "Currency"})))
+            ws["A3"].font = Font(size=10, bold=True,
+                                 color=CR_GREEN if tied else DR_RED)
 
     HEAD_ROW = 5
     headers = [label_first, _("Opening (Dr)"), _("Opening (Cr)"), _("Debit"),

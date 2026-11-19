@@ -158,6 +158,45 @@ class TestAccountParty(unittest.TestCase):
         self.assertEqual(top, {"Debtors - A"})
 
 
+class TestByPartyNet(unittest.TestCase):
+    """Most of a ledger has no party, so By Party's total reads as a net."""
+
+    def _data(self, dr, cr):
+        return [{"party": "C1", "closing_debit": dr, "closing_credit": cr},
+                {"is_total": 1, "opening_debit": 0, "opening_credit": 0, "debit": 0,
+                 "credit": 0, "closing_debit": dr, "closing_credit": cr}]
+
+    def test_the_message_gives_the_net_not_a_difference(self):
+        msg = tb._build_message(_filters("By Party"), ["A"], self._data(9300300.0, 0.0))
+        self.assertIn("net of parties", msg)
+        self.assertIn("Dr", msg)
+        self.assertNotIn("out of balance", msg)
+        self.assertIn("Cr", tb._build_message(_filters("By Party"), ["A"], self._data(0.0, 5.0)))
+
+    def test_the_summary_card_is_a_net_and_not_red(self):
+        s = tb._summary(self._data(9300300.0, 0.0), _filters("By Party"))
+        self.assertEqual((s[-1]["label"], s[-1]["indicator"]), ("Net of parties", "blue"))
+
+    def test_by_account_still_reports_a_difference(self):
+        msg = tb._build_message(_filters("By Account"), ["A"], self._data(10.0, 0.0))
+        self.assertIn("out of balance", msg)
+        s = tb._summary(self._data(10.0, 0.0), _filters("By Account"))
+        self.assertEqual((s[-1]["label"], s[-1]["indicator"]), ("Difference", "red"))
+
+    def test_the_excel_title_block_says_net_of_all_parties(self):
+        import io
+        from openpyxl import load_workbook
+        rows = self._data(9300300.0, 0.0)
+        rows[0].update(opening_debit=0, opening_credit=0, debit=0, credit=0)
+        f = F.replace('"By Account"', '"By Party"')
+        with mock.patch("frappe.desk.query_report.get_report_doc"), \
+                mock.patch(ENGINE, return_value=([{"label": "Party"}], rows, "", None, None)):
+            reports_export.export_trial_balance_xlsx(filters=f)
+        a3 = load_workbook(io.BytesIO(frappe.local.response.filecontent)).active["A3"].value
+        self.assertTrue(a3.startswith("Net of all parties:"), a3)
+        self.assertTrue(a3.endswith(" Dr"), a3)
+
+
 class TestNarrowingFilters(unittest.TestCase):
     """Cost Center / Project are read from the live ledger, carry included.
 

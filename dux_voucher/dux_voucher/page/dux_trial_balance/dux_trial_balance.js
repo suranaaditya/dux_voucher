@@ -226,6 +226,7 @@ tr.computed td{color:var(--tb-warn);font-style:italic;}
   font-weight:650;padding:3px 10px;border-radius:20px;white-space:nowrap;}
 .tb-tie.ok{background:var(--tb-good-soft);color:var(--tb-cr);}
 .tb-tie.off{background:var(--tb-bad-soft);color:var(--tb-dr);}
+.tb-tie.net{background:var(--tb-sunken);color:var(--tb-ink-2);}
 .tb-mini{height:30px;border:1px solid var(--tb-line);border-radius:8px;
   background:var(--tb-bg);color:var(--tb-ink-2);font-size:12.5px;font-weight:600;
   padding:0 11px;cursor:pointer;white-space:nowrap;}
@@ -718,11 +719,22 @@ tr.party:hover > td{background:var(--tb-line-2);}
 		if (total) {
 			const diff = (total.closing_debit || 0) - (total.closing_credit || 0);
 			const tied = Math.abs(diff) < 0.005;
-			$w.find("#tb-tie").html(
-				`<span class="tb-tie ${tied ? "ok" : "off"}">${
-					tied ? "✓ " + __("Balanced") : "⚠ " + __("Out by") + " " + this._fmt(diff)
-				}</span>`
-			);
+			// Most of a ledger has no party, so a list of parties never ties:
+			// its total is where the parties stand on balance, not an error.
+			// Judged by the view the figures were built for, not the button.
+			if ((d.view || this.view) === "By Party") {
+				$w.find("#tb-tie").html(
+					`<span class="tb-tie net">${__("Net of parties")} ${
+						tied ? __("nil") : this._fmt(Math.abs(diff)) + (diff > 0 ? " Dr" : " Cr")
+					}</span>`
+				);
+			} else {
+				$w.find("#tb-tie").html(
+					`<span class="tb-tie ${tied ? "ok" : "off"}">${
+						tied ? "✓ " + __("Balanced") : "⚠ " + __("Out by") + " " + this._fmt(diff)
+					}</span>`
+				);
+			}
 		} else {
 			$w.find("#tb-tie").empty();
 		}
