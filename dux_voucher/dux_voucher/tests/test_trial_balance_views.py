@@ -158,5 +158,76 @@ class TestAccountParty(unittest.TestCase):
         self.assertEqual(top, {"Debtors - A"})
 
 
+class TestNarrowingFilters(unittest.TestCase):
+    """Cost Center / Project are read from the live ledger, carry included.
+
+    The monthly aggregate has no cost centre or project, and a trust (more
+    companies than the live threshold) was served from it with the filter
+    simply dropped: the report came back as the trust's whole ledger."""
+
+    TRUST = [f"College {i}" for i in range(7)]
+    AGG = "dux_voucher.dux_voucher.api.tb_aggregate"
+
+    def _slice(self, **kw):
+        f = _filters("By Account", **kw)
+        with mock.patch(f"{self.AGG}.can_serve", return_value=True), \
+                mock.patch(f"{self.AGG}.built_at", return_value="2026-11-19 00:02"), \
+                mock.patch(f"{self.AGG}.fetch", return_value={"agg": 1}) as fetch, \
+                mock.patch.object(tb, "_slice_live", return_value={"live": 1}) as live:
+            out = tb._slice(self.TRUST, ("account",), f)
+        return f, out, fetch, live
+
+    def test_a_trust_under_a_cost_center_filter_reads_live(self):
+        f, out, fetch, live = self._slice(cost_center=["Main - A"])
+        fetch.assert_not_called()
+        live.assert_called_once()
+        self.assertEqual((out, f._source), ({"live": 1}, "live"))
+        self.assertIn("Cost Center", f._source_note)
+
+    def test_a_trust_under_a_project_filter_reads_live(self):
+        f, out, fetch, _live = self._slice(project=["New Hostel"])
+        fetch.assert_not_called()
+        self.assertEqual(f._source, "live")
+        self.assertIn("Project", f._source_note)
+
+    def test_without_them_a_trust_still_reads_the_aggregate(self):
+        f, out, fetch, live = self._slice()
+        fetch.assert_called_once()
+        live.assert_not_called()
+        self.assertEqual((out, f._source), ({"agg": 1}, "aggregate"))
+        self.assertFalse(f.get("_source_note"))
+
+    def test_the_carry_forward_is_taken_from_the_same_slice(self):
+        f = _filters("By Account", cost_center=["Main - A"], project="New Hostel")
+        with mock.patch.object(tb, "_touched_companies", side_effect=lambda cos, _f: list(cos)), \
+                mock.patch.object(frappe.db, "sql",
+                                  return_value=[frappe._dict(debit=10.0, credit=4.0)]) as sql:
+            self.assertEqual(tb._unclosed_pl_net(["A"], f), 6.0)
+        query, params = sql.call_args[0][:2]
+        self.assertIn("gle.cost_center IN %(cost_center)s", query)
+        self.assertIn("gle.project IN %(project)s", query)
+        self.assertEqual(params["cost_center"], ("Main - A",))
+        self.assertEqual(params["project"], ("New Hostel",))
+
+    def test_only_the_companies_that_carry_the_project_are_queried(self):
+        # GL Entry has no index on project: every company queried is a scan
+        # of its whole ledger, so the ones without the project are skipped.
+        f = _filters("By Account", project=["New Hostel"])
+        with mock.patch.object(frappe.db, "sql_list", return_value=["College 2"]) as lookup, \
+                mock.patch.object(tb, "_gl_aggregate_one", return_value=[]) as one:
+            tb._gl_aggregate(self.TRUST, ("account",), f, opening=False)
+            self.assertEqual([c.args[0] for c in one.call_args_list], ["College 2"])
+            # Known per company for the rest of the request, dates or not.
+            self.assertEqual(tb._touched_companies(["College 3", "College 2"], f), ["College 2"])
+        lookup.assert_called_once()
+        self.assertIn("gle.project IN %(project)s", lookup.call_args[0][0])
+
+    def test_without_a_narrowing_filter_nothing_is_looked_up(self):
+        f = _filters("By Account")
+        with mock.patch.object(frappe.db, "sql_list") as lookup:
+            self.assertEqual(tb._touched_companies(self.TRUST, f), self.TRUST)
+        lookup.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

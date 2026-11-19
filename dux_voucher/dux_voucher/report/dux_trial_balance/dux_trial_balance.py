@@ -396,7 +396,7 @@ def _gl_aggregate(companies, group_cols, filters, opening):
         return []
 
     out = []
-    for company in companies:
+    for company in _touched_companies(companies, filters):
         out.extend(_gl_aggregate_one(company, group_cols, filters, opening))
     return out
 
@@ -427,19 +427,7 @@ def _gl_aggregate_one(company, group_cols, filters, opening):
         where.append("gle.posting_date BETWEEN %(from_date)s AND %(to_date)s")
         where.append("gle.is_opening = 'No'")
 
-    if filters.get("cost_center"):
-        cc = filters.get("cost_center")
-        params["cost_center"] = tuple(cc if isinstance(cc, (list, tuple)) else [cc])
-        where.append("gle.cost_center IN %(cost_center)s")
-
-    if filters.get("project"):
-        pr = filters.get("project")
-        params["project"] = tuple(pr if isinstance(pr, (list, tuple)) else [pr])
-        where.append("gle.project IN %(project)s")
-
-    if filters.get("party_type_filter"):
-        params["ptf"] = filters.get("party_type_filter")
-        where.append("gle.party_type = %(ptf)s")
+    where.extend(_narrowing(filters, params))
 
     select = ", ".join(f"gle.{c} AS {c}" for c in group_cols)
     group = ", ".join(f"gle.{c}" for c in group_cols)
@@ -453,6 +441,67 @@ def _gl_aggregate_one(company, group_cols, filters, opening):
         WHERE {' AND '.join(where)}
         GROUP BY {group}
     """, params, as_dict=True)
+
+
+# Filters that narrow the ledger to part of it. The monthly aggregate is kept
+# per (month, company, account, party) and carries none of them.
+_NARROWING_FILTERS = (("cost_center", "Cost Center"), ("project", "Project"),
+                      ("party_type_filter", "Party Type"))
+
+
+def _narrowing(filters, params):
+    """WHERE clauses for the narrowing filters, filling ``params``.
+
+    Shared by the slice and the carry-forward, so the computed row is what
+    the fiscal-year reset removed from THIS slice, not from the whole ledger."""
+    where = []
+    if filters.get("cost_center"):
+        cc = filters.get("cost_center")
+        params["cost_center"] = tuple(cc if isinstance(cc, (list, tuple)) else [cc])
+        where.append("gle.cost_center IN %(cost_center)s")
+
+    if filters.get("project"):
+        pr = filters.get("project")
+        params["project"] = tuple(pr if isinstance(pr, (list, tuple)) else [pr])
+        where.append("gle.project IN %(project)s")
+
+    if filters.get("party_type_filter"):
+        params["ptf"] = filters.get("party_type_filter")
+        where.append("gle.party_type = %(ptf)s")
+    return where
+
+
+def _touched_companies(companies, filters):
+    """The companies, in order, whose ledger a narrowing filter matches at all.
+
+    A company with no row on the selected project or cost centre adds
+    nothing to the slice or to the carry-forward, so leaving it out changes
+    no figure. It is what keeps a Project filter usable on a trust: GL Entry
+    has no index on project, so every per-company query reads that company's
+    whole ledger, and 34 companies took 104s on the test ledger against
+    gunicorn's 120s worker limit. One pass finds the companies that carry
+    the project and only those are queried. Answers are kept per company on
+    the request's filters; they do not depend on the dates."""
+    params = {}
+    where = _narrowing(filters, params)
+    if not where or not companies:
+        return list(companies)
+
+    known = filters.get("_touched")
+    if known is None:
+        known = filters["_touched"] = {}
+    unknown = [c for c in companies if c not in known]
+    if unknown:
+        params["companies"] = tuple(unknown)
+        hit = set(frappe.db.sql_list(f"""
+            SELECT DISTINCT gle.company FROM `tabGL Entry` gle
+            WHERE gle.company IN %(companies)s
+              AND gle.is_cancelled = 0
+              AND {' AND '.join(where)}
+        """, params))
+        for c in unknown:
+            known[c] = c in hit
+    return [c for c in companies if known[c]]
 
 
 def _slice(companies, group_cols, filters):
@@ -471,17 +520,27 @@ def _slice(companies, group_cols, filters):
     live_threshold = int(filters.get("live_company_threshold") or 3)
     wants_fast = len(companies) > live_threshold
 
+    # The aggregate cannot narrow by these. Served from it anyway, the
+    # filter was dropped without a word: a trust under a Cost Center filter
+    # came back as its whole ledger, figure for figure.
+    narrowed = [_(label) for key, label in _NARROWING_FILTERS if filters.get(key)]
+
     if wants_fast and not filters.get("force_live"):
-        if tb_aggregate.can_serve(companies, filters.from_date, filters.to_date):
+        if narrowed:
+            filters._source_note = _(
+                "read from the live ledger: the monthly aggregate cannot "
+                "filter by {0}").format(", ".join(narrowed))
+        elif tb_aggregate.can_serve(companies, filters.from_date, filters.to_date):
             filters._source = "aggregate"
             filters._source_built_at = tb_aggregate.built_at()
             return tb_aggregate.fetch(companies, group_cols,
                                       filters.from_date, filters.to_date,
                                       filters.get("_pl_reset_date"))
-        filters._source_note = _(
-            "the monthly aggregate cannot answer this request — either it "
-            "does not cover every selected company, or the dates are not "
-            "whole months")
+        else:
+            filters._source_note = _(
+                "the monthly aggregate cannot answer this request — either it "
+                "does not cover every selected company, or the dates are not "
+                "whole months")
 
     filters._source = "live"
     return _slice_live(companies, group_cols, filters)
@@ -783,8 +842,13 @@ def _unclosed_pl_net(companies, filters):
     # Per company, for the same reason as _gl_aggregate: one IN-list
     # group-by across a trust is what blew the worker timeout.
     net = 0.0
-    for company in companies:
-        row = frappe.db.sql("""
+    for company in _touched_companies(companies, filters):
+        params = {"company": company, "from_date": filters.from_date,
+                  "to_date": filters.to_date, "pl_reset": reset}
+        # The slice's own narrowing: under a Cost Center filter this is that
+        # cost centre's prior-year result, not the whole ledger's.
+        narrow = "".join(f"\n              AND {w}" for w in _narrowing(filters, params))
+        row = frappe.db.sql(f"""
             SELECT COALESCE(SUM(gle.debit), 0)  AS debit,
                    COALESCE(SUM(gle.credit), 0) AS credit
             FROM `tabGL Entry` gle
@@ -795,9 +859,8 @@ def _unclosed_pl_net(companies, filters):
               AND ( gle.posting_date < %(from_date)s
                     OR (gle.is_opening = 'Yes'
                         AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s) )
-              AND gle.posting_date < %(pl_reset)s
-        """, {"company": company, "from_date": filters.from_date,
-              "to_date": filters.to_date, "pl_reset": reset}, as_dict=True)
+              AND gle.posting_date < %(pl_reset)s{narrow}
+        """, params, as_dict=True)
         if row:
             net += flt(row[0].debit) - flt(row[0].credit)
 
