@@ -171,6 +171,11 @@ def _build_comparison(filters, companies):
         sub = frappe._dict(dict(filters))
         sub.company = cos
         sub.from_date, sub.to_date = frm, to
+        # The chosen Fiscal Year belongs to the main range. A comparison range
+        # resets income and expense at the start of its OWN year, or "this
+        # year against last" set year-to-date against part of a year.
+        if (frm, to) != (filters.from_date, filters.to_date):
+            sub.fiscal_year = None
         sub._pl_reset_date = _pl_reset_date(sub)
         rows = builder(sub, cos)
         sources.add(sub.get("_source") or "live")

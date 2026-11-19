@@ -233,6 +233,44 @@ class TestByPartyNet(unittest.TestCase):
         self.assertTrue(a3.endswith(" Dr"), a3)
 
 
+class TestPeriodComparison(unittest.TestCase):
+    """Each range of a comparison resets income and expense at its own year.
+
+    On a trust (aggregate tier) last year's column read the whole prior-year
+    carry of THIS year on top of its own figures: 4,85,97,38,658.42 where the
+    ledger itself gave 36,612.67 in testing."""
+
+    def test_the_earlier_range_resets_at_its_own_fiscal_year(self):
+        f = frappe._dict(view="By Account", compare="Period", fiscal_year="2026-2027",
+                         from_date=frappe.utils.getdate("2026-04-01"),
+                         to_date=frappe.utils.getdate("2026-10-31"),
+                         compare_from="2025-04-01", compare_to="2025-10-31",
+                         show_group_accounts=1)
+        seen = []
+
+        def build(sub, cos):
+            seen.append(sub)
+            return []
+
+        reset = lambda sub: sub.get("fiscal_year") or str(sub.from_date)  # noqa: E731
+        with mock.patch.object(tb, "_build_by_account", side_effect=build), \
+                mock.patch.object(tb, "_pl_reset_date", side_effect=reset):
+            tb._build_comparison(f, ["A", "B"])
+        self.assertEqual([s._pl_reset_date for s in seen], ["2026-2027", "2025-04-01"])
+        self.assertEqual(f.fiscal_year, "2026-2027")   # the caller's filters are untouched
+
+    def test_the_aggregate_carry_has_the_live_bounds(self):
+        from dux_voucher.dux_voucher.api import tb_aggregate
+        with mock.patch.object(frappe.db, "sql", return_value=[frappe._dict(net=5.0)]) as sql:
+            net = tb_aggregate.unclosed_pl(["A"], "2025-04-01", "2025-10-31", "2026-04-01")
+        self.assertEqual(net, 5.0)
+        query, params = sql.call_args[0][:2]
+        self.assertEqual((params["from_p"], params["to_p"], params["pl_p"]),
+                         ("2025-04", "2025-10", "2026-04"))
+        self.assertIn("agg.period < %(from_p)s", query)
+        self.assertIn("agg.period <= %(to_p)s", query)
+
+
 class TestNarrowingFilters(unittest.TestCase):
     """Cost Center / Project are read from the live ledger, carry included.
 
