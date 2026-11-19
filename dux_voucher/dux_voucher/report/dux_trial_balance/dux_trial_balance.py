@@ -1057,6 +1057,10 @@ def _build_account_party(filters, companies):
     carries GL with no party at all — an explicit Unattributed row. That
     row is not an error state: on this dataset most Receivable/Payable
     movement has no party, so hiding it would misrepresent the ledger.
+
+    A plain account (not a control account) with no party on any line is
+    listed without children: its only child would be an Unattributed row
+    repeating its own figure.
     """
     values = _slice(companies, ["account", "party_type", "party"], filters)
     if not values:
@@ -1107,6 +1111,15 @@ def _build_account_party(filters, companies):
         if not parent_row["has_value"] and not filters.get("show_zero_values"):
             continue
         rows.append(parent_row)
+
+        # Under a plain account with no party on any line, the only child is
+        # an Unattributed row repeating the account's own figure: 531 of them
+        # on a seven-company trust in testing, burying the control accounts
+        # this view exists for. Control accounts keep theirs (there it is the
+        # point), and a plain account that does carry parties still opens.
+        if meta and not _is_control(meta.account_type, meta.account_name) \
+                and not any(p for _pt, p, _v in children):
+            continue
 
         for party_type, party, v in sorted(
                 children, key=lambda c: (c[0] or "", c[1] or "")):

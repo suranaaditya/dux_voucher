@@ -157,6 +157,42 @@ class TestAccountParty(unittest.TestCase):
         top = {r["account"] for r in rows if not r.get("parent_account") and not r.get("is_total")}
         self.assertEqual(top, {"Debtors - A"})
 
+    def _children(self, rows, account):
+        return [r for r in rows if r.get("parent_account") == account]
+
+    def test_a_plain_account_with_no_party_has_no_unattributed_row(self):
+        rows = self._build()
+        for account in ("Capital - A", "Salary - A", "Bank - A"):
+            self.assertEqual(self._children(rows, account), [], account)
+        top = {r["account"] for r in rows if not r.get("parent_account")}
+        self.assertTrue({"Capital - A", "Salary - A", "Bank - A"} <= top)
+        self.assertTrue(_ties(_total(rows)))
+
+    def test_a_control_account_keeps_its_unattributed_row(self):
+        deb = self._children(self._build(), "Debtors - A")
+        self.assertEqual(sorted(bool(r.get("is_unattributed")) for r in deb), [False, True])
+
+    def test_a_plain_account_that_carries_parties_still_opens(self):
+        em = self._children(self._build(), "Earnest Money - A")
+        self.assertEqual(sorted(bool(r.get("is_unattributed")) for r in em), [False, True])
+
+    def test_the_students_ledger_counts_as_a_control_account(self):
+        # Blank account_type, but it carries one Student per line.
+        master = self.MASTER + [_acc("Admission/Registration Fee (Provisional) - A",
+                                     "Admission/Registration Fee (Provisional)", "", "Liability")]
+        values = dict(self.VALUES)
+        values[("Admission/Registration Fee (Provisional) - A", None, None)] = _v(oc=5)
+        values[("Capital - A", None, None)] = _v(oc=205)
+        with mock.patch.object(tb, "_slice", return_value=values), \
+                mock.patch.object(tb, "_account_master", return_value=master), \
+                mock.patch.object(tb, "_default_party_accounts", return_value={}), \
+                mock.patch.object(tb, "_resolve_party_names", return_value={}), \
+                mock.patch.object(tb, "_company_currency", return_value="INR"), \
+                mock.patch.object(tb, "_unclosed_pl_net", return_value=100.0):
+            rows = tb._build_account_party(_filters("Account -> Party"), ["A"])
+        kids = self._children(rows, "Admission/Registration Fee (Provisional) - A")
+        self.assertEqual([bool(r.get("is_unattributed")) for r in kids], [True])
+
 
 class TestByPartyNet(unittest.TestCase):
     """Most of a ledger has no party, so By Party's total reads as a net."""
