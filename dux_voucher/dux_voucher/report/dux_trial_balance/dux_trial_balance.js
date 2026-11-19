@@ -123,6 +123,23 @@ frappe.query_reports["Dux Trial Balance"] = {
 			fieldtype: "Select",
 			options: ["", "Company", "Period"].join("\n"),
 			default: "",
+			// Period needs a second range, and with none the report stopped
+			// on "Comparison From and To dates are required" the moment it was
+			// chosen. Start from the same dates a year earlier; they stay
+			// editable. A filter with on_change is not refreshed by Frappe,
+			// so every other change refreshes here, as Frappe would.
+			on_change: function (query_report) {
+				const get = (f) => query_report.get_filter_value(f);
+				if (get("compare") === "Period" && !get("compare_from") && !get("compare_to")
+						&& get("from_date") && get("to_date")) {
+					query_report.set_filter_value({
+						compare_from: frappe.datetime.add_months(get("from_date"), -12),
+						compare_to: frappe.datetime.add_months(get("to_date"), -12),
+					});
+					return;
+				}
+				if (!query_report._no_refresh) query_report.refresh(true);
+			},
 		},
 		{
 			fieldname: "compare_from",
