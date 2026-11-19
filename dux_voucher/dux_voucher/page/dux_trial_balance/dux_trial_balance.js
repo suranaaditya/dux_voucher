@@ -204,7 +204,9 @@ tr.total > td{border-top:2px solid var(--tb-line);border-bottom:0;
   font-weight:700;background:var(--tb-sunken);position:sticky;bottom:0;}
 tr.computed td{color:var(--tb-warn);font-style:italic;}
 .tb-dr{color:var(--tb-dr);} .tb-cr{color:var(--tb-cr);}
-.tb-nil{color:var(--tb-ink-3);opacity:.5;}
+/* Fade the dash, not the cell: opacity on the cell also faded its background,
+   so the pinned Total's nil cells showed the rows scrolling underneath. */
+.tb-nil{color:color-mix(in srgb,var(--tb-ink-3) 50%,transparent);}
 .tb-flag{display:inline-block;font-size:9px;font-weight:700;letter-spacing:.05em;
   text-transform:uppercase;padding:0 5px;border-radius:4px;margin-left:6px;
   line-height:15px;background:var(--tb-warn-soft);color:var(--tb-warn);
