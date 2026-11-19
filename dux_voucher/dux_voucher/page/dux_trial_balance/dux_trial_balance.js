@@ -475,9 +475,7 @@ tr.party:hover > td{background:var(--tb-line-2);}
 		this.page.set_secondary_action(__("Excel"), () => this._excel());
 		this.page.add_menu_item(__("Print"), () => window.print());
 		this.page.add_menu_item(__("Rebuild aggregate"), () => this._rebuild());
-		this.page.add_menu_item(__("Open as classic report"), () =>
-			frappe.set_route("query-report", "Dux Trial Balance")
-		);
+		this.page.add_menu_item(__("Open as classic report"), () => this._classic());
 	}
 
 	_defaults() {
@@ -1099,6 +1097,16 @@ tr.party:hover > td{background:var(--tb-line-2);}
 		// Content-Disposition download, so the browser saves the file
 		// without navigating away and without leaving a blank tab behind.
 		window.location.href = url;
+	}
+
+	_classic() {
+		// Open the classic report on the selection that was run here, not on
+		// its own defaults (the user's default company, the last twelve
+		// months). The page's filter names are the report's own, so they
+		// carry over as they are.
+		const f = this.filters;
+		if (f && f.company && f.company.length) frappe.route_options = { ...f };
+		frappe.set_route("query-report", "Dux Trial Balance");
 	}
 
 	_rebuild() {
