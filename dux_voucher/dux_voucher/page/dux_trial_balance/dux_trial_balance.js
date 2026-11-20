@@ -757,7 +757,10 @@ tr.tb-cap a{font-style:normal;font-weight:600;cursor:pointer;}
 				$w.find("#tb-bar").css("display", "flex");
 				this._syncOptions();
 				this._renderStatusBar();
-				this._renderTable();
+				// The row filter outlives the run, and it can match a party
+				// only once it is fetched: this table starts with none.
+				if (this.search) this._ensurePartiesForSearch();
+				else this._renderTable();
 			},
 			error: () => {
 				if (seq !== this._seq) return;
@@ -1216,20 +1219,21 @@ tr.tb-cap a{font-style:normal;font-weight:600;cursor:pointer;}
 								if (seq === this._dataSeq) this.parties[r.account] = res.message || [];
 								resolve();
 							},
-							error: () => {
-								if (seq === this._dataSeq) this.parties[r.account] = [];
-								resolve();
-							},
+							// Not kept as "no parties": the next keystroke asks again.
+							error: () => resolve(),
 						});
 					})
 			)
 		).then(() => {
 			if (seq !== this._dataSeq) return;
 			this._loadingParties = false;
-			// Reveal what was found rather than making them expand by hand.
-			(this.data.rows || []).forEach((r) => {
-				if (r.is_control && this._partyHit(r)) this.partyOpen.add(r.account);
-			});
+			// Reveal what was found rather than making them expand by hand:
+			// for the filter now in the box. Cleared while these loaded, every
+			// party would match, and every control account would open.
+			if (this.search)
+				(this.data.rows || []).forEach((r) => {
+					if (r.is_control && this._partyHit(r)) this.partyOpen.add(r.account);
+				});
 			this._renderTable();
 		});
 	}
@@ -1413,11 +1417,12 @@ tr.tb-cap a{font-style:normal;font-weight:600;cursor:pointer;}
 			  )}</td></tr>`
 			: "";
 
-		if (this._loadingParties) {
-			$r.find(".tb-tablewrap").before(
-				`<div class="tb-searching">${__("Loading parties to search…")}</div>`
-			);
-		}
+		// Drawn with the table: put in before it, the redraw below wiped it.
+		// Not once the filter is cleared: nothing is being searched.
+		const searching =
+			this._loadingParties && this.search
+				? `<div class="tb-searching">${__("Loading parties to search…")}</div>`
+				: "";
 		const tot = rows.find((r) => r.is_total);
 		// In the four-column view Opening and Closing are netted, so the
 		// Total's netted figure is the Dr/Cr difference -- which is the tie
@@ -1480,7 +1485,7 @@ tr.tb-cap a{font-style:normal;font-weight:600;cursor:pointer;}
 				)
 				.join("");
 
-		$r.html(`<div class="tb-tablewrap"><table class="tb ${
+		$r.html(`${searching}<div class="tb-tablewrap"><table class="tb ${
 			coMode ? "coc" : this.splitCols ? "" : "cols4"
 		}">
       <thead><tr>
