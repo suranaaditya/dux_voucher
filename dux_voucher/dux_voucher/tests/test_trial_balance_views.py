@@ -1119,5 +1119,21 @@ class TestCompanyColumnsExcel(unittest.TestCase):
         self.assertTrue(self.filename.startswith("Trial Balance - A - "), self.filename)
 
 
+class TestWorkbookPrint(unittest.TestCase):
+
+    def test_the_six_column_sheet_prints_one_page_wide_not_one_page(self):
+        import io
+        from openpyxl import load_workbook
+        rows, _f = TestCompanyColumns()._build(company_columns=0)
+        cols = tb._columns_for(frappe._dict(view="By Account"), ["A", "B"])
+        with mock.patch(ENGINE, return_value=(cols, rows, "", None, None)):
+            reports_export.export_trial_balance_xlsx(filters=F)
+        ws = load_workbook(io.BytesIO(frappe.local.response.filecontent))["Trial Balance"]
+        self.assertEqual((ws.page_setup.fitToWidth, ws.page_setup.fitToHeight), (1, 0))
+        self.assertTrue(ws.sheet_properties.pageSetUpPr.fitToPage)
+        ws = TestCompanyColumnsExcel()._export()["Consolidated"]
+        self.assertEqual((ws.page_setup.fitToWidth, ws.page_setup.fitToHeight), (1, 0))
+
+
 if __name__ == "__main__":
     unittest.main()

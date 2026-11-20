@@ -913,7 +913,10 @@ def _tb_sheet(ws, f, rows, view, label_first, companies):
     ws.sheet_view.showGridLines = False
     ws.auto_filter.ref = f"A{HEAD_ROW}:G{max(r, HEAD_ROW + 1)}"
     ws.page_setup.orientation = "landscape"
+    # One page across, as many down as it takes. Fit-to-page alone means one
+    # page in both directions: an 800-row trust printed as one unreadable page.
     ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
     ws.sheet_properties.pageSetUpPr.fitToPage = True
     ws.print_title_rows = f"{HEAD_ROW}:{HEAD_ROW}"
 
