@@ -403,5 +403,124 @@ class TestNarrowingFilters(unittest.TestCase):
         lookup.assert_not_called()
 
 
+# ── several companies: merged charts, company columns ─────────────────
+
+def _master(*specs):
+    """Account master rows: (name, company, account_name, parent, root_type,
+    is_group[, account_type])."""
+    out = []
+    for i, sp in enumerate(specs):
+        name, co, acc_name, parent, root, grp = sp[:6]
+        out.append(frappe._dict(
+            name=name, company=co, account_name=acc_name, account_number=None,
+            parent_account=parent, root_type=root, report_type="Balance Sheet",
+            account_type=sp[6] if len(sp) > 6 else "", is_group=grp, lft=i + 1, rgt=i + 2))
+    return out
+
+
+def _signed(vals, stage):
+    """Dr less Cr of one stage ("opening" / "closing") of a six-value list."""
+    i = 0 if stage == "opening" else 4
+    return vals[i] - vals[i + 1]
+
+
+class TestMergedChart(unittest.TestCase):
+    """The colleges' charts were cloned and then drifted. Merged on name alone,
+    a row followed whichever college was read last: one college filing
+    Temporary Opening under Equity carried every college's into Source of
+    Funds. An account a college files under another parent is now a row of its
+    own there, and one that is a group in one college and a ledger in another
+    is two rows."""
+
+    # A files Cash under Assets; B under Bank, a group under Assets.
+    MASTER = _master(
+        ("Assets - A", "A", "Assets", None, "Asset", 1),
+        ("Cash - A", "A", "Cash", "Assets - A", "Asset", 0),
+        ("Bank - A", "A", "Bank", "Assets - A", "Asset", 1),
+        ("Liabilities - A", "A", "Liabilities", None, "Liability", 1),
+        ("Capital - A", "A", "Capital", "Liabilities - A", "Liability", 0),
+        ("Assets - B", "B", "Assets", None, "Asset", 1),
+        ("Bank - B", "B", "Bank", "Assets - B", "Asset", 1),
+        ("Cash - B", "B", "Cash", "Bank - B", "Asset", 0),
+        ("Liabilities - B", "B", "Liabilities", None, "Liability", 1),
+        ("Capital - B", "B", "Capital", "Liabilities - B", "Liability", 0),
+    )
+    VALUES = {("Cash - A",): _v(od=100), ("Capital - A",): _v(oc=100),
+              ("Cash - B",): _v(od=40), ("Capital - B",): _v(oc=40)}
+
+    def _build(self, master=None, values=None, companies=("A", "B"), **kw):
+        with mock.patch.object(tb, "_slice", return_value=dict(values or self.VALUES)), \
+                mock.patch.object(tb, "_account_master", return_value=master or self.MASTER), \
+                mock.patch.object(tb, "_company_currency", return_value="INR"), \
+                mock.patch.object(tb, "_unclosed_pl_net", return_value=0.0):
+            return tb._build_by_account(_filters("By Account", **kw), list(companies))
+
+    def test_an_account_filed_under_another_parent_is_its_own_row(self):
+        rows = self._build()
+        by = {r["account"]: r for r in rows if not r.get("is_total")}
+        split = "cash" + tb.KEY_SEP + "bank"
+        self.assertEqual((by["cash"]["parent_account"], by["cash"]["closing_debit"]), ("assets", 100))
+        self.assertEqual((by[split]["parent_account"], by[split]["closing_debit"]), ("bank", 40))
+        self.assertEqual(by[split]["account_name"], "Cash (under Bank)")
+        # every group is the sum of the rows under it
+        self.assertEqual(by["bank"]["closing_debit"], 40)
+        self.assertEqual(by["assets"]["closing_debit"], 140)
+        self.assertTrue(_ties(_total(rows)))
+        flat = self._build(show_group_accounts=0)
+        self.assertEqual(sorted(r["account_name"] for r in flat if not r.get("is_total")),
+                         ["Capital", "Cash", "Cash (under Bank)"])
+        self.assertTrue(_ties(_total(flat)))
+
+    def test_the_placement_most_companies_share_keeps_the_plain_row(self):
+        master = _master(
+            ("Assets - A", "A", "Assets", None, "Asset", 1),
+            ("Cash - A", "A", "Cash", "Assets - A", "Asset", 0),
+            ("Assets - B", "B", "Assets", None, "Asset", 1),
+            ("Cash - B", "B", "Cash", "Assets - B", "Asset", 0),
+            ("Assets - C", "C", "Assets", None, "Asset", 1),
+            ("Bank - C", "C", "Bank", "Assets - C", "Asset", 1),
+            ("Cash - C", "C", "Cash", "Bank - C", "Asset", 0),
+        )
+        keys, apart = tb._merge_keys(master, ["C", "A", "B"])   # C listed first, still outvoted
+        self.assertEqual((keys["Cash - A"], keys["Cash - B"]), ("cash", "cash"))
+        self.assertEqual(keys["Cash - C"], "cash" + tb.KEY_SEP + "bank")
+        self.assertEqual(apart, {"cash" + tb.KEY_SEP + "bank": "bank"})
+        # one each: the company listed first keeps the plain row
+        keys, _apart = tb._merge_keys(self.MASTER, ["B", "A"])
+        self.assertEqual((keys["Cash - B"], keys["Cash - A"]), ("cash", "cash" + tb.KEY_SEP + "assets"))
+
+    def test_a_group_in_one_college_and_a_ledger_in_another_are_two_rows(self):
+        master = _master(
+            ("Liabilities - A", "A", "Liabilities", None, "Liability", 1),
+            ("Loans - A", "A", "Loans", "Liabilities - A", "Liability", 1),
+            ("Term Loan - A", "A", "Term Loan", "Loans - A", "Liability", 0),
+            ("Assets - A", "A", "Assets", None, "Asset", 1),
+            ("Cash - A", "A", "Cash", "Assets - A", "Asset", 0),
+            ("Liabilities - B", "B", "Liabilities", None, "Liability", 1),
+            ("Loans - B", "B", "Loans", "Liabilities - B", "Liability", 0),
+            ("Assets - B", "B", "Assets", None, "Asset", 1),
+            ("Cash - B", "B", "Cash", "Assets - B", "Asset", 0),
+        )
+        values = {("Term Loan - A",): _v(oc=70), ("Cash - A",): _v(od=70),
+                  ("Loans - B",): _v(oc=30), ("Cash - B",): _v(od=30)}
+        # Merged, hiding group accounts either dropped B's loan with A's group,
+        # or kept it as a ledger holding A's term loan as well: out either way.
+        flat = self._build(master, values, show_group_accounts=0)
+        self.assertTrue(_ties(_total(flat)))
+        loans = [r for r in flat if r["account_name"] == "Loans"]
+        self.assertEqual([r["closing_credit"] for r in loans], [30])
+        self.assertIn("Term Loan", [r["account_name"] for r in flat])
+        tree = self._build(master, values)
+        self.assertTrue(_ties(_total(tree)))
+        by = {r["account"]: r for r in tree if not r.get("is_total")}
+        self.assertEqual(by["loans"]["is_group_account"], 0)
+        self.assertEqual(by["loans" + tb.GROUP_SUFFIX]["is_group_account"], 1)
+        self.assertEqual(by["liabilities"]["closing_credit"], 100)
+
+    def test_a_single_company_keeps_its_own_names(self):
+        rows = self._build(companies=("A",))
+        self.assertIn("Cash - A", [r["account"] for r in rows])
+
+
 if __name__ == "__main__":
     unittest.main()

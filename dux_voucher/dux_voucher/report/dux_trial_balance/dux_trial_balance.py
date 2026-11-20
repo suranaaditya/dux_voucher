@@ -705,6 +705,77 @@ def _merge_key(acc, multi):
     return "".join((acc.account_name or "").lower().split())
 
 
+# Separates a merge key from what splits it. A normalised name has no
+# whitespace and an account number no control characters, so it never
+# occurs inside a key of its own.
+KEY_SEP = "\x1f"
+# Marks the group of an account that is a group in one company and a ledger
+# in another. Doubled, so no split by placement (key, separator, parent key)
+# can arrive at it: no parent key starts with the separator.
+GROUP_SUFFIX = KEY_SEP * 2 + "group"
+
+
+def _merge_keys(accounts, companies):
+    """``{real account name: row key}`` across several companies, and the keys
+    split off by placement: ``{key: parent key}``.
+
+    ``_merge_key`` folds the same account across companies by name or number.
+    Two things then keep it apart again, because the colleges' charts have
+    drifted:
+
+    * An account that is a group in one company and a ledger in another
+      (Secured Loans, on the dev data) is two rows. As one, hiding group
+      accounts either dropped the ledger's balance or counted the group's
+      children twice, and one college read out by 16.6 crore.
+    * An account that companies file under different parents is a row per
+      parent. The placement most companies share keeps the plain key; the
+      others become their own rows under their own parents. Merged, the row
+      followed whichever company was read last: one college filing
+      Temporary Opening under Equity carried every college's Temporary
+      Opening into Source of Funds, about 110 crore each on a ten-college
+      trust, and no college's column matched its own trial balance.
+
+    Split this way every row sits under one parent, every group is the sum of
+    the rows under it, and each company's figures roll up exactly as in its
+    own chart. Ties go to the company listed first."""
+    rank = {co: i for i, co in enumerate(companies)}
+    by_name = {a.name: a for a in accounts}
+    keys = {a.name: _merge_key(a, True) for a in accounts}
+
+    kinds = {}
+    for a in accounts:
+        kinds.setdefault(keys[a.name], set()).add(bool(a.is_group))
+    for a in accounts:
+        if a.is_group and len(kinds[keys[a.name]]) > 1:
+            keys[a.name] += GROUP_SUFFIX
+
+    ordered = sorted(accounts, key=lambda a: (rank.get(a.company, len(rank)), a.lft or 0))
+    apart = {}
+    # A split parent can split its children in turn, so repeat until nothing
+    # moves; keys only ever get more specific, so this ends.
+    for _guard in range(32):
+        groups = {}
+        for a in ordered:
+            pk = keys.get(a.parent_account) if a.parent_account in by_name else None
+            groups.setdefault(keys[a.name], {}).setdefault(pk, []).append(a)
+        moved = False
+        for k, by_parent in groups.items():
+            if len(by_parent) < 2:
+                continue
+            moved = True
+            keep = max(by_parent, key=lambda pk: len(by_parent[pk]))   # first-seen on ties
+            for pk, accs in by_parent.items():
+                if pk == keep:
+                    continue
+                nk = f"{k}{KEY_SEP}{pk or ''}"
+                apart[nk] = pk
+                for a in accs:
+                    keys[a.name] = nk
+        if not moved:
+            break
+    return keys, apart
+
+
 def _build_by_account(filters, companies):
     multi = len(companies) > 1
     accounts = _account_master(companies)
@@ -715,9 +786,13 @@ def _build_by_account(filters, companies):
 
     # Fold per-company accounts onto their merge key.
     by_name = {a.name: a for a in accounts}
+    if multi:
+        keys, apart = _merge_keys(accounts, companies)
+    else:
+        keys, apart = {a.name: a.name for a in accounts}, {}
     nodes = {}
     for acc in accounts:
-        k = _merge_key(acc, multi)
+        k = keys[acc.name]
         node = nodes.get(k)
         if not node:
             node = nodes[k] = {
@@ -737,7 +812,9 @@ def _build_by_account(filters, companies):
         if acc.parent_account:
             parent = by_name.get(acc.parent_account)
             if parent:
-                node["parent_key"] = _merge_key(parent, multi)
+                # Every member of a row shares its parent: _merge_keys splits
+                # the ones that do not.
+                node["parent_key"] = keys[parent.name]
 
         v = values.get((acc.name,))
         if v:
@@ -758,6 +835,16 @@ def _build_by_account(filters, companies):
         if pk and pk in nodes and pk != node["key"]:
             for f in VALUE_FIELDS:
                 nodes[pk][f] += flt(node[f])
+
+    # A row split off by placement says where it sits, or two rows of one name
+    # read as a duplicate once group accounts are hidden.
+    for k, pk in apart.items():
+        node = nodes.get(k)
+        if node:
+            parent = nodes.get(pk)
+            node["account_name"] = (
+                _("{0} (under {1})").format(node["account_name"], parent["account_name"])
+                if parent else _("{0} (at the top)").format(node["account_name"]))
 
     show_net = filters.get("show_net_values")
     rows = []
