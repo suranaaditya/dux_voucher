@@ -1002,5 +1002,122 @@ class TestAccountPartyCompany(unittest.TestCase):
         self.assertFalse([r for r in body if "company" in r])
 
 
+class TestCompanyColumnsExcel(unittest.TestCase):
+
+    def _export(self, figure="closing", resolved=("A", "B"), values=None,
+                selection='["Trust"]', view="By Account", rows=None):
+        import io
+        from openpyxl import load_workbook
+        if rows is None:
+            rows, _f = TestCompanyColumns()._build(values)
+        cols = tb._columns_for(frappe._dict(view=view), ["A", "B"])
+
+        def engine(f):
+            f._company_columns = True
+            f._resolved_companies = list(resolved)
+            return cols, rows, "", None, None
+
+        f = (F.replace('["College A"]', selection).replace('"By Account"', f'"{view}"')[:-1]
+             + f', "company_figure": "{figure}"}}')
+        with mock.patch(ENGINE, side_effect=engine):
+            reports_export.export_trial_balance_xlsx(filters=f)
+        self.filename = frappe.local.response.filename
+        return load_workbook(io.BytesIO(frappe.local.response.filecontent))
+
+    def _find(self, ws, label):
+        return next(r for r in range(6, ws.max_row + 1) if ws.cell(row=r, column=1).value == label)
+
+    def test_a_sheet_per_figure_and_the_consolidated_one(self):
+        wb = self._export()
+        self.assertEqual(wb.sheetnames, ["Closing", "Opening", "Debit", "Credit", "Consolidated"])
+        ws = wb["Closing"]
+        # The consolidated Total beside the names and frozen with them, so it
+        # stays in view however many companies scroll past to its right.
+        self.assertEqual([ws.cell(row=5, column=i).value for i in range(1, 5)],
+                         ["Account", "Total", "A", "B"])
+        self.assertEqual(ws.freeze_panes, "C6")
+        r = self._find(ws, "Cash")
+        self.assertEqual([ws.cell(row=r, column=i).value for i in range(2, 5)], [90, 130, -40])
+        self.assertEqual(ws.cell(row=r, column=3).number_format, reports_export.NUM_FMT_SIGNED)
+        t = self._find(ws, "Difference")
+        self.assertEqual([ws.cell(row=t, column=i).value for i in range(2, 5)], [None, None, None])
+        self.assertIn("each of the 2 companies ties", ws["A3"].value)
+        self.assertTrue(self.filename.startswith("Trial Balance by Company - Trust - "))
+        cons = wb["Consolidated"]
+        self.assertEqual(cons.cell(row=5, column=2).value, "Opening (Dr)")
+
+    def test_debit_and_credit_are_plain_sums(self):
+        ws = self._export()["Debit"]
+        t = self._find(ws, "Total")
+        self.assertEqual([ws.cell(row=t, column=i).value for i in range(2, 5)], [70, 70, None])
+
+    def test_two_companies_out_by_opposite_amounts_are_named(self):
+        # A is 10 Dr out and B 10 Cr: the consolidated ties, the companies do not.
+        values = dict(TestCompanyColumns.VALUES)
+        values[("Capital - A",)] = _v(oc=120, d=20, c=50)
+        values[("Capital - B",)] = _v(od=20)
+        wb = self._export(values=values)
+        ws = wb["Closing"]
+        self.assertIn("Balanced", ws["A3"].value)
+        self.assertIn("2 of the 2 companies do not tie on their own (see the Difference row)",
+                      ws["A3"].value)
+        t = self._find(ws, "Difference")
+        self.assertEqual([ws.cell(row=t, column=i).value for i in range(2, 5)], [None, 10, -10])
+        # counted on the closing, so the other sheets point there
+        self.assertIn("(see the Closing sheet)", wb["Debit"]["A3"].value)
+        self.assertIn("(see the Closing sheet)", wb["Consolidated"]["A3"].value)
+
+    def test_a_company_with_nothing_is_named_not_given_a_column(self):
+        ws = self._export(resolved=("A", "B", "C"))["Closing"]
+        self.assertEqual([ws.cell(row=5, column=i).value for i in range(1, 6)],
+                         ["Account", "Total", "A", "B", None])
+        notes = [str(ws.cell(row=r, column=1).value or "") for r in range(1, ws.max_row + 1)]
+        self.assertIn("Not shown, with nothing in this run: C", notes)
+
+    def test_it_opens_on_the_figure_on_screen_and_only_that_sheet(self):
+        wb = self._export("opening")
+        self.assertEqual(wb.active.title, "Opening")
+        self.assertEqual([ws.sheet_view.tabSelected for ws in wb.worksheets],
+                         [False, True, False, False, False])
+
+    def test_a_trust_beside_a_college_counts_its_colleges(self):
+        # Two entries picked, three companies run: the title and the file
+        # name count the companies, as the columns do.
+        wb = self._export(resolved=("A", "B", "C"), selection='["Trust", "C"]')
+        self.assertEqual(wb["Closing"]["A1"].value, "3 companies")
+        self.assertEqual(wb["Consolidated"]["A1"].value, "3 companies")
+        self.assertTrue(self.filename.startswith("Trial Balance by Company - 3-companies - "))
+
+    def test_another_figures_sheet_reads_its_status_at_the_close(self):
+        wb = self._export()
+        self.assertTrue(wb["Closing"]["A3"].value.startswith("Balanced — debit equals credit"))
+        for sheet in ("Opening", "Debit", "Credit"):
+            self.assertTrue(wb[sheet]["A3"].value.startswith(
+                "Balanced at the close — debit equals credit"), wb[sheet]["A3"].value)
+        self.assertTrue(wb["Consolidated"]["A3"].value.startswith(
+            "Balanced — debit equals credit"))
+
+    def test_by_party_reads_as_a_net_of_parties(self):
+        rows, _sl = TestCompanyColumnsByParty()._build()
+        wb = self._export(view="By Party", rows=rows)
+        ws = wb["Closing"]
+        self.assertEqual(ws.cell(row=5, column=1).value, "Party")
+        # where the parties stand, and nothing about ties or companies
+        self.assertRegex(ws["A3"].value, r"^Net of all parties: \D*30\.00 Dr$")
+        self.assertRegex(wb["Opening"]["A3"].value, r"^Net of all parties at the close: \D*30\.00 Dr$")
+        # C1 is 100 Dr at A and 30 Cr at B; S1 40 Cr at A
+        t = self._find(ws, "Net of parties")
+        self.assertEqual([ws.cell(row=t, column=i).value for i in range(2, 5)], [30, 60, -30])
+        self.assertGreater(self._find(wb["Debit"], "Total"), 5)   # movement: plain sums
+
+    def test_a_selection_that_comes_to_one_company_names_it(self):
+        # A trust and its only college are one company: named, as one picked
+        # alone is, not "1 companies".
+        wb = self._export(resolved=("A",), selection='["Trust", "A"]')
+        self.assertEqual(wb.sheetnames, ["Trial Balance"])
+        self.assertEqual(wb.active["A1"].value, "A")
+        self.assertTrue(self.filename.startswith("Trial Balance - A - "), self.filename)
+
+
 if __name__ == "__main__":
     unittest.main()

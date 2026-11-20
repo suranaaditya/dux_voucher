@@ -654,6 +654,19 @@ TB_GRP_L1 = "F1F5F9"   # sub-groups  — Current Assets, and so on
 TB_COMPUTED = "FDF3E5"  # the carry-forward row, which is not a real account
 
 
+# The figures a company-columns workbook gives a sheet each, in this order.
+TB_FIGURES = (("closing", "Closing"), ("opening", "Opening"),
+              ("debit", "Debit"), ("credit", "Credit"))
+TB_VALUES = ("opening_debit", "opening_credit", "debit", "credit",
+             "closing_debit", "closing_credit")
+
+# A company's opening or closing as one signed figure, debit positive. The
+# suffix says which side it is on, and a SUM down or across still nets. Nil
+# cells are left empty; the third section keeps a zero a formula arrives at
+# from reading "0.00 Dr".
+NUM_FMT_SIGNED = '##,##,##0.00" Dr";##,##,##0.00" Cr";"—"'
+
+
 @frappe.whitelist()
 def export_trial_balance_xlsx(filters=None):
     """Stream the Dux Trial Balance as a formatted workbook.
@@ -664,6 +677,11 @@ def export_trial_balance_xlsx(filters=None):
     The hierarchy is carried by real Excel indent (``alignment.indent``)
     rather than leading spaces, so the account column stays sortable and
     filterable in Excel and the tree survives a re-sort.
+
+    With company columns on, there is a sheet per figure (Closing, Opening,
+    Debit, Credit), each with a column per company beside the consolidated
+    Total, and the six-column consolidated sheet after them. The workbook
+    opens on the figure that was on screen (``company_figure``).
     """
     import json as _json
     from dux_voucher.dux_voucher.report.dux_trial_balance.dux_trial_balance import (
@@ -675,10 +693,6 @@ def export_trial_balance_xlsx(filters=None):
 
     columns, rows, message, _chart, _summary = tb_execute(f)
 
-    wb = Workbook()
-    ws = wb.active
-    ws.title = _("Trial Balance")
-
     companies = f.get("company") or []
     if isinstance(companies, str):
         companies = [companies]
@@ -688,33 +702,117 @@ def export_trial_balance_xlsx(filters=None):
     label_first = (_("Party") if view == "By Party"
                    else columns[0]["label"] if columns else _("Account"))
 
-    # ── title block ──────────────────────────────────────────────────
-    ws["A1"] = (companies[0] if len(companies) == 1
-                else _("{0} companies").format(len(companies)))
+    wb = Workbook()
+    resolved = f.get("_resolved_companies") or []
+    if f.get("_company_columns") and len(resolved) > 1:
+        wanted = f.get("company_figure") or "closing"
+        active = 0
+        for i, (fig, label) in enumerate(TB_FIGURES):
+            ws = wb.active if i == 0 else wb.create_sheet()
+            ws.title = _(label)
+            _tb_company_sheet(ws, f, rows, view, label_first, companies, resolved,
+                              fig, _(label))
+            if fig == wanted:
+                active = i
+        _tb_sheet(wb.create_sheet(_("Consolidated")), f, rows, view, label_first,
+                  companies)
+        # Opened on any sheet but the first, the first stays selected too
+        # unless told otherwise, and Excel opens the two grouped: an edit on
+        # one is made on both.
+        wb.active = active
+        for i, ws in enumerate(wb.worksheets):
+            ws.sheet_view.tabSelected = i == active
+    else:
+        ws = wb.active
+        ws.title = _("Trial Balance")
+        _tb_sheet(ws, f, rows, view, label_first, companies)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    stamp = frappe.utils.formatdate(f.get("to_date"), "yyyy-MM-dd")
+    who, count = _tb_who(f, companies)
+    name = who.split(" ")[0] if who else f"{count}-companies"
+    kind = ("Trial Balance by Company" if f.get("_company_columns") and len(resolved) > 1
+            else "Trial Balance")
+    frappe.local.response.filename = f"{kind} - {name} - {stamp}.xlsx"
+    frappe.local.response.filecontent = buf.getvalue()
+    frappe.local.response.type = "binary"
+
+
+def _tb_who(f, companies):
+    """Who a workbook is for: ``(name, None)`` for one company or trust, or
+    ``(None, how many companies)``.
+
+    A selection of several counts what it stands for: a trust picked beside a
+    college counts its own colleges, not one, and two entries that come to a
+    single company (a trust and its only college) name that company."""
+    if len(companies) == 1:
+        return companies[0], None
+    resolved = f.get("_resolved_companies") or []
+    if len(resolved) == 1:
+        return resolved[0], None
+    return None, len(resolved) or len(companies)
+
+
+def _tb_title(ws, f, rows, view, companies, figure=None, fig=None):
+    """Rows 1-4: who, what and when, whether it ties, and any computed note.
+
+    ``figure`` / ``fig`` name the one figure of a sheet with a column per
+    company (its label, and "closing" / "opening" / "debit" / "credit")."""
+    who, count = _tb_who(f, companies)
+    ws["A1"] = who or _("{0} companies").format(count)
     ws["A1"].font = Font(bold=True, size=14, color=NAVY)
-    ws["A2"] = "{0}  ·  {1} → {2}".format(
+    ws["A2"] = "{0}  ·  {1} → {2}{3}".format(
         view, frappe.utils.formatdate(f.get("from_date"), "dd MMM yyyy"),
-        frappe.utils.formatdate(f.get("to_date"), "dd MMM yyyy"))
+        frappe.utils.formatdate(f.get("to_date"), "dd MMM yyyy"),
+        ("  ·  " + _("{0}, company by company").format(figure)) if figure else "")
     ws["A2"].font = Font(size=10, color=GRAY_TXT)
 
     total = next((r for r in rows if r.get("is_total")), None)
     if total:
         diff = flt(total.get("closing_debit")) - flt(total.get("closing_credit"))
         tied = abs(diff) < 0.005
+        # The status is read from the closing. A sheet of another figure (the
+        # opening, the period's debits) says so, or its figure reads as tied.
+        close = bool(fig) and fig != "closing"
         if view == "By Party":
             # Most of a ledger has no party, so a list of parties never ties:
             # its total is where the parties stand on balance, not an error.
-            ws["A3"] = _("Net of all parties: {0}").format(
+            ws["A3"] = (_("Net of all parties at the close: {0}") if close
+                        else _("Net of all parties: {0}")).format(
                 _("nil") if tied else "{0} {1}".format(
                     frappe.format_value(abs(diff), {"fieldtype": "Currency"}),
                     "Dr" if diff > 0 else "Cr"))
             ws["A3"].font = Font(size=10, bold=True, color=GRAY_TXT)
         else:
-            ws["A3"] = (_("Balanced — debit equals credit") if tied
-                        else _("Out of balance by {0}").format(
-                            frappe.format_value(diff, {"fieldtype": "Currency"})))
-            ws["A3"].font = Font(size=10, bold=True,
-                                 color=CR_GREEN if tied else DR_RED)
+            amount = frappe.format_value(diff, {"fieldtype": "Currency"})
+            if close:
+                ws["A3"] = (_("Balanced at the close — debit equals credit") if tied
+                            else _("Out of balance at the close by {0}").format(amount))
+            else:
+                ws["A3"] = (_("Balanced — debit equals credit") if tied
+                            else _("Out of balance by {0}").format(amount))
+            colour = CR_GREEN if tied else DR_RED
+            # With a column per company, the consolidated tie can hide two
+            # companies out by opposite amounts: say how many tie on their own.
+            resolved = f.get("_resolved_companies") or []
+            if f.get("_company_columns") and len(resolved) > 1 and total.get("cv"):
+                out = sum(1 for c in total["cv"]
+                          if c and abs(flt(c[4]) - flt(c[5])) >= 0.005)
+                if not out:
+                    ws["A3"] = ws["A3"].value + _(
+                        ", and each of the {0} companies ties").format(len(resolved))
+                else:
+                    # Counted on the closing: shown on the Closing sheet's
+                    # Difference row, and only there.
+                    see = (_("see the Difference row") if fig == "closing"
+                           else _("see the Closing sheet"))
+                    ws["A3"] = ws["A3"].value + _(
+                        "; {0} of the {1} companies do not tie on their own "
+                        "({2})").format(out, len(resolved), see)
+                    if tied:
+                        colour = "A65A00"
+            ws["A3"].font = Font(size=10, bold=True, color=colour)
 
     # By Company folds each company's prior-year P&L into its own opening and
     # closing. The page and the classic report say so; the file must too, or
@@ -723,6 +821,43 @@ def export_trial_balance_xlsx(filters=None):
         ws["A4"] = _("Opening and closing include each company's prior-year "
                      "profit or loss, never closed to reserves (computed).")
         ws["A4"].font = Font(size=9, italic=True, color=GRAY_TXT)
+
+
+def _tb_label(ws, r, row):
+    """Column A of a body row: the name, indented to its depth, shaded as a
+    group or as the computed carry. Returns the row's fill and boldness."""
+    label = (row.get("account_name") or row.get("party_name")
+             or row.get("company") or row.get("party") or "")
+    indent = min(int(row.get("indent") or 0), 14)
+    is_grp = bool(row.get("is_group_account"))
+    lvl = int(row.get("indent") or 0)
+
+    c = ws.cell(row=r, column=1, value=label)
+    c.alignment = Alignment(indent=indent, vertical="center")
+    if row.get("is_computed"):
+        c.font = Font(size=10, italic=True, color=GRAY_TXT)
+    elif is_grp:
+        c.font = Font(bold=True, size=10 if lvl else 11, color=NAVY)
+    else:
+        c.font = Font(size=10)
+
+    fill = None
+    if row.get("is_computed"):
+        fill = PatternFill("solid", fgColor=TB_COMPUTED)
+    elif is_grp and lvl == 0:
+        fill = PatternFill("solid", fgColor=TB_GRP_L0)
+    elif is_grp and lvl == 1:
+        fill = PatternFill("solid", fgColor=TB_GRP_L1)
+    c.border = Border(bottom=HAIR)
+    if fill:
+        c.fill = fill
+    return fill, is_grp
+
+
+def _tb_sheet(ws, f, rows, view, label_first, companies):
+    """The six-column trial balance: opening, period and closing, each Dr / Cr."""
+    _tb_title(ws, f, rows, view, companies)
+    total = next((r for r in rows if r.get("is_total")), None)
 
     HEAD_ROW = 5
     headers = [label_first, _("Opening (Dr)"), _("Opening (Cr)"), _("Debit"),
@@ -741,34 +876,8 @@ def export_trial_balance_xlsx(filters=None):
     for row in rows:
         if row.get("is_total"):
             continue
-
-        label = (row.get("account_name") or row.get("party_name")
-                 or row.get("company") or row.get("party") or "")
-        indent = min(int(row.get("indent") or 0), 14)
-        is_grp = bool(row.get("is_group_account"))
-        lvl = int(row.get("indent") or 0)
-
-        c = ws.cell(row=r, column=1, value=label)
-        c.alignment = Alignment(indent=indent, vertical="center")
-        if row.get("is_computed"):
-            c.font = Font(size=10, italic=True, color=GRAY_TXT)
-        elif is_grp:
-            c.font = Font(bold=True, size=10 if lvl else 11, color=NAVY)
-        else:
-            c.font = Font(size=10)
-
-        fill = None
-        if row.get("is_computed"):
-            fill = PatternFill("solid", fgColor=TB_COMPUTED)
-        elif is_grp and lvl == 0:
-            fill = PatternFill("solid", fgColor=TB_GRP_L0)
-        elif is_grp and lvl == 1:
-            fill = PatternFill("solid", fgColor=TB_GRP_L1)
-
-        vals = [row.get("opening_debit"), row.get("opening_credit"),
-                row.get("debit"), row.get("credit"),
-                row.get("closing_debit"), row.get("closing_credit")]
-        for i, v in enumerate(vals, start=2):
+        fill, is_grp = _tb_label(ws, r, row)
+        for i, v in enumerate((row.get(k) for k in TB_VALUES), start=2):
             cc = ws.cell(row=r, column=i, value=flt(v) or None)
             cc.number_format = (NUM_FMT_DR if i == 6
                                 else NUM_FMT_CR if i == 7 else NUM_FMT)
@@ -778,9 +887,6 @@ def export_trial_balance_xlsx(filters=None):
             cc.border = Border(bottom=HAIR)
             if fill:
                 cc.fill = fill
-        c.border = Border(bottom=HAIR)
-        if fill:
-            c.fill = fill
         r += 1
 
     # ── total ────────────────────────────────────────────────────────
@@ -789,10 +895,7 @@ def export_trial_balance_xlsx(filters=None):
         c.font = Font(bold=True, size=11, color=NAVY)
         c.fill = PatternFill("solid", fgColor=TOT_BG)
         c.border = Border(top=TOTAL_TOP)
-        vals = [total.get("opening_debit"), total.get("opening_credit"),
-                total.get("debit"), total.get("credit"),
-                total.get("closing_debit"), total.get("closing_credit")]
-        for i, v in enumerate(vals, start=2):
+        for i, v in enumerate((total.get(k) for k in TB_VALUES), start=2):
             cc = ws.cell(row=r, column=i, value=flt(v) or None)
             cc.number_format = (NUM_FMT_DR if i == 6
                                 else NUM_FMT_CR if i == 7 else NUM_FMT)
@@ -814,11 +917,120 @@ def export_trial_balance_xlsx(filters=None):
     ws.sheet_properties.pageSetUpPr.fitToPage = True
     ws.print_title_rows = f"{HEAD_ROW}:{HEAD_ROW}"
 
-    buf = io.BytesIO()
-    wb.save(buf)
-    stamp = frappe.utils.formatdate(f.get("to_date"), "yyyy-MM-dd")
-    name = (companies[0].split(" ")[0] if len(companies) == 1
-            else f"{len(companies)}-companies")
-    frappe.local.response.filename = f"Trial Balance - {name} - {stamp}.xlsx"
-    frappe.local.response.filecontent = buf.getvalue()
-    frappe.local.response.type = "binary"
+
+def _tb_figure(vals, fig):
+    """One figure from the six values: opening or closing signed debit
+    positive, debit or credit as it is."""
+    od, oc, d, c, cd, cc = (flt(x) for x in vals)
+    return {"opening": od - oc, "debit": d, "credit": c}.get(fig, cd - cc)
+
+
+def _tb_num(cell, v, signed, bold=False, size=10, fill=None, border=None):
+    v = round(flt(v), 2)
+    cell.value = v if abs(v) >= 0.005 else None
+    cell.number_format = NUM_FMT_SIGNED if signed else NUM_FMT
+    cell.alignment = Alignment(horizontal="right")
+    color = ((DR_RED if v > 0 else CR_GREEN) if signed and cell.value is not None
+             else NAVY if size > 10 else "000000")
+    cell.font = Font(size=size, bold=bold, color=color)
+    cell.border = border or Border(bottom=HAIR)
+    if fill:
+        cell.fill = fill
+
+
+def _tb_company_sheet(ws, f, rows, view, label_first, companies, resolved, fig, figure):
+    """One figure: the consolidated Total, then a column per company.
+
+    Total sits in column B, frozen with the names, so the consolidated figure
+    stays in view however many colleges scroll past to its right. A company
+    with nothing anywhere in the run is left out and named under the table."""
+    _tb_title(ws, f, rows, view, companies, figure=figure, fig=fig)
+    total = next((r for r in rows if r.get("is_total")), None)
+    n = len(resolved)
+    has = [False] * n
+    for row in rows:
+        for i, c in enumerate((row.get("cv") or [])[:n]):
+            if c:
+                has[i] = True
+    shown = [i for i in range(n) if has[i]]
+    signed = fig in ("opening", "closing")
+    by_party = view == "By Party"
+
+    HEAD_ROW = 5
+    names = [resolved[i] for i in shown]
+    for i, h in enumerate([label_first, _("Total"), *names], start=1):
+        c = ws.cell(row=HEAD_ROW, column=i, value=h)
+        c.font = Font(bold=True, size=10, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor=HEADER_BG)
+        c.alignment = Alignment(horizontal="right" if i > 1 else "left",
+                                vertical="center", wrap_text=True)
+        c.border = Border(bottom=THIN)
+    # Company names wrap in a 16-wide column: give the longest room.
+    lines = max([1] + [-(-len(nm) // 15) for nm in names])
+    ws.row_dimensions[HEAD_ROW].height = min(100, max(22, 13 * lines + 6))
+
+    def figures(row):
+        cv = list(row.get("cv") or [])[:n]
+        cv += [None] * (n - len(cv))
+        return ([_tb_figure([row.get(k) for k in TB_VALUES], fig)]
+                + [_tb_figure(cv[i], fig) if cv[i] else None for i in shown])
+
+    split = Side(style="thin", color="CBD5E1")
+    r = HEAD_ROW + 1
+    for row in rows:
+        if row.get("is_total"):
+            continue
+        fill, is_grp = _tb_label(ws, r, row)
+        for i, v in enumerate(figures(row), start=2):
+            tot_col = i == 2
+            if v is None and not fill and not tot_col:
+                continue   # a company with nothing here: an empty cell says so
+            _tb_num(ws.cell(row=r, column=i), v, signed, bold=is_grp or tot_col, fill=fill,
+                    border=Border(bottom=HAIR, right=split if tot_col else None))
+        r += 1
+
+    if total:
+        # What the bottom row is: a company's difference (nil when it ties) by
+        # account, where its parties stand by party, plain sums for movement.
+        label = (_("Net of parties") if signed and by_party
+                 else _("Difference") if signed else _("Total"))
+        c = ws.cell(row=r, column=1, value=label)
+        c.font = Font(bold=True, size=11, color=NAVY)
+        c.fill = PatternFill("solid", fgColor=TOT_BG)
+        c.border = Border(top=TOTAL_TOP)
+        for i, v in enumerate(figures(total), start=2):
+            _tb_num(ws.cell(row=r, column=i), v, signed, bold=True, size=11,
+                    fill=PatternFill("solid", fgColor=TOT_BG),
+                    border=Border(top=TOTAL_TOP, right=split if i == 2 else None))
+        notes = []
+        if signed and by_party:
+            notes.append(_("Net of parties: where each company's parties stand on balance. "
+                           "Most of a ledger has no party, so this is not a tie check."))
+        elif signed:
+            notes.append(_("Difference: each company's debit less its credit, nil when that "
+                           "company's books tie. Total is the consolidated difference."))
+        hidden = [resolved[i] for i in range(n) if not has[i]]
+        if hidden:
+            notes.append(_("Not shown, with nothing in this run: {0}").format(", ".join(hidden)))
+        for k, text in enumerate(notes):
+            note = ws.cell(row=r + 2 + k, column=1, value=text)
+            note.font = Font(size=9, italic=True, color=GRAY_TXT)
+
+    last_col = len(shown) + 2
+    ws.column_dimensions["A"].width = 52
+    ws.column_dimensions["B"].width = 18
+    for i in range(3, last_col + 1):
+        ws.column_dimensions[get_column_letter(i)].width = 16
+    ws.freeze_panes = ws.cell(row=HEAD_ROW + 1, column=3)
+    ws.sheet_view.showGridLines = False
+    ws.auto_filter.ref = f"A{HEAD_ROW}:{get_column_letter(last_col)}{max(r, HEAD_ROW + 1)}"
+    ws.page_setup.orientation = "landscape"
+    ws.print_title_rows = f"{HEAD_ROW}:{HEAD_ROW}"
+    if len(shown) <= 8:
+        ws.page_setup.fitToWidth = 1
+        ws.page_setup.fitToHeight = 0
+        ws.sheet_properties.pageSetUpPr.fitToPage = True
+    else:
+        # Too many colleges for one page across: print across pages and
+        # repeat the names and the Total on each.
+        ws.print_title_cols = "A:B"
