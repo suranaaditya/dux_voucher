@@ -969,5 +969,38 @@ class TestCompanyColumnsApi(unittest.TestCase):
         sql.assert_called_once()
 
 
+class TestAccountPartyCompany(unittest.TestCase):
+    """Account -> Party lists each company's own accounts, and a row says whose:
+    a drill across companies opens that company's ledger, not the run's first,
+    without a lookup on Account the reader may not be allowed."""
+
+    def test_each_account_row_names_its_company(self):
+        master = _master(("Cash - A", "A", "Cash", None, "Asset", 0),
+                         ("Creditors - B", "B", "Creditors", None, "Liability", 0, "Payable"))
+        values = {
+            ("Cash - A", None, None): _v(od=10),
+            ("Creditors - B", "Supplier", "S1"): _v(oc=7),
+            ("Creditors - B", None, None): _v(oc=3),
+        }
+        with mock.patch.object(tb, "_slice", return_value=values), \
+                mock.patch.object(tb, "_account_master", return_value=master), \
+                mock.patch.object(tb, "_default_party_accounts", return_value={}), \
+                mock.patch.object(tb, "_resolve_party_names", return_value={}), \
+                mock.patch.object(tb, "_company_currency", return_value="INR"), \
+                mock.patch.object(tb, "_unclosed_pl_net", return_value=0.0):
+            rows = tb._build_account_party(_filters("Account -> Party"), ["A", "B"])
+        body = [r for r in rows if not r.get("is_total")]
+        accounts = {r["account"]: r for r in body if not r.get("parent_account")}
+        self.assertEqual({a: r["account_company"] for a, r in accounts.items()},
+                         {"Cash - A": "A", "Creditors - B": "B"})
+        # The party and the Unattributed row under it reach it by their account.
+        kids = [r for r in body if r.get("parent_account")]
+        self.assertEqual(sorted(bool(r["is_unattributed"]) for r in kids), [False, True])
+        for r in kids:
+            self.assertEqual(accounts[r["parent_account"]]["account_company"], "B")
+        # Not "company": the page's row filter searches that.
+        self.assertFalse([r for r in body if "company" in r])
+
+
 if __name__ == "__main__":
     unittest.main()

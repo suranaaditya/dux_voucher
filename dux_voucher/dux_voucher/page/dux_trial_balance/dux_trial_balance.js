@@ -209,6 +209,8 @@ table.tb tbody tr:hover td{background:var(--tb-sunken);}
 .tb-caret.leaf{visibility:hidden;}
 .tb-lbl{cursor:pointer;}
 .tb-lbl:hover{color:var(--tb-accent);text-decoration:underline;}
+tr.inert .tb-lbl{cursor:default;}
+tr.inert .tb-lbl:hover{color:inherit;text-decoration:none;}
 tr.grp > td{font-weight:650;}
 tr.lvl0 > td:first-child{font-weight:700;}
 tr.total > td{border-top:2px solid var(--tb-line);border-bottom:0;
@@ -1274,7 +1276,10 @@ tr.tb-cap a{font-style:normal;font-weight:600;cursor:pointer;}
 		const type = p.party_type
 			? `<span class="tb-ptype">${frappe.utils.escape_html(p.party_type)}</span>`
 			: "";
-		return `<tr class="party" data-party="1" data-acct="${frappe.utils.escape_html(
+		// With a column per company a party opens through its own figures:
+		// on none of them (Zero rows), it opens nothing and is no link.
+		const inert = this._coMode() && !(p.cv || []).some(Boolean);
+		return `<tr class="party${inert ? " inert" : ""}" data-party="1" data-acct="${frappe.utils.escape_html(
 			acct || ""
 		)}" data-pt="${frappe.utils.escape_html(
 			p.party_type || ""
@@ -1354,10 +1359,16 @@ tr.tb-cap a{font-style:normal;font-weight:600;cursor:pointer;}
 				if (r.is_unattributed) name = `<span class="tb-unatt">${name}</span>`;
 				if (r.mismatch) name += `<span class="tb-flag">${__("wrong party type")}</span>`;
 
+				// With a column per company a row opens through its companies'
+				// figures, so one that none of them has a figure on (Zero rows)
+				// opens nothing.
+				const noFigure = coMode && !(r.cv || []).some(Boolean);
 				const cls = [
 					r.is_group_account ? "grp" : "",
 					(r.indent || 0) === 0 ? "lvl0" : "",
 					r.is_computed ? "computed" : "",
+					// A name that opens nothing does not look like a link.
+					isCo || r.is_group_account || r.is_computed || noFigure ? "inert" : "",
 				]
 					.filter(Boolean)
 					.join(" ");
@@ -1558,30 +1569,20 @@ tr.tb-cap a{font-style:normal;font-weight:600;cursor:pointer;}
 			});
 			return;
 		}
-		if (!party) {
-			// The Unattributed row has no party to open; the account ledger
-			// is the honest destination, since that is where it lives.
-			if (!acct) return;
-			this._openLedger("dux-ledger", {
-				company: (this.data.companies || [])[0],
-				account: acct,
-				from_date: f.from_date,
-				to_date: f.to_date,
-			});
-			return;
-		}
-		// The account tells us its company, which matters once a trust is
-		// selected and the row merged several companies together.
-		frappe.db.get_value("Account", acct, "company").then((r) => {
-			this._openLedger("dux-party-ledger", {
-				company: (r && r.message && r.message.company) || (this.data.companies || [])[0],
-				party: party,
-				party_type: party_type,
-				account: acct,
-				from_date: f.from_date,
-				to_date: f.to_date,
-			});
-		});
+		if (!acct) return;
+		// The account opened is the control row's first, and its company is
+		// the row's first: across a trust, a control account held by one
+		// college is that college's, not the run's first.
+		const base = {
+			company: ((r && r.member_companies) || [])[0] || (this.data.companies || [])[0],
+			account: acct,
+			from_date: f.from_date,
+			to_date: f.to_date,
+		};
+		// The Unattributed row has no party to open; the account ledger
+		// is the honest destination, since that is where it lives.
+		if (!party) return this._openLedger("dux-ledger", base);
+		this._openLedger("dux-party-ledger", { ...base, party: party, party_type: party_type });
 	}
 
 	_drill(idx) {
@@ -1623,22 +1624,34 @@ tr.tb-cap a{font-style:normal;font-weight:600;cursor:pointer;}
 			});
 			return;
 		}
-		frappe.route_options = {
-			company: r.company || (this.data.companies || [])[0],
+		if (r.is_group_account) return;
+		// A company's row is its whole ledger: no one account to open, and a
+		// Ledger Statement without one loads nothing.
+		if (view === "By Company") return;
+		// Real accounts from here: one company's run, or Account → Party,
+		// which lists each company's own accounts. A party opens under its
+		// control account, and Unattributed is that account's own ledger:
+		// its row key names no account.
+		const acct = r.party || r.is_unattributed ? r.parent_account : r.account;
+		// Account → Party names each account's company on the account's row,
+		// and the parties under it are in that company too.
+		const holder = acct && (this.data.rows || []).find((x) => x.account === acct);
+		const base = {
+			company: (holder && holder.account_company) || cos[0],
 			from_date: f.from_date,
 			to_date: f.to_date,
 		};
-		const base = frappe.route_options;
-		if (r.party) {
-			this._openLedger("dux-party-ledger", {
-				...base,
-				party: r.party,
-				party_type: r.party_type,
-				account: r.parent_account || r.account,
-			});
-		} else if (!r.is_group_account) {
-			this._openLedger("dux-ledger", { ...base, account: r.account });
-		}
+		// The ledger pages read the query string: a drill leaves no route
+		// options behind to filter whatever this tab opens next.
+		if (!r.party) return this._openLedger("dux-ledger", { ...base, account: acct });
+		// By Party names no account, and the Party Ledger needs one.
+		if (!acct) return this._openParty(base, r);
+		this._openLedger("dux-party-ledger", {
+			...base,
+			party: r.party,
+			party_type: r.party_type,
+			account: acct,
+		});
 	}
 
 	/* One company's ledger for a row, from that company's column. */

@@ -1428,6 +1428,11 @@ def _build_account_party(filters, companies):
             "indent": 0,
             "is_group_account": 0,
             "account_type": meta.account_type if meta else None,
+            # Whose account it is, so a drill across companies opens that
+            # company's ledger, for the parties under it too. Not "company":
+            # the page's row filter searches that, and every row of a college
+            # would match its name.
+            "account_company": meta.company if meta else None,
             "currency": currency,
         })
         parent_row["has_value"] = _has_value(parent_row)
