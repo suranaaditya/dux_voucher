@@ -761,6 +761,7 @@ def _tb_title(ws, f, rows, view, companies, figure=None, fig=None):
     company (its label, and "closing" / "opening" / "debit" / "credit")."""
     who, count = _tb_who(f, companies)
     ws["A1"] = who or _("{0} companies").format(count)
+    _tb_text(ws["A1"])
     ws["A1"].font = Font(bold=True, size=14, color=NAVY)
     ws["A2"] = "{0}  ·  {1} → {2}{3}".format(
         view, frappe.utils.formatdate(f.get("from_date"), "dd MMM yyyy"),
@@ -823,6 +824,15 @@ def _tb_title(ws, f, rows, view, companies, figure=None, fig=None):
         ws["A4"].font = Font(size=9, italic=True, color=GRAY_TXT)
 
 
+def _tb_text(cell):
+    """Keep a name as text. openpyxl stores any string starting with "=" as a
+    formula, so a party named "=1+1" would open in Excel as 2, and a name
+    built to look like a formula would run as one."""
+    if isinstance(cell.value, str) and cell.value.startswith("="):
+        cell.data_type = "s"
+    return cell
+
+
 def _tb_label(ws, r, row):
     """Column A of a body row: the name, indented to its depth, shaded as a
     group or as the computed carry. Returns the row's fill and boldness."""
@@ -832,7 +842,7 @@ def _tb_label(ws, r, row):
     is_grp = bool(row.get("is_group_account"))
     lvl = int(row.get("indent") or 0)
 
-    c = ws.cell(row=r, column=1, value=label)
+    c = _tb_text(ws.cell(row=r, column=1, value=label))
     c.alignment = Alignment(indent=indent, vertical="center")
     if row.get("is_computed"):
         c.font = Font(size=10, italic=True, color=GRAY_TXT)
@@ -962,7 +972,7 @@ def _tb_company_sheet(ws, f, rows, view, label_first, companies, resolved, fig, 
     HEAD_ROW = 5
     names = [resolved[i] for i in shown]
     for i, h in enumerate([label_first, _("Total"), *names], start=1):
-        c = ws.cell(row=HEAD_ROW, column=i, value=h)
+        c = _tb_text(ws.cell(row=HEAD_ROW, column=i, value=h))
         c.font = Font(bold=True, size=10, color="FFFFFF")
         c.fill = PatternFill("solid", fgColor=HEADER_BG)
         c.alignment = Alignment(horizontal="right" if i > 1 else "left",

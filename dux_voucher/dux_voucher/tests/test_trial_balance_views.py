@@ -1135,5 +1135,28 @@ class TestWorkbookPrint(unittest.TestCase):
         self.assertEqual((ws.page_setup.fitToWidth, ws.page_setup.fitToHeight), (1, 0))
 
 
+class TestWorkbookText(unittest.TestCase):
+
+    def test_a_name_starting_with_equals_stays_text(self):
+        # Party and company names come from outside the books' own chart.
+        x = TestCompanyColumnsExcel()
+        rows, _sl = TestCompanyColumnsByParty()._build()
+        for r in rows:
+            if r.get("party") == "C1":
+                r["party_name"] = "=1+1"
+        wb = x._export(view="By Party", rows=rows, resolved=("A", "=HYPERLINK(1)"))
+        for sheet in ("Closing", "Consolidated"):
+            cell = wb[sheet].cell(row=x._find(wb[sheet], "=1+1"), column=1)
+            self.assertEqual((cell.value, cell.data_type), ("=1+1", "s"), sheet)
+        head = wb["Closing"].cell(row=5, column=4)
+        self.assertEqual((head.value, head.data_type), ("=HYPERLINK(1)", "s"))
+
+    def test_the_company_in_the_title_stays_text(self):
+        wb = TestCompanyColumnsExcel()._export(selection='["=1+1"]')
+        for sheet in ("Closing", "Consolidated"):
+            a1 = wb[sheet]["A1"]
+            self.assertEqual((a1.value, a1.data_type), ("=1+1", "s"), sheet)
+
+
 if __name__ == "__main__":
     unittest.main()
