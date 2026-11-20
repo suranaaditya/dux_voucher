@@ -151,10 +151,19 @@ dux_voucher/                              repo root (pyproject, README, CLAUDE.m
         │   ├── test_ex_student_batch_import.py  7 tests (batch CSV importer guards:
         │   │                                  write on the batch, create on Ex
         │   │                                  Student, the caller's own fresh upload)
-        │   └── test_trial_balance_views.py    27 tests (every view carries the
+        │   └── test_trial_balance_views.py    71 tests (every view carries the
         │                                      prior-year P&L and ties; Cost Center /
         │                                      Project on a trust; By Party as a net;
-        │                                      comparison bounds; Excel labels)
+        │                                      comparison bounds; Excel labels; a
+        │                                      column per company adds up to the
+        │                                      consolidated figure, each company's
+        │                                      groups roll up as in its own chart,
+        │                                      accounts filed apart stay apart;
+        │                                      Compare = Company, workbook by company;
+        │                                      a party's ledger account; an Account →
+        │                                      Party row names its company; workbook
+        │                                      prints a page wide, names starting
+        │                                      with "=" stay text)
         └── utils.py                           cancel cascade for PE/JE + income JE
 ```
 
@@ -620,6 +629,59 @@ Four views, one GL slice at different resolutions:
 | Account → Party | control accounts expanded into their parties, plus an explicit **Unattributed** row; other accounts open only when they carry party lines |
 | By Company | one row per company, for trusts and comparison |
 
+**A column per company** (By Account and By Party, two or more
+companies). The strip above the page's table switches *Combined* /
+*By company* and picks the figure shown: Closing, Opening, Debit or
+Credit. A hand-picked selection of up to six companies opens By company.
+With the `company_columns` filter the engine gives each row `cv`: per
+company, aligned with the run's resolved companies, its six figures or
+`None`. The consolidated figures are untouched (summed gross, netted
+once) and each company's are netted on their own, so the columns add up
+to the consolidated figure in signed terms.
+- The consolidated Total is pinned beside the names. For Debit and Credit
+  the bottom row is plain sums in both views. For Opening and Closing it is
+  each company's own difference in By Account, nil when its books tie, and
+  each company's net of parties in By Party. The By Account badge says how
+  many companies are out on their own at the close: a consolidated tie can
+  hide two companies out by opposite amounts.
+- The *b/f* row is split by company and named neutrally when one company
+  carries a loss and another a profit: in one `GROUP BY` on the aggregate
+  tier (`tb_aggregate.unclosed_pl(..., by_company=True)`), one carry
+  query per company it touches on the live tier.
+- A company's cell opens that company's own ledger
+  (`get_company_accounts` turns the row key back into its account; it
+  takes ledger companies only, as a run resolves them); a dash is not a
+  link. A By Party row names no account, so a party opens its Party
+  Ledger on the account most of its lines sit on in that company
+  (`get_party_account`). A party opened under a control row keeps each
+  company's figure. Combined, a merged row names no ledger: a control
+  account held by one company opens that one, any other row asks for
+  *By company*. Elsewhere the row says whose ledger opens, not the run's
+  first company: an Account → Party account row carries its company
+  (`account_company`; not `company`, which the row filter searches), and
+  the parties and Unattributed row under it are its. No drill reads the
+  Account doctype on the desk, which a reader with only the trial balance
+  role may not be allowed. A By Company row, a group, the *b/f* line and,
+  by company, a row or party no company has a figure on (*Zero rows*) open
+  nothing, and their names do not look like links. The classic report's
+  own drills are simpler: they open the first company picked, and a By
+  Party or By Company name carries no account, so only a one-company
+  By Account or Account → Party run drills reliably there.
+- Printing more than six company columns offers the workbook instead;
+  what was run (every company picked, view, dates, source, tie, the row
+  filter, the companies left out of the columns) prints above the table.
+  Each run is numbered and an answer to an older one is dropped. Labels,
+  drills, party loads and Excel follow the run that produced the table on
+  screen; while a run is out, or after one failed, nothing redraws the
+  previous table under the new ask, and once anything has run, a view
+  picked with no company to run is refused, as Run is.
+- Excel writes a sheet per figure (Total in column B, frozen with the
+  names; a company with nothing is left out and named) plus the
+  Consolidated sheet; every sheet's status line is read at the close and
+  the other figures' sheets say so. The classic report's Compare =
+  Company is built in one pass from the same rows, so each account is one
+  row there too.
+
 **Things that will bite you if you do not know them:**
 
 - **No fiscal-year clamp.** ERPNext's `validate_filters` silently rewrites
@@ -667,10 +729,23 @@ Four views, one GL slice at different resolutions:
 - **By Party does not tie, by design.** Most of a ledger has no party, so
   its total is the net of the parties: message, page badge, summary card
   and Excel all say "net of parties", never "out of balance".
+- **The colleges' charts have drifted apart.** Merged by name or number
+  alone, a row sat under whichever parent the company read last: one
+  college filing Temporary Opening under Equity pulled every college's
+  Temporary Opening into Source of Funds (about 110 crore each on a
+  ten-college trust), and Secured Loans, a group in one college and a
+  ledger in the rest, put a college 16.6 crore out with group accounts
+  hidden. The consolidated total still tied, so nothing said so.
+  `_merge_keys` keeps such accounts apart: the placement most companies
+  share keeps the row, the others become "X (under Parent)", and a group
+  and a ledger of one name are two rows. Keys may then carry `KEY_SEP`
+  (`\x1f`); reach a company's account through `get_company_accounts`,
+  never by parsing a key.
 
 **Trusts** use ERPNext's **native** company nested set (`parent_company` /
-`is_group` / `lft` / `rgt`); selecting a group company expands to its
-subtree via `get_subsidiary_companies`. Do not build a parallel
+`is_group` / `lft` / `rgt`); selecting a group company expands to the
+ledger companies of its subtree, read from that nested set
+(`expand_company`). Do not build a parallel
 hierarchy — production already maintains this one.
 
 **Two tiers.** A few companies → live GL. A trust or many companies →
@@ -828,6 +903,17 @@ form and the list.
 
 ## Recently Completed
 
+- [x] **Dux Trial Balance: a column per company** — By Account and By
+      Party show each company's figure beside the consolidated one, on the
+      page, in the workbook (a sheet per figure) and in the classic
+      report's Compare = Company, which now puts each account on one row;
+      the badge says how many companies are out on their own. The columns
+      exposed a merged-chart error in the combined view too: accounts the
+      colleges file under different parents now stay apart, so every group
+      is the sum of its rows and every company's column matches its own
+      trial balance. On the dev data a ten-college trust had 100 company
+      group subtotals that disagreed with that company's own trial
+      balance; across all five trusts none do now, on any row or figure
 - [x] **Dux Trial Balance: views agree** — every view carries the
       prior-year P&L (By Company per company, Account → Party as the b/f
       row), Cost Center / Project filters are honoured on a trust, a period
@@ -1056,6 +1142,8 @@ Notable cross-cutting files when you need to find something fast:
 | Admission Fee Register report | `dux_voucher/dux_voucher/report/admission_fee_register/` |
 | Student Fee Refund Income report | `dux_voucher/dux_voucher/report/student_fee_refund_income/` |
 | Trial Balance engine (all four views) | `dux_voucher/dux_voucher/report/dux_trial_balance/dux_trial_balance.py` |
+| Accounts merged across companies, and kept apart | `dux_trial_balance.py` → `_merge_key`, `_merge_keys` |
+| Company columns (`cv`) on the page / in Excel | `page/dux_trial_balance/dux_trial_balance.js` → `_coCells`; `reports_export.py` → `_tb_company_sheet` |
 | Trial Balance page (the primary UI) | `dux_voucher/dux_voucher/page/dux_trial_balance/dux_trial_balance.js` |
 | Trial Balance API + role guards | `dux_voucher/dux_voucher/api/trial_balance.py` |
 | TB monthly aggregate + nightly job | `dux_voucher/dux_voucher/api/tb_aggregate.py` |
