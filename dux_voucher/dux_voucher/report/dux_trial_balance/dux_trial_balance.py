@@ -610,11 +610,54 @@ def _has_value(row, tol=0.005):
     return any(abs(flt(row.get(f))) >= tol for f in VALUE_FIELDS)
 
 
+# ── company columns ───────────────────────────────────────────────────
+# With two or more companies selected every figure above is consolidated.
+# "Company columns" keeps each company's own figure beside it: a row then
+# carries ``cv``, a list index-aligned with the resolved companies (the page
+# receives that list as ``companies``), each entry the six VALUE_FIELDS in
+# order, or None where the company has nothing on that row. Lists rather
+# than dicts keyed by company name: a 34-company trust has ~800 rows.
+
+COMPANY_COLUMN_VIEWS = (VIEW_ACCOUNT, VIEW_PARTY)
+
+
+def _company_columns(filters, companies):
+    """Per-company figures were asked for and mean something here: two or
+    more companies, in a view whose rows are shared across companies.
+
+    Account -> Party lists each company's real accounts (one company per
+    row) and By Company already has one row per company, so neither has a
+    second company to put beside the first."""
+    return (bool(filters.get("company_columns")) and len(companies) > 1
+            and (filters.get("view") or VIEW_ACCOUNT) in COMPANY_COLUMN_VIEWS)
+
+
+def _add_values(into, values):
+    for f in VALUE_FIELDS:
+        into[f] = flt(into.get(f)) + flt(values.get(f))
+
+
+def _cv(per_company, companies):
+    """``{company: values}`` -> the row's ``cv`` list, aligned with companies."""
+    out = []
+    for co in companies:
+        v = per_company.get(co)
+        out.append([round(flt(v[f]), 2) for f in VALUE_FIELDS]
+                   if v and _has_value(v) else None)
+    return out
+
+
+def _cv_has_value(cv):
+    return any(c and any(abs(x) >= 0.005 for x in c) for c in (cv or []))
+
+
 def _total_row(rows, label, only_top_level=False):
     total = _blank_row()
     total.update({"account": f"'{label}'", "account_name": f"'{label}'",
                   "party": f"'{label}'", "company": f"'{label}'",
                   "is_total": 1, "indent": 0, "has_value": True})
+    width = max((len(r["cv"]) for r in rows if r and r.get("cv")), default=0)
+    sums = [[0.0] * len(VALUE_FIELDS) for _i in range(width)]
     for r in rows:
         if r.get("is_total"):
             continue
@@ -622,6 +665,15 @@ def _total_row(rows, label, only_top_level=False):
             continue
         for f in VALUE_FIELDS:
             total[f] += flt(r.get(f))
+        for i, c in enumerate(r.get("cv") or []):
+            if c:
+                for j, x in enumerate(c):
+                    sums[i][j] += x
+    if width:
+        # Each company's own column, summed the way the consolidated one is:
+        # its Opening and Closing come to that company's own difference.
+        total["cv"] = [[round(x, 2) for x in s] if any(abs(x) >= 0.005 for x in s) else None
+                       for s in sums]
     return total
 
 
@@ -783,6 +835,10 @@ def _build_by_account(filters, companies):
         return []
 
     values = _slice(companies, ["account"], filters)
+    # Company columns need no query of their own: the slice is keyed by REAL
+    # account name, and every real account belongs to exactly one company.
+    cocols = _company_columns(filters, companies)
+    filters._company_columns = cocols
 
     # Fold per-company accounts onto their merge key.
     by_name = {a.name: a for a in accounts}
@@ -806,9 +862,12 @@ def _build_by_account(filters, companies):
                 "is_group": acc.is_group,
                 "lft": acc.lft,
                 "members": [],
+                "member_companies": [],
+                "co": {},
                 **_blank_row(),
             }
         node["members"].append(acc.name)
+        node["member_companies"].append(acc.company)
         if acc.parent_account:
             parent = by_name.get(acc.parent_account)
             if parent:
@@ -820,6 +879,8 @@ def _build_by_account(filters, companies):
         if v:
             for f in VALUE_FIELDS:
                 node[f] += flt(v[f])
+            if cocols:
+                _add_values(node["co"].setdefault(acc.company, _blank_row()), v)
 
     # Roll leaf values up into ancestors, deepest first so a value lands in
     # every ancestor exactly once.
@@ -835,6 +896,8 @@ def _build_by_account(filters, companies):
         if pk and pk in nodes and pk != node["key"]:
             for f in VALUE_FIELDS:
                 nodes[pk][f] += flt(node[f])
+            for co, v in node["co"].items():
+                _add_values(nodes[pk]["co"].setdefault(co, _blank_row()), v)
 
     # A row split off by placement says where it sits, or two rows of one name
     # read as a duplicate once group accounts are hidden.
@@ -851,6 +914,10 @@ def _build_by_account(filters, companies):
     for node in _tree_order(nodes, depth):
         if show_net:
             _net_off(node, _natural_side(node["root_type"]))
+            # Each company nets on its own: A's 100 Dr beside B's 40 Cr is not
+            # "60 Dr in both".
+            for v in node["co"].values():
+                _net_off(v, _natural_side(node["root_type"]))
         row = {
             "account": node["key"],
             "account_name": node["account_name"],
@@ -864,6 +931,11 @@ def _build_by_account(filters, companies):
         for f in VALUE_FIELDS:
             row[f] = flt(node[f])
         row["has_value"] = _has_value(row)
+        if cocols:
+            row["cv"] = _cv(node["co"], companies)
+            # A merged account at 100 Dr in one college and 100 Cr in another
+            # nets to nil consolidated, and is still two balances to show.
+            row["has_value"] = row["has_value"] or _cv_has_value(row["cv"])
 
         # A control account can be opened in place to reveal the parties
         # behind it, so it carries the real account names it merges. Only
@@ -872,6 +944,11 @@ def _build_by_account(filters, companies):
         if node["is_control"] and not node["is_group"]:
             row["is_control"] = 1
             row["members"] = node["members"]
+            # Which company each of those accounts is, so a party opened from
+            # one company's column reaches that company's account, and a
+            # combined row spanning several companies says so instead of
+            # opening the first one's.
+            row["member_companies"] = node["member_companies"]
 
         rows.append(row)
 
@@ -886,7 +963,11 @@ def _build_by_account(filters, companies):
     if not filters.get("show_zero_values"):
         rows = _drop_zero_keeping_ancestors(rows)
 
-    carry = _unclosed_pl_row(companies, filters, _company_currency(companies[0]))
+    if cocols:
+        carry = _unclosed_pl_row_by_company(companies, filters,
+                                            _company_currency(companies[0]))
+    else:
+        carry = _unclosed_pl_row(companies, filters, _company_currency(companies[0]))
     if carry:
         rows.append(carry)
 
@@ -914,6 +995,58 @@ def _unclosed_pl_row(companies, filters, currency):
     Returns None when the reset is off or there is nothing to carry.
     """
     return _carry_row(_unclosed_pl_net(companies, filters), currency)
+
+
+def _unclosed_pl_row_by_company(companies, filters, currency):
+    """The same balancing line, with each company's share in its own column.
+
+    Without it no company column ties: each college's balance sheet is short
+    by its own unclosed prior-year result, exactly as By Company found. The
+    consolidated figure is the sum of the shares — the live path computes it
+    per company anyway. Shares can cancel (one college's loss, another's
+    profit), so the line stays whenever any company has one."""
+    shares = _unclosed_pl_shares(companies, filters)
+    live = [s for s in shares.values() if abs(s) >= 0.005]
+    if not live:
+        return None
+    net = sum(shares.values())
+    # The shares cancel: nil consolidated, and still a figure in each column.
+    row = _carry_row(net if abs(net) >= 0.005 else 1.0, currency)
+    if abs(net) < 0.005:
+        row.update(_blank_row())
+    if any(s > 0 for s in live) and any(s < 0 for s in live):
+        # One college's loss beside another's profit: "Accumulated Loss" over
+        # a column reading Cr would be wrong for that college. Each cell's
+        # Dr / Cr says which it is.
+        row["account_name"] = _("Accumulated Profit / Loss b/f — P&L never closed")
+    row["cv"] = _cv({co: _carry_values(s) for co, s in shares.items()}, companies)
+    return row
+
+
+def _unclosed_pl_shares(companies, filters):
+    """``_unclosed_pl_net`` company by company: ``{company: net}``.
+
+    From the same tier as the rest of the report. On the aggregate it is one
+    grouped query rather than one per company; live, ``_unclosed_pl_net``
+    already queries per company, so the arithmetic is the same either way."""
+    reset = filters.get("_pl_reset_date")
+    if not reset or not companies:
+        return {}
+    if filters.get("_source") == "aggregate":
+        from dux_voucher.dux_voucher.api import tb_aggregate
+        return {co: flt(net) for co, net in tb_aggregate.unclosed_pl(
+            companies, filters.from_date, filters.to_date, reset,
+            by_company=True).items()}
+    return {co: flt(_unclosed_pl_net([co], filters))
+            for co in _touched_companies(companies, filters)}
+
+
+def _carry_values(net):
+    """A signed carry (Dr-positive) as the six value fields of its row."""
+    v = _blank_row()
+    side = "debit" if net > 0 else "credit"
+    v[f"opening_{side}"] = v[f"closing_{side}"] = abs(flt(net))
+    return v
 
 
 def _unclosed_pl_net(companies, filters):
@@ -1095,7 +1228,18 @@ def _company_currency(company):
 # ══════════════════════════════════════════════════════════════════════
 
 def _build_by_party(filters, companies):
-    values = _slice(companies, ["party_type", "party"], filters)
+    cocols = _company_columns(filters, companies)
+    filters._company_columns = cocols
+    if cocols:
+        # The same slice with the company kept apart; the consolidated row is
+        # its sum, as it is when the live path queries company by company.
+        values, per_co = {}, {}
+        for (pt, p, co), v in _slice(companies, ["party_type", "party", "company"],
+                                     filters).items():
+            _add_values(values.setdefault((pt, p), _blank_row()), v)
+            _add_values(per_co.setdefault((pt, p), {}).setdefault(co, _blank_row()), v)
+    else:
+        values, per_co = _slice(companies, ["party_type", "party"], filters), {}
     show_net = filters.get("show_net_values")
     currency = _company_currency(companies[0])
 
@@ -1106,9 +1250,10 @@ def _build_by_party(filters, companies):
     for (party_type, party), v in values.items():
         if not party:
             continue
+        natural = "debit" if party_type == "Customer" else "credit"
         row = dict(v)
         if show_net:
-            _net_off(row, "debit" if party_type == "Customer" else "credit")
+            _net_off(row, natural)
         row.update({
             "party_type": party_type,
             "party": party,
@@ -1117,6 +1262,15 @@ def _build_by_party(filters, companies):
             "indent": 0,
         })
         row["has_value"] = _has_value(row)
+        if cocols:
+            own = per_co.get((party_type, party)) or {}
+            if show_net:
+                for cv in own.values():
+                    _net_off(cv, natural)
+            row["cv"] = _cv(own, companies)
+            # A supplier owed 100 by one college and owing 100 to another
+            # nets to nil, and is still two balances.
+            row["has_value"] = row["has_value"] or _cv_has_value(row["cv"])
         if row["has_value"] or filters.get("show_zero_values"):
             rows.append(row)
 

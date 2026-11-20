@@ -522,5 +522,256 @@ class TestMergedChart(unittest.TestCase):
         self.assertIn("Cash - A", [r["account"] for r in rows])
 
 
+class TestCompanyColumns(unittest.TestCase):
+    """Each company's own figure beside the consolidated one.
+
+    Two colleges, A and B, each with a Cash, Debtors and Capital account, so
+    every account merges across the two. A's cash is 130 Dr; B's is a 40 Cr
+    overdraft; both sets of books tie on their own."""
+
+    MASTER = _master(
+        ("Assets - A", "A", "Assets", None, "Asset", 1),
+        ("Cash - A", "A", "Cash", "Assets - A", "Asset", 0),
+        ("Debtors - A", "A", "Debtors", "Assets - A", "Asset", 0, "Receivable"),
+        ("Liabilities - A", "A", "Liabilities", None, "Liability", 1),
+        ("Capital - A", "A", "Capital", "Liabilities - A", "Liability", 0),
+        ("Assets - B", "B", "Assets", None, "Asset", 1),
+        ("Cash - B", "B", "Cash", "Assets - B", "Asset", 0),
+        ("Debtors - B", "B", "Debtors", "Assets - B", "Asset", 0, "Receivable"),
+        ("Liabilities - B", "B", "Liabilities", None, "Liability", 1),
+        ("Capital - B", "B", "Capital", "Liabilities - B", "Liability", 0),
+    )
+    VALUES = {
+        ("Cash - A",): _v(od=100, d=50, c=20),
+        ("Debtors - A",): _v(od=30),
+        ("Capital - A",): _v(oc=130, d=20, c=50),
+        ("Cash - B",): _v(oc=40),
+        ("Debtors - B",): _v(od=10),
+        ("Capital - B",): _v(od=30),
+    }
+
+    def _build(self, values=None, shares=None, companies=("A", "B"), **kw):
+        kw.setdefault("company_columns", 1)
+        f = _filters("By Account", **kw)
+        with mock.patch.object(tb, "_slice", return_value=dict(values or self.VALUES)), \
+                mock.patch.object(tb, "_account_master", return_value=self.MASTER), \
+                mock.patch.object(tb, "_company_currency", return_value="INR"), \
+                mock.patch.object(tb, "_unclosed_pl_shares", return_value=dict(shares or {})), \
+                mock.patch.object(tb, "_unclosed_pl_net", return_value=0.0):
+            return tb._build_by_account(f, list(companies)), f
+
+    def _row(self, rows, key):
+        return next(r for r in rows if r.get("account") == key)
+
+    def test_each_company_keeps_its_own_figure_on_the_merged_row(self):
+        rows, f = self._build()
+        self.assertTrue(f._company_columns)
+        cash = self._row(rows, "cash")
+        self.assertEqual(cash["cv"], [[100, 0, 50, 20, 130, 0], [0, 40, 0, 0, 0, 40]])
+        # consolidated: 100 Dr and 40 Cr open at 60 Dr, as today
+        self.assertEqual((cash["opening_debit"], cash["closing_debit"]), (60, 90))
+
+    def test_the_columns_add_up_to_the_consolidated_figure(self):
+        for net in (0, 1):
+            rows, _f = self._build(show_net_values=net)
+            for r in rows:
+                if not r.get("cv"):
+                    continue
+                cv = [c or [0.0] * 6 for c in r["cv"]]
+                own = [r[k] for k in tb.VALUE_FIELDS]
+                if net:
+                    # netted per company: the signed figure adds up, and the
+                    # period is untouched
+                    for stage in ("opening", "closing"):
+                        self.assertAlmostEqual(sum(_signed(c, stage) for c in cv),
+                                               _signed(own, stage), msg=r["account"])
+                    for i in (2, 3):
+                        self.assertAlmostEqual(sum(c[i] for c in cv), own[i], msg=r["account"])
+                else:
+                    for i in range(6):
+                        self.assertAlmostEqual(sum(c[i] for c in cv), own[i], msg=r["account"])
+
+    def test_groups_roll_up_company_by_company(self):
+        rows, _f = self._build()
+        assets = self._row(rows, "assets")
+        self.assertEqual(assets["cv"], [[130, 0, 50, 20, 160, 0], [0, 30, 0, 0, 0, 30]])
+
+    def test_each_companys_total_is_its_own_difference(self):
+        rows, _f = self._build()
+        a, b = _total(rows)["cv"]
+        for c in (a, b):   # both sets of books tie
+            self.assertAlmostEqual(_signed(c, "opening"), 0)
+            self.assertAlmostEqual(_signed(c, "closing"), 0)
+        self.assertEqual((a[2], a[3]), (70, 70))
+        # Without group rows the leaves are netted one by one, so the gross
+        # totals differ, but each company still comes to its own difference.
+        flat, _f = self._build(show_group_accounts=0)
+        for c, g in zip(_total(flat)["cv"], _total(rows)["cv"]):
+            for stage in ("opening", "closing"):
+                self.assertAlmostEqual(_signed(c, stage), _signed(g, stage))
+            self.assertEqual((c[2], c[3]), (g[2], g[3]))
+
+    def test_a_row_that_nets_to_nil_across_companies_is_still_shown(self):
+        values = dict(self.VALUES)
+        values[("Debtors - A",)] = _v(od=30)
+        values[("Debtors - B",)] = _v(oc=30)
+        values[("Capital - B",)] = _v(od=70)
+        rows, _f = self._build(values)
+        deb = self._row(rows, "debtors")
+        self.assertEqual((deb["opening_debit"], deb["opening_credit"]), (0, 0))
+        self.assertEqual(deb["cv"], [[30, 0, 0, 0, 30, 0], [0, 30, 0, 0, 0, 30]])
+        # without company columns there is nothing to show
+        with mock.patch.object(tb, "_slice", return_value=values), \
+                mock.patch.object(tb, "_account_master", return_value=self.MASTER), \
+                mock.patch.object(tb, "_company_currency", return_value="INR"), \
+                mock.patch.object(tb, "_unclosed_pl_net", return_value=0.0):
+            plain = tb._build_by_account(_filters("By Account"), ["A", "B"])
+        self.assertFalse([r for r in plain if r.get("account") == "debtors"])
+        self.assertFalse([r for r in plain if r.get("cv")])
+
+    def test_a_company_without_the_account_has_no_figure(self):
+        values = {k: v for k, v in self.VALUES.items() if k != ("Debtors - B",)}
+        values[("Capital - B",)] = _v(od=40)
+        rows, _f = self._build(values)
+        self.assertIsNone(self._row(rows, "debtors")["cv"][1])
+
+    def test_control_rows_say_which_company_each_account_is(self):
+        rows, _f = self._build()
+        deb = self._row(rows, "debtors")
+        self.assertEqual(deb["members"], ["Debtors - A", "Debtors - B"])
+        self.assertEqual(deb["member_companies"], ["A", "B"])
+        # Combined too: a party drill needs to know the row spans two companies.
+        plain, _f = self._build(company_columns=0)
+        self.assertEqual(self._row(plain, "debtors")["member_companies"], ["A", "B"])
+
+    def test_the_carry_is_split_by_company(self):
+        # A's books ran a prior-year loss of 100, B's a profit of 40.
+        values = dict(self.VALUES)
+        values[("Capital - A",)] = _v(oc=230, d=20, c=50)
+        values[("Capital - B",)] = _v(od=70)
+        rows, _f = self._build(values, shares={"A": 100.0, "B": -40.0})
+        carry = next(r for r in rows if r.get("is_computed"))
+        self.assertEqual((carry["opening_debit"], carry["closing_debit"]), (60, 60))
+        self.assertEqual(carry["cv"], [[100, 0, 0, 0, 100, 0], [0, 40, 0, 0, 0, 40]])
+        # A loss in one college and a profit in the other: "Accumulated Loss"
+        # over B's Cr column would be wrong for B.
+        self.assertIn("Profit / Loss", carry["account_name"])
+        a, b = _total(rows)["cv"]
+        for c in (a, b):
+            self.assertAlmostEqual(_signed(c, "closing"), 0)
+        self.assertTrue(_ties(_total(rows)))
+
+    def test_a_carry_of_one_sign_keeps_its_name(self):
+        values = dict(self.VALUES)
+        values[("Capital - A",)] = _v(oc=230, d=20, c=50)
+        values[("Capital - B",)] = _v(oc=10)
+        rows, _f = self._build(values, shares={"A": 100.0, "B": 40.0})
+        carry = next(r for r in rows if r.get("is_computed"))
+        self.assertTrue(carry["account_name"].startswith("Accumulated Loss"))
+        self.assertEqual(carry["closing_debit"], 140)
+
+    def test_shares_that_cancel_still_show_in_their_columns(self):
+        values = dict(self.VALUES)
+        values[("Capital - A",)] = _v(oc=180, d=20, c=50)
+        values[("Capital - B",)] = _v(od=80)
+        rows, _f = self._build(values, shares={"A": 50.0, "B": -50.0})
+        carry = next(r for r in rows if r.get("is_computed"))
+        self.assertEqual([carry[k] for k in tb.VALUE_FIELDS], [0, 0, 0, 0, 0, 0])
+        self.assertEqual(carry["cv"], [[50, 0, 0, 0, 50, 0], [0, 50, 0, 0, 0, 50]])
+        self.assertIn("Profit / Loss", carry["account_name"])
+        for c in _total(rows)["cv"]:   # each college still ties with its own share
+            self.assertAlmostEqual(_signed(c, "closing"), 0)
+        self.assertFalse([r for r in self._build()[0] if r.get("is_computed")])   # no shares
+
+    def test_each_company_rolls_up_as_its_own_chart_does(self):
+        # A files Cash under Assets, B under Bank: each column's groups are that
+        # company's own subtotals.
+        t = TestMergedChart
+        with mock.patch.object(tb, "_slice", return_value=dict(t.VALUES)), \
+                mock.patch.object(tb, "_account_master", return_value=t.MASTER), \
+                mock.patch.object(tb, "_company_currency", return_value="INR"), \
+                mock.patch.object(tb, "_unclosed_pl_shares", return_value={}), \
+                mock.patch.object(tb, "_unclosed_pl_net", return_value=0.0):
+            rows = tb._build_by_account(_filters("By Account", company_columns=1), ["A", "B"])
+        cv = {r["account"]: r["cv"] for r in rows if not r.get("is_total")}
+        self.assertEqual(cv["assets"], [[100, 0, 0, 0, 100, 0], [40, 0, 0, 0, 40, 0]])
+        self.assertEqual(cv["bank"], [None, [40, 0, 0, 0, 40, 0]])
+        self.assertEqual(cv["cash"], [[100, 0, 0, 0, 100, 0], None])
+        self.assertEqual(cv["cash" + tb.KEY_SEP + "bank"], [None, [40, 0, 0, 0, 40, 0]])
+
+    def test_only_two_or_more_companies_on_a_shared_view(self):
+        on = frappe._dict(company_columns=1, view="By Account")
+        self.assertTrue(tb._company_columns(on, ["A", "B"]))
+        self.assertTrue(tb._company_columns(frappe._dict(on, view="By Party"), ["A", "B"]))
+        self.assertFalse(tb._company_columns(on, ["A"]))
+        self.assertFalse(tb._company_columns(frappe._dict(on, view="By Company"), ["A", "B"]))
+        self.assertFalse(tb._company_columns(frappe._dict(on, view="Account -> Party"), ["A", "B"]))
+        self.assertFalse(tb._company_columns(frappe._dict(view="By Account"), ["A", "B"]))
+        rows, f = self._build(companies=("A",))
+        self.assertFalse(f._company_columns)
+        self.assertFalse([r for r in rows if "cv" in r])
+
+
+class TestCompanyColumnsByParty(unittest.TestCase):
+    VALUES = {
+        ("Customer", "C1", "A"): _v(od=100),
+        ("Customer", "C1", "B"): _v(oc=30),
+        ("Supplier", "S1", "A"): _v(oc=50, d=10),
+        ("Customer", None, "A"): _v(od=7),     # no party: not a row here
+    }
+
+    def _build(self, **kw):
+        kw.setdefault("company_columns", 1)
+        with mock.patch.object(tb, "_slice", return_value=dict(self.VALUES)) as sl, \
+                mock.patch.object(tb, "_resolve_party_names", return_value={}), \
+                mock.patch.object(tb, "_company_currency", return_value="INR"):
+            rows = tb._build_by_party(_filters("By Party", **kw), ["A", "B"])
+        return rows, sl
+
+    def test_parties_keep_each_companys_figure(self):
+        rows, sl = self._build()
+        self.assertEqual(sl.call_args[0][1], ["party_type", "party", "company"])
+        c1 = next(r for r in rows if r.get("party") == "C1")
+        self.assertEqual((c1["opening_debit"], c1["opening_credit"]), (70, 0))
+        self.assertEqual(c1["cv"], [[100, 0, 0, 0, 100, 0], [0, 30, 0, 0, 0, 30]])
+        s1 = next(r for r in rows if r.get("party") == "S1")
+        self.assertEqual(s1["cv"], [[0, 50, 10, 0, 0, 40], None])
+        t = _total(rows)
+        self.assertEqual(t["cv"][1], [0, 30, 0, 0, 0, 30])
+        self.assertEqual(len([r for r in rows if not r.get("is_total")]), 2)
+
+    def test_the_consolidated_party_is_as_before(self):
+        rows, _sl = self._build()
+        with mock.patch.object(tb, "_slice", return_value={
+                    ("Customer", "C1"): _v(od=100, oc=30), ("Supplier", "S1"): _v(oc=50, d=10),
+                    ("Customer", None): _v(od=7)}), \
+                mock.patch.object(tb, "_resolve_party_names", return_value={}), \
+                mock.patch.object(tb, "_company_currency", return_value="INR"):
+            plain = tb._build_by_party(_filters("By Party"), ["A", "B"])
+        strip = lambda rs: [{k: v for k, v in r.items() if k != "cv"} for r in rs]  # noqa: E731
+        self.assertEqual(strip(rows), strip(plain))
+
+
+class TestCompanyCarryShares(unittest.TestCase):
+
+    def test_the_aggregate_gives_every_share_in_one_query(self):
+        from dux_voucher.dux_voucher.api import tb_aggregate
+        with mock.patch.object(frappe.db, "sql", return_value=[
+                frappe._dict(company="A", net=5.0), frappe._dict(company="B", net=-2.0)]) as sql:
+            shares = tb_aggregate.unclosed_pl(["A", "B"], "2026-04-01", "2027-03-31",
+                                              "2026-04-01", by_company=True)
+        self.assertEqual(shares, {"A": 5.0, "B": -2.0})
+        self.assertEqual(sql.call_count, 1)
+        self.assertIn("GROUP BY agg.company", sql.call_args[0][0])
+
+    def test_live_shares_are_the_per_company_carry(self):
+        f = _filters("By Account")
+        with mock.patch.object(tb, "_touched_companies", side_effect=lambda cos, _f: list(cos)), \
+                mock.patch.object(tb, "_unclosed_pl_net",
+                                  side_effect=lambda cos, _f: {"A": 3.0, "B": 0.0}[cos[0]]):
+            self.assertEqual(tb._unclosed_pl_shares(["A", "B"], f), {"A": 3.0, "B": 0.0})
+        self.assertEqual(tb._unclosed_pl_shares(["A"], _filters("By Account", _pl_reset_date=None)), {})
+
+
 if __name__ == "__main__":
     unittest.main()

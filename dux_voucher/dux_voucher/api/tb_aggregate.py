@@ -284,7 +284,7 @@ def can_serve(companies, from_date, to_date):
     return True
 
 
-def unclosed_pl(companies, from_date, to_date, pl_reset_date):
+def unclosed_pl(companies, from_date, to_date, pl_reset_date, by_company=False):
     """Prior-year P&L that the fiscal-year reset removed, from the aggregate.
 
     The live equivalent joins GL to Account across a company's whole
@@ -292,16 +292,20 @@ def unclosed_pl(companies, from_date, to_date, pl_reset_date):
     trial balance itself came back in milliseconds and then this one query
     held the request open for the better part of a minute. The aggregate
     already carries root_type per bucket, so the same figure is a sum.
+
+    ``by_company`` returns ``{company: net}`` from the same one query, for a
+    trial balance that shows each company's share in its own column.
     """
     if not companies or not pl_reset_date:
-        return 0.0
+        return {} if by_company else 0.0
     # Exactly what the reset took out of fetch()'s opening, and the same
     # bounds as the live query: movement before From, is_opening rows up to
     # To, each only before the reset. Bounded by the reset alone, a range
     # starting before the reset (a period comparison's earlier series, or a
     # Fiscal Year later than From) had its own movement added back on top.
-    row = frappe.db.sql(f"""
-        SELECT COALESCE(SUM(CASE WHEN agg.period < %(from_p)s
+    rows = frappe.db.sql(f"""
+        SELECT {"agg.company AS company," if by_company else ""}
+               COALESCE(SUM(CASE WHEN agg.period < %(from_p)s
                                  THEN agg.debit - agg.credit END), 0)
              + COALESCE(SUM(CASE WHEN agg.period <= %(to_p)s
                                  THEN agg.opening_debit - agg.opening_credit END), 0)
@@ -310,10 +314,13 @@ def unclosed_pl(companies, from_date, to_date, pl_reset_date):
         WHERE agg.company IN %(companies)s
           AND agg.root_type IN ('Income', 'Expense')
           AND agg.period < %(pl_p)s
+        {"GROUP BY agg.company" if by_company else ""}
     """, {"companies": tuple(companies),
           "from_p": month_key(from_date), "to_p": month_key(to_date),
           "pl_p": month_key(pl_reset_date)}, as_dict=True)
-    return float(row[0].net) if row else 0.0
+    if by_company:
+        return {r.company: float(r.net) for r in rows}
+    return float(rows[0].net) if rows else 0.0
 
 
 def fetch(companies, group_cols, from_date, to_date, pl_reset_date=None):
