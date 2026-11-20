@@ -148,9 +148,13 @@ dux_voucher/                              repo root (pyproject, README, CLAUDE.m
         │   │                                  sheets as before; "Various" order kept)
         │   ├── test_ex_student_adjustment.py  17 tests (adjustment Dr/Cr, CSV cells
         │   │                                  and matching, reconciliation items)
-        │   └── test_ex_student_batch_import.py  7 tests (batch CSV importer guards:
-        │                                      write on the batch, create on Ex
-        │                                      Student, the caller's own fresh upload)
+        │   ├── test_ex_student_batch_import.py  7 tests (batch CSV importer guards:
+        │   │                                  write on the batch, create on Ex
+        │   │                                  Student, the caller's own fresh upload)
+        │   └── test_trial_balance_views.py    27 tests (every view carries the
+        │                                      prior-year P&L and ties; Cost Center /
+        │                                      Project on a trust; By Party as a net;
+        │                                      comparison bounds; Excel labels)
         └── utils.py                           cancel cascade for PE/JE + income JE
 ```
 
@@ -613,7 +617,7 @@ Four views, one GL slice at different resolutions:
 |---|---|
 | By Account | CoA tree, child values rolled into groups |
 | By Party | every party, **all party types at once** |
-| Account → Party | control accounts expanded into their parties, plus an explicit **Unattributed** row |
+| Account → Party | control accounts expanded into their parties, plus an explicit **Unattributed** row; other accounts open only when they carry party lines |
 | By Company | one row per company, for trusts and comparison |
 
 **Things that will bite you if you do not know them:**
@@ -641,6 +645,28 @@ Four views, one GL slice at different resolutions:
   Receivable/Payable accounts with no party at all, 93–100% of rows on
   some companies. The Unattributed row is permanent furniture, not an
   error state.
+- **Every view carries the prior-year P&L, or it does not tie.** By
+  Account and Account → Party add the computed *b/f* row (not with
+  *Control accounts only*: that subset never ties). By Company folds each
+  company's share into that company's own opening and closing
+  (`carry_forward` on the row), also for a company whose narrowed slice is
+  otherwise empty, so a company whose books tie reads nil; its workbook
+  says so in a note under the status line. Without it every company of a
+  trust read "out" by its own unclosed result.
+- **Cost Center, Project and Party Type filters always read the live
+  ledger.** The monthly aggregate has no such columns and used to drop the
+  filter without a word. Live queries first find which companies have a
+  matching line at all (`_touched_companies`: one `DISTINCT company` query,
+  cached on the filters) and skip the rest, and the carry is narrowed the
+  same way. `project` is not indexed on GL Entry, so a Project filter on a
+  wide trust is a full scan (about 30 s on the dev data).
+- **A comparison range resets at its own fiscal year.** The chosen Fiscal
+  Year belongs to the main range only; `_build_comparison` clears it for
+  the other range, and `tb_aggregate.unclosed_pl` takes the same date
+  bounds as the live carry query.
+- **By Party does not tie, by design.** Most of a ledger has no party, so
+  its total is the net of the parties: message, page badge, summary card
+  and Excel all say "net of parties", never "out of balance".
 
 **Trusts** use ERPNext's **native** company nested set (`parent_company` /
 `is_group` / `lft` / `rgt`); selecting a group company expands to its
@@ -654,9 +680,10 @@ aggregate was built**.
 
 **Roles** (seeded by `v1_5`): `Dux Trial Balance` reads;
 `Dux Trial Balance Manager` also rebuilds the aggregate. Gating the
-Report and Page records only hides it from the menu, so every whitelisted
-endpoint calls `require_access()` and `tb_aggregate.rebuild` calls
-`require_manager()`. User-Permission company scoping applies on top.
+Report and Page records only hides it from the menu, so every page
+endpoint (`api/trial_balance.py`) calls `require_access()` and then
+`_guard()` for the user's Company User Permissions, and
+`tb_aggregate.rebuild` calls `require_manager()`.
 
 ### 10. Students as ledger parties + Student Journal Voucher
 
@@ -801,6 +828,16 @@ form and the list.
 
 ## Recently Completed
 
+- [x] **Dux Trial Balance: views agree** — every view carries the
+      prior-year P&L (By Company per company, Account → Party as the b/f
+      row), Cost Center / Project filters are honoured on a trust, a period
+      comparison no longer adds this year's carry to last year's column,
+      By Party reads as a net of parties, Account → Party stops hanging a
+      lone Unattributed under plain accounts, the pinned Total no longer
+      shows rows through its nil cells, and the By Party and By Company
+      workbooks say what their figures are. On the dev data a seven-company
+      trust now reads the same difference in By Account, Account → Party
+      and By Company, where two of them had read hundreds of crores out
 - [x] **TDS on bills in the party ledger** — a party's journal / payment
       row opens to its whole voucher ("as per details"), so the TDS and
       other deductions taken on the supplier's own side of a bill JV show
