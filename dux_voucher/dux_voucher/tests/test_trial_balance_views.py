@@ -773,5 +773,89 @@ class TestCompanyCarryShares(unittest.TestCase):
         self.assertEqual(tb._unclosed_pl_shares(["A"], _filters("By Account", _pl_reset_date=None)), {})
 
 
+class TestCompareCompanies(unittest.TestCase):
+    """Compare = Company puts each company's closing on the same row.
+
+    Built company by company, each series was keyed by that company's own
+    account names, so "Cash - A" and "Cash - B" were two rows and the
+    companies never met on one."""
+
+    def _compare(self, **kw):
+        t = TestCompanyColumns
+        f = frappe._dict(view="By Account", compare="Company",
+                         from_date=frappe.utils.getdate("2026-04-01"),
+                         to_date=frappe.utils.getdate("2027-03-31"),
+                         show_net_values=1, show_group_accounts=1,
+                         _pl_reset_date=RESET, **kw)
+        with mock.patch.object(tb, "_slice", return_value=dict(t.VALUES)), \
+                mock.patch.object(tb, "_account_master", return_value=t.MASTER), \
+                mock.patch.object(tb, "_company_currency", return_value="INR"), \
+                mock.patch.object(tb, "_unclosed_pl_shares", return_value={}):
+            return tb._build_comparison(f, ["A", "B"])
+
+    def test_one_row_per_account_with_a_column_per_company(self):
+        cols, rows, msg, _c, _s = self._compare()
+        self.assertEqual([c["label"] for c in cols if c["fieldname"].startswith("s")], ["A", "B"])
+        cash = [r for r in rows if r.get("label") == "Cash"]
+        self.assertEqual(len(cash), 1)
+        self.assertEqual((cash[0]["s0"], cash[0]["s1"], cash[0]["variance"]), (130, -40, 170))
+        total = rows[-1]
+        self.assertEqual((total["s0"], total["s1"]), (0, 0))   # both sets of books tie
+        self.assertIn("comparing by company", msg)
+
+    def test_a_group_that_nets_to_nil_keeps_its_accounts_under_it(self):
+        t = TestCompanyColumns
+        values = dict(t.VALUES)
+        values[("Debtors - A",)] = _v(oc=100)        # an advance, against cash of 100 Dr
+        values[("Cash - A",)] = _v(od=100)
+        values[("Capital - A",)] = _v()
+        values[("Cash - B",)] = _v()
+        values[("Debtors - B",)] = _v()
+        values[("Capital - B",)] = _v()
+        f = frappe._dict(view="By Account", compare="Company",
+                         from_date=frappe.utils.getdate("2026-04-01"),
+                         to_date=frappe.utils.getdate("2027-03-31"),
+                         show_net_values=1, show_group_accounts=1, _pl_reset_date=RESET)
+        with mock.patch.object(tb, "_slice", return_value=values), \
+                mock.patch.object(tb, "_account_master", return_value=t.MASTER), \
+                mock.patch.object(tb, "_company_currency", return_value="INR"), \
+                mock.patch.object(tb, "_unclosed_pl_shares", return_value={}):
+            _cols, rows, _m, _c, _s = tb._build_comparison(f, ["A", "B"])
+        labels = [r["label"] for r in rows]
+        self.assertIn("Assets", labels)            # nil in both, still the parent
+        self.assertLess(labels.index("Assets"), labels.index("Cash"))
+
+    def test_carries_that_cancel_still_close_each_company(self):
+        # Last year A lost 50 and B made 50: nil together, and each company's
+        # column still needs its own share to come to nil.
+        t = TestCompanyColumns
+        values = dict(t.VALUES)
+        values[("Capital - A",)] = _v(oc=180, d=20, c=50)
+        values[("Capital - B",)] = _v(od=80)
+        f = frappe._dict(view="By Account", compare="Company",
+                         from_date=frappe.utils.getdate("2026-04-01"),
+                         to_date=frappe.utils.getdate("2027-03-31"),
+                         show_net_values=1, show_group_accounts=1, _pl_reset_date=RESET)
+        with mock.patch.object(tb, "_slice", return_value=values), \
+                mock.patch.object(tb, "_account_master", return_value=t.MASTER), \
+                mock.patch.object(tb, "_company_currency", return_value="INR"), \
+                mock.patch.object(tb, "_unclosed_pl_shares", return_value={"A": 50.0, "B": -50.0}):
+            _cols, rows, _m, _c, _s = tb._build_comparison(f, ["A", "B"])
+        carry = next(r for r in rows if r.get("account") == "__unclosed_pl__")
+        self.assertEqual((carry["s0"], carry["s1"]), (50, -50))
+        self.assertIn("Profit / Loss", carry["label"])
+        self.assertEqual((rows[-1]["s0"], rows[-1]["s1"]), (0, 0))
+
+    def test_the_message_says_when_the_aggregate_was_built(self):
+        series = [("A", ["A"], None, None), ("B", ["B"], None, None)]
+        _c, _r, msg, _x, _s = tb._comparison_result(
+            _filters("By Account"), series, "By Account", "Company", {}, [],
+            {"aggregate"}, {"2026-11-20 00:03:08.684921"})
+        self.assertIn("monthly aggregate · built 2026-11-20 00:03", msg)
+        _c, _r, live, _x, _s = tb._comparison_result(
+            _filters("By Account"), series, "By Account", "Company", {}, [], {"live"}, set())
+        self.assertNotIn("built", live)
+
+
 if __name__ == "__main__":
     unittest.main()

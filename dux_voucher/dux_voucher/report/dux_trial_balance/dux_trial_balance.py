@@ -164,9 +164,12 @@ def _build_comparison(filters, companies):
         frappe.throw(_("Unknown comparison mode: {0}").format(mode))
 
     builder = _build_by_account if view == VIEW_ACCOUNT else _build_by_party
+    if mode == "Company":
+        return _compare_companies(filters, companies, series, view, builder)
+
     merged = {}
     order = []
-    sources = set()
+    sources, built = set(), set()
 
     for idx, (label, cos, frm, to) in enumerate(series):
         sub = frappe._dict(dict(filters))
@@ -180,6 +183,8 @@ def _build_comparison(filters, companies):
         sub._pl_reset_date = _pl_reset_date(sub)
         rows = builder(sub, cos)
         sources.add(sub.get("_source") or "live")
+        if sub.get("_source_built_at"):
+            built.add(str(sub._source_built_at))
 
         for r in rows:
             if r.get("is_total"):
@@ -187,19 +192,60 @@ def _build_comparison(filters, companies):
             key = _compare_key(r, view)
             slot = merged.get(key)
             if not slot:
-                slot = merged[key] = {
-                    "label": r.get("account_name") or r.get("party_name"),
-                    "account": r.get("account") or key,
-                    "parent_account": r.get("parent_account"),
-                    "indent": r.get("indent", 0),
-                    "is_group_account": r.get("is_group_account", 0),
-                    "party_type": r.get("party_type"),
-                    "party": r.get("party"),
-                    "currency": r.get("currency"),
-                }
+                slot = merged[key] = _compare_slot(r, key)
                 order.append(key)
             slot[f"s{idx}"] = flt(r.get("closing_debit")) - flt(r.get("closing_credit"))
 
+    return _comparison_result(filters, series, view, mode, merged, order, sources, built)
+
+
+def _compare_companies(filters, companies, series, view, builder):
+    """Compare = Company: ONE run over every company with company columns,
+    each company's signed closing becoming its series.
+
+    Run company by company, each series was a one-company trial balance keyed
+    by that company's own account names ("Cash - A", "Cash - B"), so no two
+    companies ever met on a row: company A's tree printed with B's column
+    blank, then B's tree below it. One run merges the same account across
+    companies exactly as the consolidated view does, and a trust reads the
+    monthly aggregate instead of querying each college live."""
+    sub = frappe._dict(dict(filters))
+    sub.compare = None
+    sub.view = view
+    sub.company_columns = 1
+    rows = builder(sub, companies)
+
+    merged, order = {}, []
+    for r in rows:
+        if r.get("is_total"):
+            continue
+        key = _compare_key(r, view)
+        slot = merged[key] = _compare_slot(r, key)
+        order.append(key)
+        for idx, c in enumerate(r.get("cv") or []):
+            # Closing Dr less Closing Cr: the same signed figure whether or
+            # not the company's own balance was netted onto one side.
+            slot[f"s{idx}"] = (flt(c[4]) - flt(c[5])) if c else 0.0
+
+    return _comparison_result(filters, series, view, "Company", merged, order,
+                              {sub.get("_source") or "live"},
+                              {str(sub._source_built_at)} if sub.get("_source_built_at") else set())
+
+
+def _compare_slot(row, key):
+    return {
+        "label": row.get("account_name") or row.get("party_name"),
+        "account": row.get("account") or key,
+        "parent_account": row.get("parent_account"),
+        "indent": row.get("indent", 0),
+        "is_group_account": row.get("is_group_account", 0),
+        "party_type": row.get("party_type"),
+        "party": row.get("party"),
+        "currency": row.get("currency"),
+    }
+
+
+def _comparison_result(filters, series, view, mode, merged, order, sources, built=()):
     rows = []
     for key in order:
         slot = merged[key]
@@ -207,9 +253,10 @@ def _build_comparison(filters, companies):
             slot.setdefault(f"s{idx}", 0.0)
         if len(series) == 2:
             slot["variance"] = flt(slot["s0"]) - flt(slot["s1"])
-        if any(abs(flt(slot.get(f"s{i}"))) >= 0.005 for i in range(len(series))) \
-                or filters.get("show_zero_values"):
+        if (any(abs(flt(slot.get(f"s{i}"))) >= 0.005 for i in range(len(series)))
+                or filters.get("show_zero_values")):
             rows.append(slot)
+    rows = _keep_ancestors(rows, [merged[k] for k in order])
 
     # Each series contributes a SIGNED net (debit-positive), so summing the
     # root nodes yields nil on a ledger that ties. Labelling that "Total"
@@ -228,11 +275,33 @@ def _build_comparison(filters, companies):
     columns = _comparison_columns(series, view)
     src = "aggregate" if sources == {"aggregate"} else (
         "mixed" if len(sources) > 1 else "live")
+    # When the aggregate was built, as the trial balance itself says: a trust
+    # compared by company reads it, and it can lag the live ledger by a day.
+    stamp = _(" · built {0}").format(min(built)[:16]) if built and src != "live" else ""
     message = _("<b>{0}</b> series &nbsp;·&nbsp; {1} &nbsp;·&nbsp; {2}").format(
         len(series), _("comparing by {0}").format(mode.lower()),
-        _("monthly aggregate") if src == "aggregate" else
-        (_("mixed sources") if src == "mixed" else _("live GL")))
+        (_("monthly aggregate") + stamp) if src == "aggregate" else
+        ((_("mixed sources") + stamp) if src == "mixed" else _("live GL")))
     return columns, rows, message, None, None
+
+
+def _keep_ancestors(kept, ordered):
+    """``kept`` plus every group above a kept row, in ``ordered``'s order.
+
+    A group whose balance nets to nil in every series (a receivable at 100
+    beside an advance at -100) was dropped while the accounts under it stayed,
+    so they printed under whatever group came before it."""
+    by_key = {r["account"]: r for r in ordered}
+    keep = {id(r) for r in kept}
+    for r in kept:
+        cur, guard = r, 0
+        while cur.get("parent_account") and guard < 30:
+            cur = by_key.get(cur["parent_account"])
+            if not cur:
+                break
+            keep.add(id(cur))
+            guard += 1
+    return [r for r in ordered if id(r) in keep]
 
 
 def _compare_key(row, view):
