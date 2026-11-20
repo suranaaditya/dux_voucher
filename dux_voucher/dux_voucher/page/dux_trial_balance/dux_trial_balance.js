@@ -41,6 +41,9 @@ class DuxTrialBalance {
 		this.view = "By Account";
 		this.collapsed = new Set();
 		this.data = null;
+		// What ``data`` answers: the filters, view and selection of the run
+		// that produced it. Labels and drills read these, never the newest ask.
+		this._ran = null;
 		this.search = "";
 		this.parties = {}; // account key -> party rows, fetched on demand
 		this.partyOpen = new Set();
@@ -48,11 +51,19 @@ class DuxTrialBalance {
 		// split Dr/Cr form is available for anyone who wants the strict
 		// six-column presentation.
 		this.splitCols = false;
+		// With two or more companies: one column per company beside the
+		// consolidated figure, showing one figure at a time. ``coChoice`` is
+		// what the user picked on the switch above the table (null until they
+		// do); ``coAll`` lifts the row cap for this run.
+		this.coFig = "closing";
+		this.coChoice = null;
+		this.coAll = false;
 
 		this._styles();
 		this._layout();
 		this._bind();
 		this._defaults();
+		this._syncOptions();
 		this._loadFiscalYears();
 	}
 
@@ -255,6 +266,57 @@ tr.party > td{background:var(--tb-sunken);}
 tr.party:hover > td{background:var(--tb-line-2);}
 .tb-ptype{font-size:9.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;
   color:var(--tb-ink-3);margin-left:7px;line-height:15px;flex:none;}
+.tb-pop label.off{opacity:.45;cursor:not-allowed;}
+.tb-pop label.tb-sub{padding-left:24px;}
+.tb-pop select{height:28px;border:1px solid var(--tb-line);border-radius:6px;
+  background:var(--tb-bg);color:var(--tb-ink);font-size:12.5px;padding:0 6px;
+  font-family:inherit;}
+
+/* Company columns: the account and the consolidated Total pinned on the
+   left, one column per company to their right, scrolling sideways. Pinned
+   cells need an opaque background or the scrolled figures show through. */
+.tb-costrip{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  margin:-2px 0 10px;font-size:12px;color:var(--tb-ink-3);}
+.tb-costrip .tb-seg button{font-size:12px;padding:4px 11px;}
+.tb-costrip .lbl{font-size:10.5px;font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase;}
+.tb-costrip .note{cursor:help;}
+table.tb.coc{table-layout:auto;width:max-content;min-width:100%;}
+table.tb.coc td,table.tb.coc th{background:var(--tb-bg);}
+table.tb.coc th:first-child,table.tb.coc td:first-child{width:auto;position:sticky;
+  left:0;z-index:1;border-right:1px solid var(--tb-line);}
+table.tb.coc .tb-name{width:300px;}
+table.tb.coc th:not(:first-child),table.tb.coc td:not(:first-child){width:auto;
+  min-width:150px;}
+table.tb.coc .tb-cot{position:sticky;left:var(--tb-c1w,325px);z-index:1;
+  font-weight:650;border-right:1px solid var(--tb-line);}
+table.tb.coc thead th{white-space:nowrap;background:var(--tb-sunken);}
+table.tb.coc thead th:first-child,table.tb.coc thead th.tb-cot{z-index:5;}
+table.tb.coc tfoot td:first-child,table.tb.coc tfoot td.tb-cot{z-index:5;}
+table.tb.coc tbody tr:hover td{background:var(--tb-sunken);}
+table.tb.coc tr.party > td{background:var(--tb-sunken);}
+table.tb.coc thead th[title]{cursor:help;}
+.tb-figtag{font-weight:600;color:var(--tb-accent);margin-left:6px;}
+td.tb-coc{cursor:pointer;}
+td.tb-coc:hover{text-decoration:underline;}
+tr.tb-cap td{text-align:left;color:var(--tb-ink-3);font-style:italic;padding:9px 14px;}
+tr.tb-cap a{font-style:normal;font-weight:600;cursor:pointer;}
+.tb-tie.warn{background:var(--tb-warn-soft);color:var(--tb-warn);}
+.tb-pick-row{display:flex;justify-content:space-between;gap:16px;padding:5px 0;
+  border-bottom:1px solid var(--tb-line-2);}
+.tb-printonly{display:none;}
+@media print{
+  .tb-tablewrap{max-height:none;overflow:visible;}
+  /* The controls stay on screen. What was run (companies, view, dates,
+     source, tie, the filter and its caveat, the companies left out of the
+     columns) prints above the table; the figure shown is already in the
+     first column's heading. */
+  .tb-filters,#tb-coseg,#tb-figseg,.tb-costrip .lbl,#tb-search,.tb-bar .tb-popwrap,#tb-edit{
+    display:none !important;}
+  .tb-printonly{display:inline;}
+  .tb-bar{flex-wrap:wrap;}
+  .tb-bar .ctx{max-width:none;overflow:visible;white-space:normal;}
+}
 .tb-empty{padding:64px 20px;text-align:center;color:var(--tb-ink-3);font-size:14px;}
 .tb-empty strong{display:block;color:var(--tb-ink-2);font-size:15px;margin-bottom:6px;}
 @media(max-width:900px){
@@ -327,16 +389,30 @@ tr.party:hover > td{background:var(--tb-line-2);}
     <span class="tb-popwrap">
       <button class="tb-mini" id="tb-opts">${__("Options")}</button>
       <div class="tb-pop" id="tb-pop">
-        <label><input type="checkbox" id="tb-net" checked> ${__("Net opening / closing")}</label>
+        <label id="tb-net-l"><input type="checkbox" id="tb-net" checked> ${__("Net opening / closing")}</label>
         <label><input type="checkbox" id="tb-grp" checked> ${__("Group accounts")}</label>
         <label><input type="checkbox" id="tb-zero"> ${__("Zero rows")}</label>
         <label><input type="checkbox" id="tb-pl"> ${__("Carry prior-year P&L")}</label>
         <label><input type="checkbox" id="tb-live"> ${__("Force live query")}</label>
-        <label style="border-top:1px solid var(--tb-line);margin-top:4px;padding-top:8px">
-          <input type="checkbox" id="tb-split"> ${__("Split Dr / Cr columns")}</label>
+        <label id="tb-split-l"><input type="checkbox" id="tb-split"> ${__("Split Dr / Cr columns")}</label>
       </div>
     </span>
     <button class="tb-mini" id="tb-edit">${__("Filters")}</button>
+  </div>
+
+  <div class="tb-costrip" id="tb-costrip" style="display:none">
+    <span class="lbl">${__("Companies")}</span>
+    <span class="tb-seg" id="tb-coseg">
+      <button data-co="0">${__("Combined")}</button>
+      <button data-co="1">${__("By company")}</button>
+    </span>
+    <span class="tb-seg" id="tb-figseg">
+      <button data-fig="closing">${__("Closing")}</button>
+      <button data-fig="opening">${__("Opening")}</button>
+      <button data-fig="debit">${__("Debit")}</button>
+      <button data-fig="credit">${__("Credit")}</button>
+    </span>
+    <span class="note" id="tb-conote"></span>
   </div>
 
   <div class="tb-card" id="tb-result">
@@ -353,10 +429,20 @@ tr.party:hover > td{background:var(--tb-line-2);}
 		const $w = $(this.wrapper);
 
 		$w.on("click", "#tb-seg button", (e) => {
+			// Once anything has run, a view picked is run at once. With no
+			// company to run it for it is not taken, as Run refuses: the
+			// table on screen keeps its view, and the pills keep naming it.
+			if (this._seq && !this.companies.length) {
+				frappe.show_alert({ message: __("Pick a company or a trust first."), indicator: "orange" });
+				return;
+			}
 			this.view = $(e.currentTarget).data("view");
 			$w.find("#tb-seg button").removeClass("on");
 			$(e.currentTarget).addClass("on");
-			if (this.data) this.run();
+			this._syncOptions();
+			// Once anything has run, the first run included: a view picked
+			// while it is out is what is asked for, not the one it answers.
+			if (this._seq) this.run();
 		});
 
 		$w.on("click", "#tb-run", () => this.run());
@@ -377,6 +463,45 @@ tr.party:hover > td{background:var(--tb-line-2);}
 		$w.on("change", "#tb-split", (e) => {
 			this.splitCols = $(e.currentTarget).is(":checked");
 			this._renderTable();
+		});
+
+		// Combined, or a column per company. The server computes the company
+		// figures only when asked, so switching re-runs.
+		$w.on("click", "#tb-coseg button", (e) => {
+			const on = String($(e.currentTarget).data("co")) === "1";
+			// Against what was last asked for: while a run is out, the table
+			// on screen is the previous one. After a run failed, the same
+			// position asks again.
+			if (on === this._coAsked() && this._failedSeq !== this._seq) return;
+			this.coChoice = on;
+			this.run();
+		});
+
+		// Which figure the company columns show. Every figure came back with
+		// the run, so this only re-renders.
+		$w.on("click", "#tb-figseg button", (e) => {
+			this.coFig = String($(e.currentTarget).data("fig")) || "closing";
+			this._syncOptions();
+			this._renderTable();
+			this._renderStatusBar();
+		});
+
+		$w.on("click", ".tb-showall", (e) => {
+			e.preventDefault();
+			this.coAll = true;
+			this._renderTable();
+		});
+
+		// A company's figure opens THAT company's ledger. The row itself
+		// merges the same account across companies, so it names no single
+		// ledger to open.
+		$w.on("click", "td.tb-coc", (e) => {
+			const $td = $(e.currentTarget);
+			const $tr = $td.closest("tr");
+			const ci = Number($td.data("ci"));
+			if (!Number.isInteger(ci)) return;
+			if ($tr.data("party")) return this._drillPartyCo($tr, ci);
+			this._drillCo($tr.data("idx"), ci);
 		});
 
 		// Bring the filter panel back.
@@ -473,7 +598,7 @@ tr.party:hover > td{background:var(--tb-line-2);}
 		});
 
 		this.page.set_secondary_action(__("Excel"), () => this._excel());
-		this.page.add_menu_item(__("Print"), () => window.print());
+		this.page.add_menu_item(__("Print"), () => this._print());
 		this.page.add_menu_item(__("Rebuild aggregate"), () => this._rebuild());
 		this.page.add_menu_item(__("Open as classic report"), () => this._classic());
 	}
@@ -573,6 +698,7 @@ tr.party:hover > td{background:var(--tb-line-2);}
 			)
 			.join("");
 		$c.prepend(html);
+		this._syncOptions();
 	}
 
 	/* -------------------------------------------------------------- run */
@@ -592,26 +718,50 @@ tr.party:hover > td{background:var(--tb-line-2);}
 			show_zero_values: $w.find("#tb-zero").is(":checked") ? 1 : 0,
 			show_unclosed_fy_pl_balances: $w.find("#tb-pl").is(":checked") ? 1 : 0,
 			force_live: $w.find("#tb-live").is(":checked") ? 1 : 0,
+			company_columns: this._coWanted() ? 1 : 0,
 		};
 		this.filters = filters;
+		this.coAll = false;
+		// Each run is numbered. An answer to an earlier run that lands after a
+		// later one was asked for is dropped, so the table never shows a
+		// selection, a view or a switch position that is no longer asked.
+		const seq = (this._seq = (this._seq || 0) + 1);
+		// Kept with the answer: chips added while the run is out are not
+		// what it ran.
+		const ran = {
+			filters,
+			view: this.view,
+			sel: this._selKey(),
+			companies: this.companies.map((c) => c.value),
+		};
+		this._syncOptions();
 
 		$w.find("#tb-result").html(`<div class="tb-empty">${__("Running…")}</div>`);
 		frappe.call({
 			method: "dux_voucher.dux_voucher.api.trial_balance.get_trial_balance",
 			args: { filters: JSON.stringify(filters) },
 			callback: (r) => {
+				if (seq !== this._seq) return;
 				this.data = r.message;
+				this._ran = ran;
+				this._dataSeq = seq;
+				this._coShownCache = null;
 				this.collapsed = new Set();
 				this.parties = {};
 				this.partyOpen = new Set();
+				// A party load still out belongs to the table this replaces.
+				this._loadingParties = false;
 				// Filters are a set-up step, not a thing you stare at. Fold
 				// them away once there is a report to look at.
 				$w.find(".tb-filters").hide();
 				$w.find("#tb-bar").css("display", "flex");
+				this._syncOptions();
 				this._renderStatusBar();
 				this._renderTable();
 			},
 			error: () => {
+				if (seq !== this._seq) return;
+				this._failedSeq = seq;
 				$w.find("#tb-result").html(
 					`<div class="tb-empty"><strong>${__("Could not run")}</strong>${__(
 						"Check the filters and try again."
@@ -623,10 +773,14 @@ tr.party:hover > td{background:var(--tb-line-2);}
 
 	_fmt(v) {
 		if (!v || Math.abs(v) < 0.005) return null;
-		return new Intl.NumberFormat("en-IN", {
-			minimumFractionDigits: 2,
-			maximumFractionDigits: 2,
-		}).format(v);
+		// One formatter for the page: building one per cell was most of the
+		// render time once a trust's companies each got a column.
+		if (!this._nf)
+			this._nf = new Intl.NumberFormat("en-IN", {
+				minimumFractionDigits: 2,
+				maximumFractionDigits: 2,
+			});
+		return this._nf.format(v);
 	}
 
 	_signed(dr, cr) {
@@ -638,7 +792,203 @@ tr.party:hover > td{background:var(--tb-line-2);}
 		)}<span class="tb-sfx">${isDr ? "Dr" : "Cr"}</span></td>`;
 	}
 
-	_money(r) {
+	/* -------------------------------------------------- company columns */
+	_selKey() {
+		return JSON.stringify(this.companies.map((c) => c.value));
+	}
+
+	_coColsApplicable() {
+		// Two or more companies, and a view whose rows are shared across
+		// companies: Account → Party lists each company's own accounts and By
+		// Company is already one row per company. Once the selection has run,
+		// count what it resolved to — a trust can hold a single company.
+		const ran = this.data && this._ran && this._ran.sel === this._selKey();
+		const many = ran
+			? (this.data.companies || []).length > 1
+			: this.companies.length > 1 || this.companies.some((c) => c.is_group);
+		return many && (this.view === "By Account" || this.view === "By Party");
+	}
+
+	_coWanted() {
+		if (!this._coColsApplicable()) return false;
+		if (this.coChoice !== null) return this.coChoice;
+		// Colleges picked by hand are picked to be set side by side; a trust
+		// is first its consolidated trial balance. Either is one click away.
+		const handPicked = !this.companies.some((c) => c.is_group);
+		return handPicked && this.companies.length <= 6;
+	}
+
+	_coMode() {
+		const d = this.data;
+		return !!(d && d.company_columns && (d.companies || []).length > 1);
+	}
+
+	// Where the Combined / By company switch stands: what the table on screen
+	// shows, or, while a run is out or after one failed, what that run asked
+	// for. A click compared with the table alone was lost while a run was out.
+	_coAsked() {
+		if (this.filters && this._dataSeq !== this._seq) return !!this.filters.company_columns;
+		return this._coMode();
+	}
+
+	// The filters behind the table on screen. A drill or a party load is for
+	// that table's period and companies, not for an ask still out or failed.
+	_ranFilters() {
+		return (this._ran && this._ran.filters) || this.filters || {};
+	}
+
+	// Indexes of the companies with any figure in this run. A college with
+	// nothing on the selected project, cost centre or period is a column of
+	// dashes; it is left out and named in the note instead.
+	_coShown() {
+		if (this._coShownCache) return this._coShownCache;
+		const d = this.data || {};
+		const n = (d.companies || []).length;
+		const has = new Array(n).fill(false);
+		for (const r of d.rows || []) {
+			(r.cv || []).forEach((c, i) => {
+				if (c) has[i] = true;
+			});
+		}
+		this._coShownCache = has.map((h, i) => (h ? i : -1)).filter((i) => i >= 0);
+		return this._coShownCache;
+	}
+
+	_abbr(i) {
+		const d = this.data || {};
+		const c = (d.companies || [])[i];
+		return (d.company_abbrs || {})[c] || c;
+	}
+
+	_syncOptions() {
+		const $w = $(this.wrapper);
+		const ok = this._coColsApplicable();
+		const asked = this._coAsked();
+		// The figure picker and its note describe the table on screen, so they
+		// show only once that table is the one asked for: not while a run is
+		// out, nor after one failed and left no table.
+		const on = this._dataSeq === this._seq && this._coMode() && asked;
+		const d = this.data || {};
+		$w.find("#tb-costrip").css("display", d.rows && ok ? "flex" : "none");
+		$w.find("#tb-coseg button").each((i, b) => {
+			$(b).toggleClass("on", String($(b).data("co")) === (asked ? "1" : "0"));
+		});
+		$w.find("#tb-figseg").toggle(on);
+		$w.find("#tb-figseg button").each((i, b) => {
+			$(b).toggleClass("on", $(b).data("fig") === this.coFig);
+		});
+		let note = "";
+		let title = "";
+		if (on) {
+			const shown = this._coShown();
+			const n = (d.companies || []).length;
+			const hidden = (d.companies || []).filter((c, i) => !shown.includes(i));
+			if (hidden.length) {
+				note = __("{0} of {1} companies have nothing in this run and are not shown", [
+					hidden.length,
+					n,
+				]);
+				title = hidden.join(", ");
+			}
+		}
+		// The names are a hover away on screen; a printout names them.
+		const esc = frappe.utils.escape_html;
+		$w.find("#tb-conote")
+			.html(note ? `${esc(note)}<span class="tb-printonly">: ${esc(title)}</span>` : "")
+			.attr("title", title);
+		// Splitting Dr and Cr would double every company column, and every
+		// company cell is already one signed figure, netted or not. These
+		// follow the switch, so they change the moment it is pushed.
+		$w.find("#tb-split").prop("disabled", asked);
+		$w.find("#tb-split-l")
+			.toggleClass("off", asked)
+			.attr("title", asked ? __("Not available with a column per company") : "");
+		$w.find("#tb-net").prop("disabled", asked);
+		$w.find("#tb-net-l")
+			.toggleClass("off", asked)
+			.attr(
+				"title",
+				asked ? __("Each company's opening and closing already show as one Dr or Cr figure") : ""
+			);
+	}
+
+	_figLabel() {
+		return (
+			{ closing: __("Closing"), opening: __("Opening"), debit: __("Debit"), credit: __("Credit") }[
+				this.coFig
+			] || __("Closing")
+		);
+	}
+
+	_signedFig() {
+		return this.coFig === "opening" || this.coFig === "closing";
+	}
+
+	// One figure from the six values [opening Dr, opening Cr, Dr, Cr, closing
+	// Dr, closing Cr]: Opening and Closing as one signed figure, debit
+	// positive; Debit and Credit as they are.
+	_coVal(v) {
+		if (!v) return 0;
+		if (this.coFig === "opening") return (v[0] || 0) - (v[1] || 0);
+		if (this.coFig === "closing") return (v[4] || 0) - (v[5] || 0);
+		return (this.coFig === "debit" ? v[2] : v[3]) || 0;
+	}
+
+	_coFmt(v) {
+		const x = this._coVal(v);
+		if (Math.abs(x) < 0.005) return null;
+		if (!this._signedFig()) return { html: this._fmt(x), tone: "" };
+		return {
+			html: `${this._fmt(Math.abs(x))}<span class="tb-sfx">${x > 0 ? "Dr" : "Cr"}</span>`,
+			tone: x > 0 ? "tb-dr" : "tb-cr",
+		};
+	}
+
+	_coTd(v, cls, attrs) {
+		const f = this._coFmt(v);
+		if (!f) return `<td class="tb-nil ${cls || ""}">—</td>`;
+		return `<td class="${f.tone} ${cls || ""}"${attrs || ""}>${f.html}</td>`;
+	}
+
+	// The consolidated Total first, pinned beside the name, then one cell per
+	// company with a figure in this run.
+	_coCells(r, clickable) {
+		const cv = r.cv || [];
+		const own = [
+			r.opening_debit,
+			r.opening_credit,
+			r.debit,
+			r.credit,
+			r.closing_debit,
+			r.closing_credit,
+		];
+		let html = this._coTd(own, "tb-cot");
+		for (const i of this._coShown()) {
+			// Only a figure opens a ledger. A company can hold the row and
+			// still show a dash for this figure (an income head's opening):
+			// that dash is not a link.
+			const f = this._coFmt(cv[i]);
+			if (!f) html += `<td class="tb-nil">—</td>`;
+			else if (clickable) html += `<td class="${f.tone} tb-coc" data-ci="${i}">${f.html}</td>`;
+			else html += `<td class="${f.tone}">${f.html}</td>`;
+		}
+		return html;
+	}
+
+	// Each company's own difference, from the Total row: what the badge and the
+	// bottom row report company by company.
+	_coOut() {
+		const tot = ((this.data || {}).rows || []).find((r) => r.is_total);
+		const out = [];
+		((tot && tot.cv) || []).forEach((c, i) => {
+			const diff = c ? (c[4] || 0) - (c[5] || 0) : 0;
+			if (Math.abs(diff) >= 0.005) out.push({ i, diff });
+		});
+		return out;
+	}
+
+	_money(r, clickable) {
+		if (this._coMode()) return this._coCells(r, clickable);
 		// Four columns the Tally way, or the strict six-column split.
 		return this.splitCols
 			? this._cell(r.opening_debit) +
@@ -664,30 +1014,35 @@ tr.party:hover > td{background:var(--tb-line-2);}
 		const rows = d.rows || [];
 		const $w = $(this.wrapper);
 		const total = rows.find((r) => r.is_total);
+		// What the figures are for: the run that produced them, not chips,
+		// a view or dates picked since.
+		const ran = this._ran || {};
+		const rf = this._ranFilters();
 
 		// Name the companies. The filter panel folds away after a run, so a
 		// bare count leaves you unable to tell what you are looking at —
 		// and two trial balances that differ only by which company was
 		// selected are indistinguishable.
-		const co = this.companies.map((c) => c.value);
+		const co = ran.companies || this.companies.map((c) => c.value);
 		const expanded = (d.companies || []).length;
+		const esc = frappe.utils.escape_html;
 		let coTxt;
 		if (co.length === 1) {
 			// A trust expands to many, so say so rather than showing one name.
-			coTxt =
-				expanded > 1
-					? `${co[0]} · ${expanded} ${__("companies")}`
-					: co[0];
+			coTxt = esc(expanded > 1 ? `${co[0]} · ${expanded} ${__("companies")}` : co[0]);
 		} else if (co.length <= 3) {
-			coTxt = co.join("  ·  ");
+			coTxt = esc(co.join("  ·  "));
 		} else {
-			coTxt = `${co[0]} + ${co.length - 1} ${__("more")}`;
+			// The rest are a hover away on screen; a printout names them.
+			coTxt = `${esc(`${co[0]} + ${co.length - 1} ${__("more")}`)}<span class="tb-printonly">: ${esc(
+				co.slice(1).join(", ")
+			)}</span>`;
 		}
 		const fmtD = (v) => (v ? frappe.datetime.str_to_user(v) : "");
 		$w.find("#tb-ctx")
-			.text(
-				`${coTxt}  ·  ${this.view}  ·  ${fmtD(this.filters.from_date)} → ${fmtD(
-					this.filters.to_date
+			.html(
+				`${coTxt}  ·  ${esc(
+					`${ran.view || this.view}  ·  ${fmtD(rf.from_date)} → ${fmtD(rf.to_date)}`
 				)}`
 			)
 			// The full list is always one hover away, however many there are.
@@ -702,9 +1057,12 @@ tr.party:hover > td{background:var(--tb-line-2);}
 		// A filter narrows the rows but not the Total — the trial balance
 		// total belongs to the period, not to what you searched. Say so, or
 		// 4,56,095 beside two rows adding to 40,000 reads as a contradiction.
+		// The filter box is not printed, so a printout names the filter.
 		if (this.search)
 			pills.push(
-				`<span class="tb-pill warn">${__("filtered — Total is for the full period")}</span>`
+				`<span class="tb-pill warn"><span class="tb-printonly">“${frappe.utils.escape_html(
+					String($w.find("#tb-search").val() || "").trim()
+				)}” · </span>${__("filtered — Total is for the full period")}</span>`
 			);
 
 		const mism = rows.filter((r) => r.mismatch).length;
@@ -727,6 +1085,47 @@ tr.party:hover > td{background:var(--tb-line-2);}
 					`<span class="tb-tie net">${__("Net of parties")} ${
 						tied ? __("nil") : this._fmt(Math.abs(diff)) + (diff > 0 ? " Dr" : " Cr")
 					}</span>`
+				);
+			} else if (this._coMode()) {
+				// The consolidated tie can hide two colleges out by opposite
+				// amounts — exactly what a column per company is there to show,
+				// so the badge reads company by company too.
+				const n = (d.companies || []).length;
+				const out = this._coOut();
+				const who = out
+					.map((o) => {
+						const x = this._fmt(Math.abs(o.diff)) + (o.diff > 0 ? " Dr" : " Cr");
+						return `${(d.companies || [])[o.i]}: ${x}`;
+					})
+					.join("\n");
+				const names = out.slice(0, 3).map((o) => this._abbr(o.i));
+				const more = out.length > 3 ? ` +${out.length - 3}` : "";
+				let cls, txt;
+				if (tied && !out.length) {
+					cls = "ok";
+					txt = "✓ " + __("Balanced · all {0} companies tie", [n]);
+				} else if (tied) {
+					cls = "warn";
+					txt =
+						"✓ " +
+						__("Balanced overall · {0} of {1} out ({2})", [
+							out.length,
+							n,
+							names.join(", ") + more,
+						]);
+				} else {
+					cls = "off";
+					txt =
+						"⚠ " +
+						__("Out by") +
+						" " +
+						this._fmt(diff) +
+						(out.length ? " · " + __("{0} of {1} companies out", [out.length, n]) : "");
+				}
+				$w.find("#tb-tie").html(
+					`<span class="tb-tie ${cls}" title="${frappe.utils.escape_html(who)}">${frappe.utils.escape_html(
+						txt
+					)}</span>`
 				);
 			} else {
 				$w.find("#tb-tie").html(
@@ -796,6 +1195,11 @@ tr.party:hover > td{background:var(--tb-line-2);}
 			this._renderTable();
 			return;
 		}
+		// For the table on screen: a run landing meanwhile resets the
+		// parties, and these would carry the earlier run's period, and its
+		// companies' columns, into the new one.
+		const seq = this._dataSeq;
+		const filters = JSON.stringify(this._ranFilters());
 		this._loadingParties = true;
 		this._renderTable();
 		Promise.all(
@@ -805,21 +1209,22 @@ tr.party:hover > td{background:var(--tb-line-2);}
 						frappe.call({
 							method: "dux_voucher.dux_voucher.api.trial_balance.get_account_parties",
 							args: {
-								filters: JSON.stringify(this.filters || {}),
+								filters,
 								accounts: JSON.stringify(r.members || [r.account]),
 							},
 							callback: (res) => {
-								this.parties[r.account] = res.message || [];
+								if (seq === this._dataSeq) this.parties[r.account] = res.message || [];
 								resolve();
 							},
 							error: () => {
-								this.parties[r.account] = [];
+								if (seq === this._dataSeq) this.parties[r.account] = [];
 								resolve();
 							},
 						});
 					})
 			)
 		).then(() => {
+			if (seq !== this._dataSeq) return;
 			this._loadingParties = false;
 			// Reveal what was found rather than making them expand by hand.
 			(this.data.rows || []).forEach((r) => {
@@ -835,13 +1240,16 @@ tr.party:hover > td{background:var(--tb-line-2);}
 			this._renderTable();
 			return;
 		}
+		const seq = this._dataSeq;
 		frappe.call({
 			method: "dux_voucher.dux_voucher.api.trial_balance.get_account_parties",
 			args: {
-				filters: JSON.stringify(this.filters || {}),
+				filters: JSON.stringify(this._ranFilters()),
 				accounts: JSON.stringify(row.members || [row.account]),
 			},
 			callback: (r) => {
+				// Dropped once another run has landed: it was for that table.
+				if (seq !== this._dataSeq) return;
 				this.parties[key] = r.message || [];
 				this.partyOpen.add(key);
 				this._renderTable();
@@ -855,7 +1263,7 @@ tr.party:hover > td{background:var(--tb-line-2);}
 		});
 	}
 
-	_partyRowHtml(p, indent, acct) {
+	_partyRowHtml(p, indent, acct, ridx) {
 		let name = frappe.utils.escape_html(p.label || "");
 		if (p.is_unattributed) name = `<span class="tb-unatt">${name}</span>`;
 		if (p.mismatch) name += `<span class="tb-flag">${__("wrong party type")}</span>`;
@@ -866,21 +1274,27 @@ tr.party:hover > td{background:var(--tb-line-2);}
 			acct || ""
 		)}" data-pt="${frappe.utils.escape_html(
 			p.party_type || ""
-		)}" data-p="${frappe.utils.escape_html(p.party || "")}">
+		)}" data-p="${frappe.utils.escape_html(p.party || "")}" data-ridx="${ridx}">
       <td><div class="tb-name" style="padding-left:${indent + 18}px">
         <span class="tb-caret leaf">▼</span>
         <span class="tb-lbl">${name}</span>${type}
       </div></td>
-      ${this._money(p)}</tr>`;
+      ${this._money(p, true)}</tr>`;
 	}
 
 	_renderTable() {
+		// While a run is out, or after one failed, what is in hand answers an
+		// earlier ask. The figure picker, Split, the filter box and a late
+		// party load all redraw; none may put that table back under the new
+		// ask's labels in place of "Running…" or "Could not run".
+		if (this._dataSeq !== this._seq) return;
 		const d = this.data || {};
 		const rows = d.rows || [];
 		const $r = $(this.wrapper).find("#tb-result");
 		// Expanding a row re-renders the whole table, which destroys the
 		// scroller and sends you back to the top. Carry the offset across.
 		const keepTop = $r.find(".tb-tablewrap").scrollTop() || 0;
+		const keepLeft = $r.find(".tb-tablewrap").scrollLeft() || 0;
 		if (!rows.length) {
 			$r.html(
 				`<div class="tb-empty"><strong>${__("No rows")}</strong>${__(
@@ -890,12 +1304,26 @@ tr.party:hover > td{background:var(--tb-line-2);}
 			return;
 		}
 
-		const isParty = this.view === "By Party";
-		const isCo = this.view === "By Company";
+		// The view the table answers, not a pill picked since.
+		const view = d.view || this.view;
+		const isParty = view === "By Party";
+		const isCo = view === "By Company";
 		const first = isParty ? __("Party") : isCo ? __("Company") : __("Account");
+		const coMode = this._coMode();
 
 		const kids = new Set(rows.map((r) => r.parent_account).filter(Boolean));
-		const vis = this._visible(rows);
+		let vis = this._visible(rows);
+		// A trust's By Party can run to thousands of parties with a cell per
+		// company each. Draw a bounded number of cells and offer the rest,
+		// rather than freeze the tab on every keystroke in the filter box.
+		let capped = 0;
+		if (coMode && !this.coAll) {
+			const max = Math.max(400, Math.floor(60000 / (this._coShown().length + 1)));
+			if (vis.length > max) {
+				capped = vis.length;
+				vis = vis.slice(0, max);
+			}
+		}
 
 		const body = vis
 			.map((r, i) => {
@@ -946,7 +1374,7 @@ tr.party:hover > td{background:var(--tb-line-2);}
 							: ""
 					}
         </div></td>
-        ${this._money(r)}</tr>`;
+        ${this._money(r, !r.is_group_account && !r.is_computed)}</tr>`;
 
 				if (r.is_control && this.partyOpen.has(r.account)) {
 					// When the account name itself matches, show all its parties;
@@ -960,10 +1388,12 @@ tr.party:hover > td{background:var(--tb-line-2);}
 					// Across a trust the row is a merge key, not an account —
 					// hand the drill a real account name to open.
 					const realAcct = (r.members && r.members[0]) || r.account;
-					html += kidsRows.map((p) => this._partyRowHtml(p, indent, realAcct)).join("");
+					html += kidsRows
+						.map((p) => this._partyRowHtml(p, indent, realAcct, idx))
+						.join("");
 					if (!kidsRows.length) {
 						html += `<tr class="party"><td colspan="${
-							this.splitCols ? 7 : 5
+							coMode ? this._coShown().length + 2 : this.splitCols ? 7 : 5
 						}" style="padding-left:${
 							indent + 36
 						}px;color:var(--tb-ink-3);font-style:italic">${__(
@@ -974,6 +1404,14 @@ tr.party:hover > td{background:var(--tb-line-2);}
 				return html;
 			})
 			.join("");
+		const capRow = capped
+			? `<tr class="tb-cap"><td colspan="${this._coShown().length + 2}">${__(
+					"Showing {0} of {1} rows.",
+					[vis.length, capped]
+			  )} <a class="tb-showall">${__("Show all")}</a> · ${__(
+					"or narrow them with the filter box. The Excel workbook has every row."
+			  )}</td></tr>`
+			: "";
 
 		if (this._loadingParties) {
 			$r.find(".tb-tablewrap").before(
@@ -986,35 +1424,90 @@ tr.party:hover > td{background:var(--tb-line-2);}
 		// check, not a sum. Say so, or 2,375.32 sitting under a column of
 		// crores reads as a broken total. Debit and Credit stay true sums,
 		// so the tie is still visible in the row itself.
-		const totLabel = this.splitCols ? __("Total") : __("Total (net)");
-		const totHint = this.splitCols
-			? ""
-			: ` title="${__(
-					"Opening and Closing are netted, so their totals show the Dr − Cr difference. Debit and Credit are true column sums."
-			  )}"`;
+		let totLabel, totHint;
+		if (coMode) {
+			// What the bottom row is depends on the figure and the view: a
+			// company's difference (nil when it ties) for Opening and Closing by
+			// account, where its parties stand on balance by party, and plain
+			// sums for Debit and Credit.
+			const signed = this._signedFig();
+			if (isParty) {
+				totLabel = signed ? __("Net of parties") : __("Total");
+				totHint = signed
+					? __(
+							"Each company's parties, netted. Most of a ledger has no party, so this is where the parties stand, not a tie check."
+					  )
+					: __("True sums: each company's figure, and in Total all of them together.");
+			} else {
+				totLabel = signed ? __("Difference") : __("Total");
+				totHint = signed
+					? __(
+							"Each company's debit less its credit: nil when that company's books tie. The Total column is the consolidated difference the badge checks."
+					  )
+					: __("True sums: each company's figure, and in Total all of them together.");
+			}
+		} else {
+			// In the four-column view Opening and Closing are netted, so the
+			// Total's netted figure is the Dr/Cr difference -- which is the tie
+			// check, not a sum. Say so, or 2,375.32 sitting under a column of
+			// crores reads as a broken total. Debit and Credit stay true sums,
+			// so the tie is still visible in the row itself.
+			const netted = !this.splitCols;
+			totLabel = netted ? __("Total (net)") : __("Total");
+			totHint = netted
+				? __(
+						"Opening and Closing are netted, so their totals show the Dr − Cr difference. Debit and Credit are true column sums."
+				  )
+				: "";
+		}
 		const foot = tot
 			? `<tfoot><tr>
-          <td${totHint}>${totLabel}</td>
+          <td${totHint ? ` title="${frappe.utils.escape_html(totHint)}"` : ""}>${totLabel}</td>
           ${this._money(tot)}
         </tr></tfoot>`
 			: "";
 
+		const coHead = () =>
+			`<th class="tb-cot" title="${frappe.utils.escape_html(
+				__("All the companies together — the figure the badge checks")
+			)}">${__("Total")}</th>` +
+			this._coShown()
+				.map(
+					(i) =>
+						`<th title="${frappe.utils.escape_html(
+							(d.companies || [])[i]
+						)}">${frappe.utils.escape_html(this._abbr(i))}</th>`
+				)
+				.join("");
+
 		$r.html(`<div class="tb-tablewrap"><table class="tb ${
-			this.splitCols ? "" : "cols4"
+			coMode ? "coc" : this.splitCols ? "" : "cols4"
 		}">
       <thead><tr>
-        <th>${first}</th>
+        <th>${first}${
+			coMode ? `<span class="tb-figtag">· ${frappe.utils.escape_html(this._figLabel())}</span>` : ""
+		}</th>
         ${
-					this.splitCols
+					coMode
+						? coHead()
+						: this.splitCols
 						? `<th>${__("Opening (Dr)")}</th><th>${__("Opening (Cr)")}</th>
              <th>${__("Debit")}</th><th>${__("Credit")}</th>
              <th>${__("Closing (Dr)")}</th><th>${__("Closing (Cr)")}</th>`
 						: `<th>${__("Opening")}</th><th>${__("Debit")}</th>
              <th>${__("Credit")}</th><th>${__("Closing")}</th>`
 				}
-      </tr></thead><tbody>${body}</tbody>${foot}</table></div>`);
+      </tr></thead><tbody>${body}${capRow}</tbody>${foot}</table></div>`);
 
+		if (coMode) {
+			// The Total column is pinned just right of the name column, whose
+			// width depends on the font and the padding at this screen size.
+			const $t = $r.find("table.tb");
+			const w = $t.find("thead th:first-child").outerWidth();
+			if (w) $t[0].style.setProperty("--tb-c1w", `${w}px`);
+		}
 		if (keepTop) $r.find(".tb-tablewrap").scrollTop(keepTop);
+		if (keepLeft) $r.find(".tb-tablewrap").scrollLeft(keepLeft);
 	}
 
 	_openLedger(route, opts) {
@@ -1032,7 +1525,34 @@ tr.party:hover > td{background:var(--tb-line-2);}
 		const acct = $tr.data("acct");
 		const party = $tr.data("p");
 		const party_type = $tr.data("pt");
-		const f = this.filters || {};
+		const f = this._ranFilters();
+		// The control row above may merge one account across several
+		// companies. With a column per company the party's own figures say
+		// which company to open; combined, they cannot.
+		const r = (this.data.rows || [])[$tr.data("ridx")];
+		if (r && this._coMode()) {
+			const p = (this.parties[r.account] || []).find(
+				(x) =>
+					(x.party_type || "") === String(party_type || "") &&
+					(x.party || "") === String(party || "")
+			);
+			const has = ((p && p.cv) || []).map((c, i) => (c ? i : -1)).filter((i) => i >= 0);
+			if (has.length === 1) return this._drillPartyCo($tr, has[0]);
+			if (has.length > 1)
+				return this._chooseCo(has, p.cv, (ci) => this._drillPartyCo($tr, ci));
+			return;
+		}
+		const spans = new Set((r && r.member_companies) || []).size;
+		if (spans > 1) {
+			frappe.show_alert({
+				message: __(
+					"This account adds up {0} companies. Choose By company above the table, then click a company's figure to open its ledger.",
+					[spans]
+				),
+				indicator: "blue",
+			});
+			return;
+		}
 		if (!party) {
 			// The Unattributed row has no party to open; the account ledger
 			// is the honest destination, since that is where it lives.
@@ -1062,7 +1582,42 @@ tr.party:hover > td{background:var(--tb-line-2);}
 	_drill(idx) {
 		const r = (this.data.rows || [])[idx];
 		if (!r || r.is_total || r.is_computed) return;
-		const f = this.filters || {};
+		const f = this._ranFilters();
+		const cos = this.data.companies || [];
+		const view = this.data.view || this.view;
+		// Across companies a By Account row is a merge key, not an account: it
+		// names no ledger. With company columns, a row that only one company
+		// has opens that company's; otherwise each company's figure is the
+		// way in. (Account → Party lists real accounts and keeps its drill.)
+		const merged = view === "By Account" || view === "By Party";
+		if (merged && cos.length > 1 && !r.is_group_account) {
+			if (this._coMode()) {
+				const has = cos.map((c, i) => i).filter((i) => (r.cv || [])[i]);
+				if (has.length === 1) return this._drillCo(idx, has[0]);
+				if (has.length > 1) return this._chooseCo(has, r.cv, (ci) => this._drillCo(idx, ci));
+				return;
+			}
+			// Combined, the row adds up the companies that hold it — a party's
+			// too — so it names no single ledger. Opening the first company's
+			// read as a nil balance wherever the row lived in another one. A
+			// control account knows its companies: held by one, it opens that
+			// one's ledger. Any other row cannot say how many it adds up.
+			const spans = [...new Set(r.member_companies || [])];
+			if (spans.length === 1 && cos.includes(spans[0])) return this._drillCo(idx, cos.indexOf(spans[0]));
+			frappe.show_alert({
+				message:
+					spans.length > 1
+						? __(
+								"This row adds up {0} companies. Choose By company above the table, then click a company's figure to open its ledger.",
+								[spans.length]
+						  )
+						: __(
+								"This row can add up several companies. Choose By company above the table, then click a company's figure to open its ledger."
+						  ),
+				indicator: "blue",
+			});
+			return;
+		}
 		frappe.route_options = {
 			company: r.company || (this.data.companies || [])[0],
 			from_date: f.from_date,
@@ -1081,17 +1636,193 @@ tr.party:hover > td{background:var(--tb-line-2);}
 		}
 	}
 
+	/* One company's ledger for a row, from that company's column. */
+	_drillCo(idx, ci) {
+		const r = (this.data.rows || [])[idx];
+		const co = (this.data.companies || [])[ci];
+		if (!r || !co || r.is_total || r.is_computed || r.is_group_account) return;
+		const f = this._ranFilters();
+		const base = { company: co, from_date: f.from_date, to_date: f.to_date };
+		if (r.party) return this._openParty(base, r);
+		// A control account already carries its real accounts and their
+		// companies; any other row asks which account this company holds
+		// under the merged one.
+		const own = this._ownAccounts(r, co);
+		if (own.length) return this._openOwn(base, own);
+		frappe.call({
+			method: "dux_voucher.dux_voucher.api.trial_balance.get_company_accounts",
+			// The run's companies, in order, rebuild the run's own row keys.
+			args: { company: co, key: r.account, companies: JSON.stringify(this.data.companies || []) },
+			callback: (res) => this._openOwn(base, res.message || []),
+		});
+	}
+
+	/* A By Party row names a party but no account, and the Party Ledger loads
+	   only with one: the account the party's lines sit on in that company.
+	   Its figures are the party's own whichever account heads them. */
+	_openParty(base, r) {
+		frappe.call({
+			method: "dux_voucher.dux_voucher.api.trial_balance.get_party_account",
+			args: { company: base.company, party_type: r.party_type, party: r.party },
+			callback: (res) => {
+				if (!res.message) {
+					// An alert reads HTML, and these are names people typed.
+					frappe.show_alert({
+						message: __("{0} has no ledger lines for {1}.", [
+							frappe.utils.escape_html(base.company),
+							frappe.utils.escape_html(r.party_name || r.party),
+						]),
+						indicator: "orange",
+					});
+					return;
+				}
+				this._openLedger("dux-party-ledger", {
+					...base,
+					party: r.party,
+					party_type: r.party_type,
+					party_label: r.party_name,
+					account: res.message,
+				});
+			},
+		});
+	}
+
+	_ownAccounts(r, co) {
+		const mc = r.member_companies || [];
+		return (r.members || []).filter((m, i) => mc[i] === co);
+	}
+
+	_openOwn(base, accounts) {
+		const esc = frappe.utils.escape_html;
+		if (!accounts.length) {
+			frappe.show_alert({
+				message: __("{0} has no account under this row.", [esc(base.company)]),
+				indicator: "orange",
+			});
+			return;
+		}
+		if (accounts.length === 1) {
+			this._openLedger("dux-ledger", { ...base, account: accounts[0] });
+			return;
+		}
+		// Two accounts of one company fold onto one row only when their names
+		// differ in case or spacing alone. Offer both rather than guess.
+		const links = accounts
+			.map((a) => {
+				const qs = Object.entries({ ...base, account: a })
+					.filter(([, v]) => v)
+					.map(([k, v]) => encodeURIComponent(k) + "=" + encodeURIComponent(v))
+					.join("&");
+				return `<div style="padding:4px 0"><a href="/desk/dux-ledger?${qs}" target="_blank" rel="noopener">${frappe.utils.escape_html(
+					a
+				)}</a></div>`;
+			})
+			.join("");
+		frappe.msgprint({
+			title: __("{0} has {1} accounts under this row", [esc(base.company), accounts.length]),
+			message: links,
+			indicator: "blue",
+		});
+	}
+
+	/* A party opened in place under a control account, from one company's
+	   column: that company's own account. */
+	_drillPartyCo($tr, ci) {
+		const r = (this.data.rows || [])[$tr.data("ridx")];
+		const co = (this.data.companies || [])[ci];
+		if (!r || !co) return;
+		const acct = this._ownAccounts(r, co)[0];
+		if (!acct) return;
+		const f = this._ranFilters();
+		const party = $tr.data("p");
+		const base = { company: co, from_date: f.from_date, to_date: f.to_date, account: acct };
+		if (!party) return this._openLedger("dux-ledger", base);
+		this._openLedger("dux-party-ledger", {
+			...base,
+			party: party,
+			party_type: $tr.data("pt"),
+		});
+	}
+
+	/* Several companies have a figure on the row: ask which ledger to open. */
+	_chooseCo(has, cv, onPick) {
+		const cos = this.data.companies || [];
+		const items = has
+			.map((i) => {
+				const f = this._coFmt(cv[i]);
+				return `<div class="tb-pick-row"><a href="#" class="tb-pick" data-ci="${i}">${frappe.utils.escape_html(
+					cos[i]
+				)}</a><span class="${f ? f.tone : ""}">${f ? f.html : "—"}</span></div>`;
+			})
+			.join("");
+		const dlg = frappe.msgprint({
+			title: __("Open which company's ledger?"),
+			message: `<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:6px">${frappe.utils.escape_html(
+				this._figLabel()
+			)}</div>${items}`,
+			indicator: "blue",
+		});
+		// The message dialog is shared and reused, so rebind each time.
+		const $wr = (dlg && dlg.$wrapper) || $(".modal:visible");
+		$wr.off("click.tbpick").on("click.tbpick", ".tb-pick", (e) => {
+			e.preventDefault();
+			if (dlg && dlg.hide) dlg.hide();
+			onPick(Number($(e.currentTarget).data("ci")));
+		});
+	}
+
+	_print() {
+		const n = this._coMode() ? this._coShown().length : 0;
+		if (n <= 6) return window.print();
+		// Wider than a printed page. The workbook prints across pages; printing
+		// the screen anyway is the other button. Closing the dialog (Esc, the
+		// cross) prints nothing — a confirm read that as "No" and printed.
+		const d = new frappe.ui.Dialog({
+			title: __("{0} company columns", [n]),
+			fields: [
+				{
+					fieldtype: "HTML",
+					fieldname: "msg",
+					options: `<p>${__(
+						"With {0} company columns the table is wider than a printed page. The Excel workbook prints across pages and repeats the account column on each.",
+						[n]
+					)}</p>`,
+				},
+			],
+			primary_action_label: __("Download Excel"),
+			primary_action: () => {
+				d.hide();
+				this._excel();
+			},
+			secondary_action_label: __("Print anyway"),
+			secondary_action: () => {
+				// Once the dialog has gone, or it is printed too.
+				d.$wrapper.one("hidden.bs.modal", () => window.print());
+				d.hide();
+			},
+		});
+		d.show();
+	}
+
 	_excel() {
-		if (!this.data) {
-			frappe.show_alert({ message: __("Run the report first."), indicator: "orange" });
+		// The workbook is the table on screen. While a run is out there is
+		// none yet, and after one failed its ask may not run at all: the
+		// download would navigate this tab to the error.
+		if (!this.data || this._dataSeq !== this._seq) {
+			const running = this._seq && this._failedSeq !== this._seq;
+			frappe.show_alert({
+				message: running ? __("Wait for the run to finish.") : __("Run the report first."),
+				indicator: "orange",
+			});
 			return;
 		}
 		// Same execute() the screen ran, formatted server-side, streamed
-		// back as a file — not a detour through the classic report.
+		// back as a file — not a detour through the classic report. With
+		// company columns the workbook opens on the figure on screen.
 		const url =
 			"/api/method/dux_voucher.dux_voucher.api.reports_export.export_trial_balance_xlsx" +
 			"?filters=" +
-			encodeURIComponent(JSON.stringify(this.filters || {}));
+			encodeURIComponent(JSON.stringify({ ...this._ranFilters(), company_figure: this.coFig }));
 		frappe.show_alert({ message: __("Building the workbook…"), indicator: "blue" });
 		// Same mechanism as the other Excel buttons in this app: a
 		// Content-Disposition download, so the browser saves the file
@@ -1105,7 +1836,17 @@ tr.party:hover > td{background:var(--tb-line-2);}
 		// months). The page's filter names are the report's own, so they
 		// carry over as they are.
 		const f = this.filters;
-		if (f && f.company && f.company.length) frappe.route_options = { ...f };
+		if (f && f.company && f.company.length) {
+			const ro = { ...f };
+			delete ro.company_columns;
+			// The classic report has no column per company; its Compare =
+			// Company sets each company's signed closing side by side. Only
+			// once the table on screen answers this ask: one still out may be
+			// for a view that compares nothing, and the report stops on it.
+			// Set either way, or a Compare left from an earlier visit stays.
+			ro.compare = this._dataSeq === this._seq && this._coMode() ? "Company" : "";
+			frappe.route_options = ro;
+		}
 		frappe.set_route("query-report", "Dux Trial Balance");
 	}
 

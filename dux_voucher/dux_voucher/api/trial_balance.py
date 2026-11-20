@@ -19,6 +19,7 @@ from frappe.utils import flt
 from dux_voucher.dux_voucher.report.dux_trial_balance.dux_trial_balance import (
     execute as _execute,
     expand_company,
+    resolve_companies,
     VIEWS,
 )
 
@@ -35,6 +36,8 @@ def get_trial_balance(filters=None):
 
     columns, rows, message, _chart, summary = _execute(filters)
 
+    companies = filters.get("_resolved_companies") or []
+    company_columns = bool(filters.get("_company_columns"))
     return {
         "columns": columns,
         "rows": rows,
@@ -42,8 +45,13 @@ def get_trial_balance(filters=None):
         "summary": summary,
         "source": filters.get("_source") or "live",
         "source_built_at": filters.get("_source_built_at"),
-        "companies": filters.get("_resolved_companies") or [],
+        "companies": companies,
         "view": filters.get("view"),
+        # Rows carry ``cv``, aligned with ``companies``, only when this is set.
+        "company_columns": company_columns,
+        "company_abbrs": dict(frappe.get_all(
+            "Company", filters={"name": ["in", companies]}, fields=["name", "abbr"],
+            as_list=True)) if company_columns else {},
     }
 
 
@@ -115,7 +123,8 @@ def get_account_parties(filters=None, accounts=None):
     require_access()
     from dux_voucher.dux_voucher.report.dux_trial_balance.dux_trial_balance import (
         _slice, _validate, _resolve_party_names, _net_off, _has_value,
-        _party_type_mismatch, _default_party_accounts, UNATTRIBUTED)
+        _party_type_mismatch, _default_party_accounts, _add_values, _blank_row,
+        _cv, _cv_has_value, UNATTRIBUTED)
 
     if isinstance(filters, str):
         filters = json.loads(filters or "{}")
@@ -143,7 +152,14 @@ def get_account_parties(filters=None, accounts=None):
     acct_type = frappe.db.get_value("Account", accounts[0], "account_type")
     natural = "debit" if acct_type == "Receivable" else "credit"
 
-    merged = {}
+    # With company columns each party also keeps its figure per company, read
+    # from the company each real account belongs to.
+    cocols = bool(f.get("company_columns")) and len(companies) > 1
+    owner = (dict(frappe.get_all("Account", filters={"name": ["in", list(wanted)]},
+                                 fields=["name", "company"], as_list=True))
+             if cocols else {})
+
+    merged, per_co = {}, {}
     for (account, party_type, party), v in values.items():
         if account not in wanted:
             continue
@@ -153,6 +169,9 @@ def get_account_parties(filters=None, accounts=None):
             slot[fld] += flt(v[fld])
         slot["_mismatch"] = slot.get("_mismatch") or _party_type_mismatch(
             account, party_type, default_map)
+        if cocols:
+            _add_values(per_co.setdefault(key, {}).setdefault(
+                owner.get(account), _blank_row()), v)
 
     out = []
     for (party_type, party), v in merged.items():
@@ -167,7 +186,15 @@ def get_account_parties(filters=None, accounts=None):
             "is_unattributed": 0 if party else 1,
             "mismatch": 1 if v.get("_mismatch") else 0,
         })
-        if _has_value(row) or f.get("show_zero_values"):
+        keep = _has_value(row)
+        if cocols:
+            own = per_co.get((party_type, party)) or {}
+            if f.get("show_net_values"):
+                for cv in own.values():
+                    _net_off(cv, natural)
+            row["cv"] = _cv(own, companies)
+            keep = keep or _cv_has_value(row["cv"])
+        if keep or f.get("show_zero_values"):
             out.append(row)
 
     out.sort(key=lambda r: (r["is_unattributed"],
@@ -175,16 +202,84 @@ def get_account_parties(filters=None, accounts=None):
     return out
 
 
+@frappe.whitelist()
+def get_company_accounts(company=None, key=None, companies=None):
+    """The account(s) ``company`` holds under one row of a multi-company run.
+
+    Across companies a By Account row is a merge key (an account number, or a
+    normalised name), not an account, so opening one company's ledger from
+    its column needs that company's own account name. ``companies`` is the
+    run's own list, in its order: rows are keyed against every chart in it
+    (an account filed under a different parent in one college is a row of its
+    own), and the same list rebuilds the same keys. Usually one account; two
+    when the company has accounts differing only in case or spacing."""
+    require_access()
+    from dux_voucher.dux_voucher.report.dux_trial_balance.dux_trial_balance import (
+        _account_master, _merge_key, _merge_keys, KEY_SEP)
+
+    if isinstance(companies, str):
+        companies = json.loads(companies or "[]")
+    companies = [c for c in (companies or []) if c]
+    if not company or not key:
+        return []
+    names = list(dict.fromkeys(companies + [company]))
+    # A run's companies are ledger companies: the engine expands a group into
+    # the companies beneath it. A group named here would pass the guard for
+    # those companies and then be read for a chart of its own.
+    if _ledger_companies(names) != set(names):
+        return []
+    _guard(frappe._dict(company=names))
+    if len(companies) > 1 and company in companies:
+        accounts = _account_master(companies)
+        keys, _apart = _merge_keys(accounts, companies)
+        return [a.name for a in accounts
+                if a.company == company and not a.is_group and keys[a.name] == key]
+    base = key.split(KEY_SEP)[0]
+    return [a.name for a in _account_master([company])
+            if not a.is_group and _merge_key(a, True) == base]
+
+
+def _ledger_companies(names):
+    """Those of ``names`` that are companies holding a ledger, not groups."""
+    if not names:
+        return set()
+    return set(frappe.get_all("Company", filters={"name": ["in", list(names)], "is_group": 0},
+                              pluck="name"))
+
+
+@frappe.whitelist()
+def get_party_account(company=None, party_type=None, party=None):
+    """The account a party's lines sit on in one company, or None.
+
+    A By Party row names a party and no account, and the Party Ledger loads
+    only with an account beside the party. Its figures are the party's own in
+    that company whichever account is passed (it reads by party), so the one
+    most of the party's lines sit on is given: it heads the statement."""
+    require_access()
+    if not (company and party_type and party):
+        return None
+    # A ledger company, as a run resolves them: a group would pass the guard
+    # for the companies beneath it.
+    if _ledger_companies([company]) != {company}:
+        return None
+    _guard(frappe._dict(company=[company]))
+    row = frappe.db.sql("""
+        SELECT account
+        FROM `tabGL Entry`
+        WHERE company = %s AND party_type = %s AND party = %s AND is_cancelled = 0
+        GROUP BY account
+        ORDER BY COUNT(*) DESC, account
+        LIMIT 1
+    """, (company, party_type, party))
+    return row[0][0] if row else None
+
+
 def expand_all(selected):
-    if isinstance(selected, str):
-        selected = [selected] if selected else []
-    out, seen = [], set()
-    for name in selected or []:
-        for co in expand_company(name):
-            if co not in seen:
-                seen.add(co)
-                out.append(co)
-    return out
+    """The companies a selection stands for, exactly as the engine resolves
+    them. A party's company figures are matched to the run's ``companies`` by
+    position, so a second copy of this logic drifting would put a college's
+    figure under another college's heading without an error."""
+    return resolve_companies(frappe._dict(company=selected))
 
 
 @frappe.whitelist()

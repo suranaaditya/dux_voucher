@@ -857,5 +857,117 @@ class TestCompareCompanies(unittest.TestCase):
         self.assertNotIn("built", live)
 
 
+class TestCompanyColumnsApi(unittest.TestCase):
+
+    def test_parties_under_a_control_account_keep_each_companys_figure(self):
+        from dux_voucher.dux_voucher.api import trial_balance as api
+        values = {
+            ("Debtors - A", "Customer", "C1"): _v(od=100),
+            ("Debtors - B", "Customer", "C1"): _v(oc=30),
+            ("Debtors - A", None, None): _v(od=5),
+            ("Cash - A", None, None): _v(od=1),
+        }
+        f = {"company": ["A", "B"], "from_date": "2026-04-01", "to_date": "2027-03-31",
+             "show_net_values": 1, "company_columns": 1}
+        with mock.patch.object(api, "require_access"), mock.patch.object(api, "_guard"), \
+                mock.patch.object(api, "expand_all", return_value=["A", "B"]), \
+                mock.patch.object(tb, "_pl_reset_date", return_value=None), \
+                mock.patch.object(tb, "_slice", return_value=values), \
+                mock.patch.object(tb, "_resolve_party_names", return_value={}), \
+                mock.patch.object(tb, "_default_party_accounts", return_value={}), \
+                mock.patch.object(frappe.db, "get_value", return_value="Receivable"), \
+                mock.patch.object(frappe, "get_all",
+                                  return_value=[("Debtors - A", "A"), ("Debtors - B", "B")]):
+            out = api.get_account_parties(filters=f, accounts=["Debtors - A", "Debtors - B"])
+        c1 = next(r for r in out if r["party"] == "C1")
+        self.assertEqual((c1["opening_debit"], c1["opening_credit"]), (70, 0))
+        self.assertEqual(c1["cv"], [[100, 0, 0, 0, 100, 0], [0, 30, 0, 0, 0, 30]])
+        un = next(r for r in out if r["is_unattributed"])
+        self.assertEqual(un["cv"], [[5, 0, 0, 0, 5, 0], None])
+
+    def test_a_merged_row_resolves_to_the_companys_own_account(self):
+        from dux_voucher.dux_voucher.api import trial_balance as api
+        master = _master(("Cash - B", "B", "Cash", "Assets - B", "Asset", 0),
+                         ("CASH  - B", "B", "CASH ", "Assets - B", "Asset", 0),
+                         ("Assets - B", "B", "Assets", None, "Asset", 1),
+                         ("Bank - B", "B", "Bank", "Assets - B", "Asset", 0))
+        with mock.patch.object(api, "require_access"), mock.patch.object(api, "_guard") as guard, \
+                mock.patch.object(api, "_ledger_companies", side_effect=lambda n: set(n)), \
+                mock.patch.object(tb, "_account_master", return_value=master):
+            self.assertEqual(api.get_company_accounts("B", "cash"), ["Cash - B", "CASH  - B"])
+            self.assertEqual(api.get_company_accounts("B", "assets"), [])   # groups: no ledger
+        self.assertEqual(guard.call_args[0][0].company, ["B"])
+
+    def test_a_group_company_names_no_account(self):
+        # The run's companies are ledger companies. A group named here would
+        # pass the guard for the companies beneath it and be read for its own.
+        from dux_voucher.dux_voucher.api import trial_balance as api
+        with mock.patch.object(api, "require_access"), mock.patch.object(api, "_guard") as guard, \
+                mock.patch.object(api, "_ledger_companies", side_effect=lambda n: set(n) - {"Trust"}), \
+                mock.patch.object(tb, "_account_master") as master:
+            self.assertEqual(api.get_company_accounts("Trust", "cash"), [])
+            self.assertEqual(api.get_company_accounts("A", "cash", ["Trust", "A"]), [])
+        guard.assert_not_called()
+        master.assert_not_called()
+        with mock.patch.object(frappe, "get_all", return_value=["A"]) as get_all:
+            self.assertEqual(api._ledger_companies(["A", "Trust"]), {"A"})
+        self.assertEqual(get_all.call_args.kwargs["filters"],
+                         {"name": ["in", ["A", "Trust"]], "is_group": 0})
+
+    def test_a_row_split_off_by_placement_opens_its_own_account(self):
+        from dux_voucher.dux_voucher.api import trial_balance as api
+        master = TestMergedChart.MASTER
+        split = "cash" + tb.KEY_SEP + "bank"
+        with mock.patch.object(api, "require_access"), mock.patch.object(api, "_guard"), \
+                mock.patch.object(api, "_ledger_companies", side_effect=lambda n: set(n)), \
+                mock.patch.object(tb, "_account_master",
+                                  side_effect=lambda cos: [a for a in master if a.company in cos]):
+            self.assertEqual(api.get_company_accounts("B", split, ["A", "B"]), ["Cash - B"])
+            self.assertEqual(api.get_company_accounts("A", "cash", '["A", "B"]'), ["Cash - A"])
+            self.assertEqual(api.get_company_accounts("A", split, ["A", "B"]), [])
+            # without the run's companies: the account of that name in the company
+            self.assertEqual(api.get_company_accounts("B", split), ["Cash - B"])
+
+    def test_parties_resolve_companies_as_the_engine_does(self):
+        # A party's figures are placed under the run's companies by position:
+        # the endpoint must expand a trust exactly as the engine did.
+        from dux_voucher.dux_voucher.api import trial_balance as api
+        tree = {"Trust": ["A", "B"], "B": ["B"], "C": ["C"]}
+        with mock.patch.object(tb, "expand_company", side_effect=lambda n: tree.get(n, [])):
+            sel = ["Trust", "B", "C"]
+            self.assertEqual(api.expand_all(sel), ["A", "B", "C"])
+            self.assertEqual(api.expand_all(sel),
+                             tb.resolve_companies(frappe._dict(company=sel)))
+            self.assertEqual(api.expand_all("C"), ["C"])
+
+    def test_a_party_opens_on_the_account_most_of_its_lines_sit_on(self):
+        # A By Party row names no account, and the Party Ledger loads only
+        # with one beside the party.
+        from dux_voucher.dux_voucher.api import trial_balance as api
+        with mock.patch.object(api, "require_access") as access, \
+                mock.patch.object(api, "_guard") as guard, \
+                mock.patch.object(api, "_ledger_companies", side_effect=lambda n: set(n)), \
+                mock.patch.object(frappe.db, "sql", return_value=(("Creditors - A",),)) as sql:
+            self.assertEqual(api.get_party_account("A", "Supplier", "S1"), "Creditors - A")
+        access.assert_called_once()
+        self.assertEqual(guard.call_args[0][0].company, ["A"])
+        query, params = sql.call_args[0]
+        self.assertEqual(params, ("A", "Supplier", "S1"))
+        self.assertIn("is_cancelled = 0", query)
+        self.assertIn("ORDER BY COUNT(*) DESC", query)
+
+    def test_no_account_for_a_group_a_blank_or_a_party_without_lines(self):
+        from dux_voucher.dux_voucher.api import trial_balance as api
+        with mock.patch.object(api, "require_access"), mock.patch.object(api, "_guard") as guard, \
+                mock.patch.object(api, "_ledger_companies", side_effect=lambda n: set(n) - {"Trust"}), \
+                mock.patch.object(frappe.db, "sql", return_value=()) as sql:
+            self.assertIsNone(api.get_party_account("Trust", "Supplier", "S1"))
+            self.assertIsNone(api.get_party_account("A", "", "S1"))
+            guard.assert_not_called()
+            sql.assert_not_called()
+            self.assertIsNone(api.get_party_account("A", "Supplier", "S1"))
+        sql.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()
